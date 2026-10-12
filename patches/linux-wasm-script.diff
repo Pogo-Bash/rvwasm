@@ -1,0 +1,25 @@
+diff --git a/linux-wasm.sh b/linux-wasm.sh
+index b5f750d..fd1b898 100755
+--- a/linux-wasm.sh
++++ b/linux-wasm.sh
+@@ -55,8 +55,8 @@ case "$1" in # note use of ;;& meaning that each case is re-tested (can hit mult
+ 
+     "fetch-kernel"|"all-kernel"|"fetch"|"all")
+         mkdir -p "$LW_SRC/kernel"
+-        git clone -b wasm-7.0 --shallow-exclude=v7.0 --single-branch --no-tags https://github.com/joelseverin/linux.git "$LW_SRC/kernel"
+-        git -C "$LW_SRC/kernel" fetch --deepen=1 --no-tags
++        # The fork has no v7.0 tag, so --shallow-exclude=v7.0 is rejected by the server ("expected packfile").
++        git clone -b wasm-7.0 --depth 1 --single-branch --no-tags https://github.com/joelseverin/linux.git "$LW_SRC/kernel"
+     handled=1;;&
+ 
+     "fetch-musl"|"all-musl"|"fetch"|"all")
+@@ -202,6 +202,9 @@ case "$1" in # note use of ;;& meaning that each case is re-tested (can hit mult
+                 $LW_KERNEL_MOD_CONFIG "$LW_BUILD_KERNEL/.config" --undefine CONFIG_SND_SOC
+ 
+                 $LW_KERNEL_MAKE olddefconfig
++            elif [ "$LW_KERNEL_CONFIG" == "rvwasm" ]; then
++                # Default config plus what the riscv64 user-mode translator needs (binfmt_misc etc.).
++                $LW_KERNEL_MAKE "${LW_VARIANT}_defconfig" rvwasm.config
+             elif [ "$LW_KERNEL_CONFIG" == "" ]; then
+                 $LW_KERNEL_MAKE "${LW_VARIANT}_defconfig"
+             else

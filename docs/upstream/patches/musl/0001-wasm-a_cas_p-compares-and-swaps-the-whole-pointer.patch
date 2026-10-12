@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:50:44 -0500
+Subject: [PATCH 1/5] wasm: a_cas_p compares and swaps the whole pointer
+
+a_cas_p cast the pointer slot to volatile int * and both pointers to int: on
+wasm64 it swapped the low half only (the high half kept its old value) and
+returned the old low half sign-extended. Users in musl: dcngettext.c
+(bindings, and the cats loop, which spins for good once a catalog is at or
+above 2 GiB, because the sign-extended return never equals the old value),
+dlerror.c (freebuf_queue).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/atomic_arch.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/wasm/atomic_arch.h b/arch/wasm/atomic_arch.h
+index 1f38df0..bfee953 100644
+--- a/arch/wasm/atomic_arch.h
++++ b/arch/wasm/atomic_arch.h
+@@ -5,10 +5,12 @@ static inline int a_cas(volatile int *p, int t, int s)
+ 	return t;
+ }
+ 
++/* All of the pointer: on wasm64 an int is half of one. */
+ #define a_cas_p a_cas_p
+ static inline void *a_cas_p(volatile void *p, void *t, void *s)
+ {
+-	return (void *)a_cas((volatile int *)p, (long)t, (long)s);
++	__atomic_compare_exchange_n((void *volatile *)p, &t, s, (_Bool)0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
++	return t;
+ }
+ 
+ extern void __wasm_abort();

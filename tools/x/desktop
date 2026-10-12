@@ -1,0 +1,502 @@
+#!/bin/sh
+# Start X on the display with a desktop: IceWM (a taskbar, a menu of the
+# installed programs) by default, or `desktop twm` for the bare minimum, a
+# terminal and a clock under twm.
+#
+# Where KDE is installed (the debian-kde disk):
+#   desktop plasma          the Plasma desktop
+#   desktop kde PROGRAM...  one KDE or Qt program under twm, with a session
+#                           bus (for trying things one at a time)
+# What the X server and the programs print goes to /root/desktop.log then.
+#
+# Without X at all:
+#   desktop wayland PROGRAM...
+#                           the page's own window server (wlserver/ in the
+#                           source tree, a JavaScript process of this machine
+#                           at /run/wlserver), and PROGRAM as a Wayland client
+#                           of it, on the session's bus: each of its
+#                           windows is a window in the page, framed by the
+#                           page. If the server runs already, PROGRAM joins it
+#                           (so `desktop wayland konsole` twice is two
+#                           Konsoles side by side). What the server prints
+#                           goes to /root/wlserver.log; WLSERVER_DEBUG=1 and
+#                           WLSERVER_STATS=1 in the environment say more.
+#   desktop wayland-x [PROGRAM...]
+#                           X programs in the page's window server: Xwayland
+#                           as one window (rootful) the size of the screen,
+#                           with twm in it, and PROGRAM (xterm if none) on that
+#                           display (:1). Again while it runs: PROGRAM joins it.
+#                           What Xwayland and twm print goes to /root/xwayland.log.
+#   desktop wayland plasma-native
+#                           Plasma's own shell, plasmashell, as the desktop of the
+#                           window server: its desktop, panels, task manager and
+#                           popups instead of the ones the page draws (the server
+#                           is told WLSERVER_SHELL=plasma: it leaves plasmashell's
+#                           names on the session bus to it, and the page draws no
+#                           panel or wallpaper of its own). The server has to be
+#                           started this way: one that runs already for other
+#                           programs is the page's shell.
+#                           The plasmashell is the native one (WebAssembly, branch
+#                           nativeqt), /run/nq/plasmashell, /opt/nq/plasmashell or
+#                           $NQ_PLASMASHELL, when that is there and PLASMA_NATIVE is
+#                           not 0; else Debian's.
+#   desktop x11 PROGRAM...  PROGRAM as an X program of the window server: each
+#                           of its windows a window in the page (rootless
+#                           Xwayland, started when the first X program
+#                           connects; GDK_BACKEND=x11, QT_QPA_PLATFORM=xcb).
+#                           Programs started by `desktop wayland` have
+#                           DISPLAY=:0 too, so X-only ones (xterm, xedit)
+#                           work there as well.
+#
+# Run inside the Debian system (`debian desktop` from Linux/Wasm).
+
+# There is no D-Bus here: programs are told not to look for the buses they can do without.
+export NO_AT_BRIDGE=1
+export GDK_BACKEND=x11
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+mkdir -p -m 700 $XDG_RUNTIME_DIR
+export PATH=$PATH:/usr/games
+# Programs started from the desktop start where a person's files are.
+cd "$HOME" 2> /dev/null
+
+# Sound. The machine's sound card (the page plays it: tools/www/audio.js) works for programs that use ALSA by
+# themselves; most desktop programs (Firefox, Chromium, mpv, KDE's volume applet) want a sound server. Started
+# here, once, if one is installed, before anything that plays:
+#   PulseAudio (preferred: one process, and the card's own volume control): there is no udev here, so its
+#   module-udev-detect finds nothing; the card is loaded by name instead.
+#   PipeWire with WirePlumber and pipewire-pulse: WirePlumber's ALSA monitor needs udev too, so the card's
+#   output is a node of its own, from ~/.config/pipewire/pipewire.conf.d/rvwasm.conf (written if missing).
+# RV_SOUND=0 starts none, RV_SOUND=pipewire prefers PipeWire. What they print goes to /root/sound.log.
+sound_start() {
+	[ "${RV_SOUND:-1}" = 0 ] && return
+	[ -e /dev/snd/pcmC0D0p ] || return
+	if [ "$RV_SOUND" != pipewire ] && command -v pulseaudio > /dev/null; then
+		pulseaudio --check 2> /dev/null && return
+		pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=file:/root/sound.log \
+			-L "module-alsa-card device_id=0 name=wasm card_name=wasm" 2> /dev/null
+	elif command -v pipewire > /dev/null && command -v wireplumber > /dev/null; then
+		pgrep -x pipewire > /dev/null && return
+		conf="$HOME/.config/pipewire/pipewire.conf.d/rvwasm.conf"
+		if [ ! -e "$conf" ]; then
+			mkdir -p "${conf%/*}"
+			cat > "$conf" <<-'END'
+			# The machine's sound card (written by `desktop`: there is no udev for WirePlumber to find it).
+			context.objects = [
+			  { factory = adapter
+			    args = {
+			      factory.name = api.alsa.pcm.sink
+			      node.name = "wasm-output"
+			      node.description = "Wasm audio"
+			      media.class = "Audio/Sink"
+			      api.alsa.path = "hw:0,0"
+			      priority.session = 1000
+			      priority.driver = 1000
+			    }
+			  }
+			]
+			END
+		fi
+		{
+			pipewire &
+			sleep 1
+			wireplumber &
+			command -v pipewire-pulse > /dev/null && pipewire-pulse &
+		} >> /root/sound.log 2>&1
+	fi
+}
+sound_start
+
+# KDE and Qt without a graphics processor: Qt Quick draws in software, Qt does
+# not look for OpenGL, and the window manager does not composite (which it
+# can only do with OpenGL).
+kde_environment() {
+	export QT_QUICK_BACKEND=software
+	export QT_XCB_GL_INTEGRATION=none
+	export KWIN_COMPOSE=N
+	export LIBGL_ALWAYS_SOFTWARE=1
+	export XDG_SESSION_TYPE=x11
+	export XDG_CURRENT_DESKTOP=KDE
+	# Konsole's default profile (tools/x/xdg; the disk image has the same in /etc/xdg and
+	# /usr/local/share/konsole once it is rebuilt): bidirectional text rendering off, the rest
+	# Konsole's own defaults. Looked at after the user's own configuration, not instead of it.
+	# (RV_DESKTOP_DEFAULTS=0: without them, Konsole's built-in profile.)
+	if [ -d /run/wlserver/xdg ] && [ "${RV_DESKTOP_DEFAULTS:-1}" != 0 ]; then
+		export XDG_CONFIG_DIRS="${XDG_CONFIG_DIRS:-/etc/xdg}:/run/wlserver/xdg/config"
+		export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}:/run/wlserver/xdg/data"
+		# X programs' own defaults (xterm: the clipboard on Ctrl-Shift-C and Ctrl-Shift-V), where Xt
+		# looks for a user's, unless the user says where those are.
+		if [ -z "$XAPPLRESDIR" ] && [ -z "$XUSERFILESEARCHPATH" ]; then
+			export XAPPLRESDIR=/run/wlserver/xdg/app-defaults
+		fi
+	fi
+	# A default profile of the user's own (konsolerc names one) that says nothing about it: off too.
+	profile=$(kreadconfig6 --file konsolerc --group "Desktop Entry" --key DefaultProfile 2> /dev/null)
+	if [ "${RV_DESKTOP_DEFAULTS:-1}" != 0 ] && [ -n "$profile" ] && [ -f "$HOME/.local/share/konsole/$profile" ] &&
+		! grep -q '^BidiRenderingEnabled=' "$HOME/.local/share/konsole/$profile"; then
+		kwriteconfig6 --file "$HOME/.local/share/konsole/$profile" --group "Terminal Features" \
+			--key BidiRenderingEnabled false 2> /dev/null
+	fi
+	# KDE's menu of the programs: Plasma's session says it is plasma-applications.menu (startplasma sets
+	# XDG_MENU_PREFIX=plasma-), and there is no applications.menu without it. KService builds its cache of the
+	# programs (ksycoca) from that menu: without the prefix the cache has no programs at all, so nothing opens
+	# a file (Dolphin, Kate's Open With, kioclient: "0 offers" for every type, then KIO asks for the open-with
+	# portal, which is not here, and nothing happens).
+	if [ -z "$XDG_MENU_PREFIX" ] && [ -f /etc/xdg/menus/plasma-applications.menu ]; then
+		export XDG_MENU_PREFIX=plasma-
+	fi
+	# A cache built before, without the menu, is not seen as out of date (the directories it was made from
+	# have not changed): made again once, the first time with the menu.
+	if [ -n "$XDG_MENU_PREFIX" ] && [ "$(cat "$HOME/.cache/rv-ksycoca-menu" 2> /dev/null)" != "$XDG_MENU_PREFIX" ] &&
+		command -v kbuildsycoca6 > /dev/null; then
+		mkdir -p "$HOME/.cache"
+		kbuildsycoca6 --noincremental > /dev/null 2>&1 && echo "$XDG_MENU_PREFIX" > "$HOME/.cache/rv-ksycoca-menu"
+	fi
+	# The system bus, which parts of the desktop ask about power, networks and the like.
+	mkdir -p /run/dbus
+	[ -e /run/dbus/pid ] || dbus-daemon --system --fork 2> /dev/null
+}
+
+if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
+	mode=$1
+	shift
+	shell=page
+	if [ "$mode" = wayland ] && [ "$1" = plasma-native ]; then
+		shift
+		shell=plasma
+		# What a Plasma session's startup gives plasmashell (startplasma: KDE_FULL_SESSION, KDE_SESSION_VERSION).
+		export KDE_FULL_SESSION=true KDE_SESSION_VERSION=6
+		# The native plasmashell (a WebAssembly program, branch nativeqt) when there is one, else Debian's
+		# riscv64 one. Its Qt is static, without the KDE platform theme that tells Debian's which controls
+		# style and fonts to use, and is kept off the GPU path (Qt Quick in software, no virgl): what
+		# nativeqt's tests run it with.
+		# Where it is: one fetched by plasma-native-get (/run/nq, newer: a dev setup's), else the disk's own (/opt/nq,
+		# the release image's: tools/build-debian-image.sh release-root), each with its share/ beside it.
+		if [ -z "$NQ_PLASMASHELL" ]; then
+			NQ_PLASMASHELL=/run/nq/plasmashell
+			[ -x "$NQ_PLASMASHELL" ] || NQ_PLASMASHELL=/opt/nq/plasmashell
+		fi
+		if [ -x "$NQ_PLASMASHELL" ] && [ "$PLASMA_NATIVE" != 0 ]; then
+			echo "desktop: the native plasmashell, $NQ_PLASMASHELL" >&2
+			# (and the QML packages it brings that Debian's disk has not: plasma-native-get, /run/nq/share)
+			nq_share=$(dirname "$NQ_PLASMASHELL")/share
+			[ -d "$nq_share" ] && export XDG_DATA_DIRS=$nq_share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
+			set -- env -u GALLIUM_DRIVER -u VTEST_SOCKET_NAME -u RV_VIRTGPU QT_QUICK_BACKEND=software \
+				QT_QUICK_CONTROLS_STYLE=org.kde.desktop QT_QPA_FONTDIR=/usr/share/fonts/truetype/dejavu \
+				"$NQ_PLASMASHELL" --no-respawn "$@"
+		else
+			set -- plasmashell --no-respawn "$@"
+		fi
+	fi
+	if [ ! -x /run/wlserver/hostnode ] && [ ! -x /run/hostnode/hostnode ]; then
+		echo "desktop: no window server here (/run/wlserver: see tools/debian-enter)" >&2
+		exit 1
+	fi
+	# Programs draw into memory the server shares with the page: no X, no
+	# OpenGL, and GTK is left to choose its backend by itself.
+	unset GDK_BACKEND
+	kde_environment
+	export XDG_SESSION_TYPE=wayland
+	export WAYLAND_DISPLAY=wayland-0
+	export QT_QPA_PLATFORM=wayland
+	# Chromium (RevyOS's build) as it runs here: on Wayland, no sandbox, no
+	# GPU, as few processes and as little background work as it allows.
+	# No sandbox: Chromium will not start with one as root (zygote_host_impl_linux.cc,
+	# crbug.com/638180), and its sandbox needs user, PID and network namespaces and a
+	# zygote that forks, none of which rv gives it. --test-type: then Chromium does
+	# not put up its startup bars, "unsupported command-line flag: --no-sandbox" and
+	# "Google API keys are missing" among them (infobar_utils.cc,
+	# AddInfoBarsIfNecessary); ChromeDriver starts every Chrome with it.
+	case "$1" in
+	chromium | */chromium)
+		shift
+		set -- /usr/lib/chromium/chromium --ozone-platform=wayland --no-sandbox --test-type --no-zygote \
+			--in-process-gpu --disable-gpu --disable-dev-shm-usage --renderer-process-limit=1 \
+			--disable-site-isolation-trials \
+			--disable-features=AudioServiceOutOfProcess,OptimizationGuideOnDeviceModel,OnDeviceModelService \
+			--disable-extensions --disable-component-update --no-first-run --disable-background-networking \
+			--disable-breakpad --disable-crash-reporter --disable-sync "$@"
+		;;
+	esac
+	# A program on the session's bus (the one the server was started with, see below), or with a session bus
+	# of its own if there is none (KDE's programs want one).
+	client() {
+		if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+			export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+		fi
+		if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-run-session > /dev/null; then
+			dbus-run-session -- "$@"
+		else
+			"$@"
+		fi
+	}
+	# OpenGL drawn by the page's GPU (gpu/PROTOCOL.md), the default. The GPU server (/run/rvgpu) takes the
+	# programs' GL over a socket, through Mesa's virgl driver in its vtest form; it is started with the
+	# window server, and says it can draw (an executor in the page answered) by a file next to its
+	# socket (rvgpu-0.ready), or that none answered in its first 10 s (rvgpu-0.none). Only with the first
+	# are programs pointed at it: a program sent there with nothing to draw it would be stopped by Mesa.
+	# What they get is OpenGL ES 3.0 and OpenGL 2.1 (what virgl makes of WebGL2): Qt Quick, GTK 4, SDL and
+	# GL ES programs are fine with that; programs that need OpenGL 3.2 or newer are not: Blender (4.3
+	# core) and what RVGPU_SOFTWARE names (program names, separated by spaces) stay on llvmpipe (run below).
+	#   RVGPU=0   software for everything (llvmpipe; Qt Quick's own software renderer)
+	#   RVGPU=1   wait up to 10 s for the executor, and say so if there is none
+	#   (unset)   use it when it is there, waiting at most 4 s for it on the server's first start
+	#   RVGPU_DRM=1  the same GPU server, but programs see a GPU device, /dev/dri/renderD128 (rv makes it:
+	#             rv/virtgpu.c), and Mesa takes its DRM path (virtio_gpu_dri, GBM, EGL's dmabuf windows:
+	#             no readback per frame) instead of its software path with vtest (virpipe)
+	rvgpu_start() {
+		[ "$RVGPU" != 0 ] && [ -f /run/rvgpu/boot.js ] || return 0
+		if ! [ -S "$XDG_RUNTIME_DIR/rvgpu-0" ]; then
+			rm -f "$XDG_RUNTIME_DIR/rvgpu-0.ready" "$XDG_RUNTIME_DIR/rvgpu-0.none"
+			HOSTNODE_HOME=/run/rvgpu /run/hostnode/hostnode > /root/rvgpu.log 2>&1 &
+		fi
+	}
+	rvgpu_use() {
+		[ "$RVGPU" != 0 ] && [ -f /run/rvgpu/boot.js ] || return 0
+		# Mesa's demos that came with the server (es2gears_wayland, eglinfo, ...), by name.
+		export PATH="$PATH:/run/rvgpu/bin"
+		wait=${RVGPU_WAIT:-40}
+		[ "$RVGPU" = 1 ] && wait=${RVGPU_WAIT:-100}
+		i=0
+		while [ ! -f "$XDG_RUNTIME_DIR/rvgpu-0.ready" ] && [ ! -f "$XDG_RUNTIME_DIR/rvgpu-0.none" ] && [ $i -lt $wait ]; do
+			i=$((i + 1))
+			sleep 0.1
+		done
+		if [ -f "$XDG_RUNTIME_DIR/rvgpu-0.ready" ] && [ "$RVGPU_DRM" = 1 ]; then
+			export RV_VIRTGPU="$XDG_RUNTIME_DIR/rvgpu-0"
+			unset QT_QUICK_BACKEND LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER VTEST_SOCKET_NAME
+			# Video: VA-API (libva finds drivers through the render node) with our driver, whose decoder is the
+			# page's WebCodecs (docs/video-decode.md; gpuserver's ready file says "vdec"); RVVDEC=0 not.
+			# (The driver that came with the machine, /run/rvgpu/va, else the disk's, where libva looks by itself.)
+			va=${LIBVA_DRIVERS_PATH:-/run/rvgpu/va}
+			[ -e "$va/rvwasm_drv_video.so" ] || [ -n "$LIBVA_DRIVERS_PATH" ] || va=/usr/lib/riscv64-linux-gnu/dri
+			if [ "$RVVDEC" != 0 ] && grep -q '"vdec"' "$XDG_RUNTIME_DIR/rvgpu-0.ready" 2> /dev/null &&
+			   [ -e "$va/rvwasm_drv_video.so" ]; then
+				export LIBVA_DRIVER_NAME=rvwasm LIBVA_DRIVERS_PATH=$va GST_VA_ALL_DRIVERS=1
+			fi
+		elif [ -f "$XDG_RUNTIME_DIR/rvgpu-0.ready" ]; then
+			export GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME="$XDG_RUNTIME_DIR/rvgpu-0"
+			unset QT_QUICK_BACKEND
+		elif [ "$RVGPU" = 1 ]; then
+			echo "desktop: no GPU (no executor answered: see /root/rvgpu.log); drawing in software" >&2
+		fi
+	}
+	# X programs (wayland-x): Xwayland on display :1, rootful, as one window of the server, with twm in it
+	# to put the X windows in their places. A second `desktop wayland-x PROGRAM` while it runs joins it.
+	xwayland_rootful() {
+		export DISPLAY=:1
+		[ $# -eq 0 ] && set -- xterm
+		if [ -S /tmp/.X11-unix/X1 ] && [ -f /tmp/.X1-lock ] && kill -0 $(cat /tmp/.X1-lock) 2> /dev/null; then
+			client "$@"
+			return $?
+		fi
+		rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
+		# The X screen fills the page's screen inside our frame: the server says how big that is in a file next
+		# to its socket (width, height, scale, the panel's strip, the title bar, the border), once the page has
+		# told it (or after two seconds without a page).
+		i=0
+		while [ ! -s "$XDG_RUNTIME_DIR/wlserver.screen" ] && [ $i -lt 50 ]; do
+			sleep 0.1
+			i=$((i + 1))
+		done
+		sw=1024 sh=768 sscale=1 spanel=0 stitle=28 sborder=4
+		[ -s "$XDG_RUNTIME_DIR/wlserver.screen" ] && read sw sh sscale spanel stitle sborder < "$XDG_RUNTIME_DIR/wlserver.screen"
+		w=$((sw - 2 * sborder))
+		h=$((sh - spanel - stitle - 2 * sborder))
+		Xwayland :1 -shm -geometry ${w}x${h} -nolisten tcp > /root/xwayland.log 2>&1 &
+		xpid=$!
+		# Up to a minute for its socket (Xwayland starts in some seconds here).
+		i=0
+		while [ ! -S /tmp/.X11-unix/X1 ]; do
+			if ! kill -0 $xpid 2> /dev/null || [ $i -gt 600 ]; then
+				echo "desktop: Xwayland did not start (see /root/xwayland.log)" >&2
+				return 1
+			fi
+			i=$((i + 1))
+			sleep 0.1
+		done
+		{
+			echo RandomPlacement
+			cat /etc/X11/twm/system.twmrc
+		} > /tmp/twmrc 2> /dev/null
+		twm -f /tmp/twmrc 2>&1 | grep -v 'font for charset' >> /root/xwayland.log &
+		wm=$!
+		xsetroot -solid '#2e4a62' 2> /dev/null || { sleep 1; xsetroot -solid '#2e4a62' 2> /dev/null; }
+		client "$@"
+		status=$?
+		kill $wm $xpid 2> /dev/null
+		wait $wm $xpid 2> /dev/null
+		return $status
+	}
+	run() {
+		case " blender ${RVGPU_SOFTWARE} " in
+		*" ${1##*/} "*)
+			unset GALLIUM_DRIVER VTEST_SOCKET_NAME RV_VIRTGPU
+			export QT_QUICK_BACKEND=software
+			;;
+		esac
+		# Chromium with the page's GPU (rvgpu_use found an executor): its GPU thread on ANGLE over Mesa's
+		# GL ES (virgl), instead of --disable-gpu. RVGPU_CHROMIUM says how (default below); RVGPU_CHROMIUM=0
+		# keeps Chromium in software.
+		# (With RVGPU_DRM=1 the same flags: ANGLE then runs on Mesa's EGL on rv's render node, and Ozone/Wayland
+		# finds that node for its GBM buffers, which go to the window server as dmabufs.)
+		if { [ "$GALLIUM_DRIVER" = virpipe ] || [ -n "$RV_VIRTGPU" ]; } && [ "$1" = /usr/lib/chromium/chromium ] && [ "$RVGPU_CHROMIUM" != 0 ]; then
+			for a; do
+				shift
+				if [ "$a" = --disable-gpu ]; then
+					set -- "$@" ${RVGPU_CHROMIUM:---use-gl=angle --use-angle=gles-egl --ignore-gpu-blocklist --enable-gpu-rasterization}
+				else
+					set -- "$@" "$a"
+				fi
+			done
+		fi
+		# X programs of the server's own (rootless Xwayland, wlserver/xwm.js): the server listens on :0 and
+		# starts Xwayland when the first one connects. Wayland programs ignore DISPLAY (Qt is told
+		# QT_QPA_PLATFORM, GTK 3 tries Wayland first); `desktop x11` makes the program an X one.
+		if [ -S /tmp/.X11-unix/X0 ]; then
+			export DISPLAY=:0
+		fi
+		if [ "$mode" = wayland-x ]; then
+			xwayland_rootful "$@"
+		elif [ "$mode" = x11 ]; then
+			if [ -z "$DISPLAY" ]; then
+				echo "desktop: the window server offers no X display (no Xwayland?)" >&2
+				return 1
+			fi
+			(unset WAYLAND_DISPLAY; GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb MOZ_ENABLE_WAYLAND=0 client "$@")
+		else
+			client "$@"
+		fi
+	}
+	# The server runs already (it holds the lock next to its socket): the program joins it.
+	if [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ] && ! flock -n "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.lock" true 2> /dev/null; then
+		[ $# -eq 0 ] && [ "$mode" != wayland-x ] && { echo "desktop: the window server runs already" >&2; exit 1; }
+		if [ "$shell" = plasma ] && [ "$(cat "$XDG_RUNTIME_DIR/wlserver.shell" 2> /dev/null)" != plasma ]; then
+			echo "desktop: the window server runs already with the page's own shell; plasmashell can be the shell" \
+				"only of a server started by 'desktop wayland plasma-native'" >&2
+			exit 1
+		fi
+		rvgpu_start
+		rvgpu_use
+		run "$@"
+		exit $?
+	fi
+	# $XDG_RUNTIME_DIR is in memory (tools/debian-enter mounts /tmp so): a
+	# client's pixels are files there, mapped by both sides.
+	rm -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$XDG_RUNTIME_DIR/wlserver.done"
+	# One session bus for the session, where a systemd user session has it ($XDG_RUNTIME_DIR/bus): the programs
+	# hear each other, and KDE's programs follow what System Settings changes (KConfigWatcher and KGlobalSettings
+	# tell them over this bus; on buses of their own they would not hear it). The server and the programs it
+	# starts from the panel have it too.
+	if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-daemon > /dev/null; then
+		[ -f "$XDG_RUNTIME_DIR/bus.pid" ] && kill "$(cat "$XDG_RUNTIME_DIR/bus.pid")" 2> /dev/null
+		rm -f "$XDG_RUNTIME_DIR/bus" "$XDG_RUNTIME_DIR/bus.pid"
+		if dbus-daemon --session --fork --address="unix:path=$XDG_RUNTIME_DIR/bus" --print-pid=3 \
+			3> "$XDG_RUNTIME_DIR/bus.pid" 2> /dev/null; then
+			export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+		fi
+	fi
+	rvgpu_start
+	# With the GPU server, the window server takes buffers that are GPU resources (zwp_linux_dmabuf_v1).
+	[ "$RVGPU" != 0 ] && export WLSERVER_DMABUF=1
+	# (and, for programs on the GPU device, says which device that is: Mesa's EGL on Wayland needs to hear it).
+	# Always, not only when this start has RVGPU_DRM=1: the server is shared, and a program given the device
+	# later (`RVGPU_DRM=1 desktop wayland PROGRAM` beside a session started without it) otherwise took Mesa's
+	# software path, llvmpipe. Programs without the device (vtest, software) find no such device in /sys and
+	# take their software path as before.
+	[ "$RVGPU" != 0 ] && export WLSERVER_DMABUF_DEVICE=${WLSERVER_DMABUF_DEVICE:-226:128}
+	# Whose shell the desktop is: the page's, or plasmashell's (wlserver/plasmashell.js).
+	echo "$shell" > "$XDG_RUNTIME_DIR/wlserver.shell"
+	if [ "$shell" = plasma ]; then
+		WLSERVER_SHELL=plasma HOSTNODE_HOME=/run/wlserver /run/hostnode/hostnode > /root/wlserver.log 2>&1 &
+	else
+		HOSTNODE_HOME=/run/wlserver /run/hostnode/hostnode > /root/wlserver.log 2>&1 &
+	fi
+	server=$!
+
+	# Up to ten seconds for the socket to appear.
+	i=0
+	while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do
+		if ! kill -0 $server 2> /dev/null; then
+			echo "desktop: the window server did not start (see /root/wlserver.log)" >&2
+			exit 1
+		fi
+		i=$((i + 1))
+		if [ $i -gt 100 ]; then
+			echo "desktop: no $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY after ten seconds" >&2
+			exit 1
+		fi
+		sleep 0.1
+	done
+	if [ $# -eq 0 ] && [ "$mode" != wayland-x ]; then
+		wait $server
+		exit $?
+	fi
+	rvgpu_use
+	run "$@"
+	status=$?
+	# The program may have left windows behind it (Kate goes into the background, so does a second instance that
+	# handed its work to the first): the server stays until the last client has gone.
+	touch "$XDG_RUNTIME_DIR/wlserver.done"
+	wait $server
+	rm -f "$XDG_RUNTIME_DIR/wlserver.done"
+	exit $status
+elif [ "$1" = plasma ]; then
+	shift
+	kde_environment
+	# There is no systemd here to start the session's parts: Plasma does it
+	# itself. And no picture while it starts (it draws with OpenGL): KSplash
+	# is off for this session only, by a ksplashrc of the system's that locks
+	# its group (KConfig's [$i], which a person's own file cannot override),
+	# so that ~/.config/ksplashrc stays the person's choice (the page's
+	# desktop, `desktop wayland`, draws the splash it names).
+	kwriteconfig6 --file startkderc --group General --key systemdBoot false
+	mkdir -p /tmp/rv-x11-xdg
+	printf '[KSplash][$i]\nEngine=none\nTheme=None\n' > /tmp/rv-x11-xdg/ksplashrc
+	export XDG_CONFIG_DIRS="/tmp/rv-x11-xdg:${XDG_CONFIG_DIRS:-/etc/xdg}"
+	# The screen is not locked when nothing happens for a while: root has no
+	# password here to unlock it with (set one with `debian passwd`, and
+	# take these two lines out, to have the lock).
+	# A program that is starting shows as such in the panel for as long as
+	# starting can take here (Plasma gives up after 5 seconds, and then
+	# nothing says that a click was heard).
+	kwriteconfig6 --file klaunchrc --group FeedbackStyle --key TaskbarButton true
+	kwriteconfig6 --file klaunchrc --group TaskbarButtonSettings --key Timeout 90
+	kwriteconfig6 --file kscreenlockerrc --group Daemon --key Autolock false
+	kwriteconfig6 --file kscreenlockerrc --group Daemon --key LockOnResume false
+	cat > /tmp/xinitrc <<'END'
+xsetroot -solid '#2e4a62'
+exec dbus-run-session -- startplasma-x11
+END
+	exec xinit /tmp/xinitrc -- /usr/lib/xorg/Xorg :0 -nolisten tcp -config /etc/X11/xorg.conf "$@" \
+		> /root/desktop.log 2>&1
+elif [ "$1" = kde ]; then
+	shift
+	kde_environment
+	# twm as it comes asks where every new window should go, with a click:
+	# here it decides by itself.
+	{
+		echo RandomPlacement
+		cat /etc/X11/twm/system.twmrc
+	} > /tmp/twmrc 2> /dev/null
+	{
+		echo "xsetroot -solid '#2e4a62'"
+		echo "twm -f /tmp/twmrc &"
+		echo "exec dbus-run-session -- $*"
+	} > /tmp/xinitrc
+	exec xinit /tmp/xinitrc -- /usr/lib/xorg/Xorg :0 -nolisten tcp -config /etc/X11/xorg.conf \
+		> /root/desktop.log 2>&1
+elif [ "$1" = twm ]; then
+	shift
+	cat > /tmp/xinitrc <<'END'
+xsetroot -solid '#2e4a62'
+twm &
+xclock -geometry 140x140-20+20 &
+exec xterm -geometry 90x28+20+20 -fa Monospace -fs 11
+END
+else
+	cat > /tmp/xinitrc <<'END'
+xsetroot -solid '#2e4a62'
+exec icewm-session
+END
+fi
+exec xinit /tmp/xinitrc -- /usr/lib/xorg/Xorg :0 -nolisten tcp -config /etc/X11/xorg.conf "$@"

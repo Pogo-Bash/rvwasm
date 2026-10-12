@@ -1,0 +1,14 @@
+--- a/src/utils.c
++++ b/src/utils.c
+@@ -26,7 +26,10 @@
+ #include <fcntl.h>
+ #include "utils.h"
+ 
+-#ifdef HAVE_MMAP
++/* nativeqt: linux-wasm has no MMU: a shared mapping of a file on a disk fails (no direct mapping there), and
++ * with it every Compose and XKB file (Qt: "couldn't find a Compose file for locale"); files are read
++ * instead. */
++#if defined(HAVE_MMAP) && !defined(__wasm__)
+ 
+ #include <unistd.h>
+ #include <sys/mman.h>

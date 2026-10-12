@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:40:28 -0500
+Subject: [PATCH 2/3] runtime: end the Worker of a task that runs its program
+ when a fatal signal comes
+
+The kernel acts on signals only when a program makes a system call: SIGKILL
+did not end a program in a loop, and an exit_group() or exec() of one of its
+threads waited for good for another that computed.
+
+The kernel now asks for it (the import wasm_end_user_task(task, state)) when
+a fatal signal finds a task running its program. The main thread changes the
+task's state word from KILL to ENDING (anything else means the task entered
+the kernel meanwhile and takes the signal there), terminates the task's
+Worker and starts a Worker that runs the task's exit as the task (the
+kernel's wasm_user_task_end); the task's runner is that Worker from then on.
+
+Needs the kernel patch "wasm: end a task that runs its program when a fatal
+signal comes" (which imports wasm_end_user_task: a runtime without this
+cannot start such a kernel).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ runtime/linux-worker.js | 10 ++++++++++
+ runtime/linux.js        | 14 ++++++++++++++
+ 2 files changed, 24 insertions(+)
+
+diff --git a/runtime/linux-worker.js b/runtime/linux-worker.js
+index 8dd4bcd..7d02208 100644
+--- a/runtime/linux-worker.js
++++ b/runtime/linux-worker.js
+@@ -128,6 +128,12 @@
+       return serialize_me();
+     },
+ 
++    /// A fatal signal for a task running its program (state: its thread_info's user_state, now KILL): the main
++    /// thread ends that task's Worker and runs the task's exit in a new one.
++    wasm_end_user_task: (task, state) => {
++      port.postMessage({ method: "end_user_task", task: task, state: state });
++    },
++
+     /// Remove a task created by wasm_create_and_run_task().
+     wasm_release_task: (dead_task) => {
+       port.postMessage({
+@@ -419,6 +425,10 @@
+           vmlinux_instance.exports._start_secondary(Ulong(message.idle_task));
+ 
+           throw new Error("start_secondary returned");
++        } else if (message.runner_type == "task_end") {
++          // A task whose Worker the main thread ended: become it, and take it to its exit (does not return).
++          vmlinux_instance.exports.wasm_user_task_end(Ulong(message.task));
++          throw new Error("wasm_user_task_end returned");
+         } else if (message.runner_type == "task") {
+           // A fresh task, possibly serialized on CPU 0 before secondaries are brought up.
+           should_call_clone_callback = vmlinux_instance.exports.ret_from_fork(Ulong(message.prev_task), Ulong(message.new_task));
+diff --git a/runtime/linux.js b/runtime/linux.js
+index 5d32953..44d3e93 100644
+--- a/runtime/linux.js
++++ b/runtime/linux.js
+@@ -69,6 +69,20 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+       make_task(message.prev_task, message.new_task, message.name, message.user_executable);
+     },
+ 
++    end_user_task: (message) => {
++      // A fatal signal for a task that runs its program, which never comes into the kernel by itself. Its state word
++      // goes from KILL (2) to ENDING (3) here, or the task has entered the kernel meanwhile (and takes the signal
++      // there). Then its Worker is ended, and a new one runs the task to its exit (wasm_user_task_end).
++      const word = new Int32Array(memory.buffer, Number(message.state), 1);
++      if (Atomics.compareExchange(word, 0, 2, 3) != 2) {
++        return;
++      }
++      if (tasks[message.task]) {
++        tasks[message.task].worker.terminate();
++      }
++      tasks[message.task] = make_vmlinux_runner("task " + message.task + " (ending)", { runner_type: "task_end", task: message.task });
++    },
++
+     release_task: (message) => {
+       kill_task(message.dead_task);
+     },

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/allfiles;
+Actions=saveToHost;
+X-KDE-Priority=TopLevel
+
+[Desktop Action saveToHost]
+Name=Save to This Computer
+Icon=document-save
+Exec=/run/hostopen/bin/rv-host-save %F

@@ -1,0 +1,8 @@
+# https://plasmaontheweb.com/
+# The boot page (/desktop) answers with X-Robots-Tag: noindex, so it is left crawlable for that header to be seen.
+User-agent: *
+Allow: /
+Disallow: /disk/
+Disallow: /relay/
+
+Sitemap: https://plasmaontheweb.com/sitemap.xml

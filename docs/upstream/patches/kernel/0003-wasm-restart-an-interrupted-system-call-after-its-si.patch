@@ -1,0 +1,266 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 3/8] wasm: restart an interrupted system call after its signal
+ handler
+
+With SA_RESTART (musl's signal() sets it, and shells and event loops use
+it) a handler for SIGCHLD, SIGWINCH, SIGALRM or SIGUSR1 was held back for as
+long as the interrupted call blocked, possibly for good: handle_signal()
+leaves -ERESTARTSYS for SA_RESTART (and -ERESTARTNOINTR always), and the
+loop in __wasm_syscall_N restarted the call right away, inside the kernel,
+while the host runs the handler only after __wasm_syscall_N has returned
+(_user_mode_tail in the asm foot). Elsewhere the frame records a program
+counter rewound to the system call instruction, so the restart comes after
+the handler.
+
+When a frame has been set up in this return (_TIF_DELIVER_SIGNAL) the C loop
+no longer restarts; each wasm_syscall_N in entry.S keeps the result in a
+local, and when it is -ERESTARTSYS or -ERESTARTNOINTR (only returned now
+with a handler run) branches back and makes the call again with the
+arguments it still has: the handler's rt_sigreturn has put the stack pointer
+and TLS back. -ERESTARTNOHAND and -ERESTART_RESTARTBLOCK become -EINTR in
+handle_signal() when there is a handler, and need nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/kernel/entry.S | 169 +++++++++++++++++++++++++++------------
+ arch/wasm/kernel/traps.c |   9 ++-
+ 2 files changed, 127 insertions(+), 51 deletions(-)
+
+diff --git a/arch/wasm/kernel/entry.S b/arch/wasm/kernel/entry.S
+index fbb0a2f..d908ca4 100644
+--- a/arch/wasm/kernel/entry.S
++++ b/arch/wasm/kernel/entry.S
+@@ -193,8 +193,27 @@ ret_from_fork:
+ 	* and signal return, the call stack collapses (this call never returns).
+ 	*/
+ 	call _user_mode_tail
++.endm
+ 
+-	end_function
++/*
++ * A system call interrupted by a signal whose handler is to run first comes
++ * back with -ERESTARTSYS (SA_RESTART) or -ERESTARTNOINTR (traps.c): the
++ * handler has run in _user_mode_tail by now, and the call is made again, with
++ * the arguments it had (on other architectures the program counter is moved
++ * back to the system call instruction, with the same effect). Restarting it
++ * in the kernel instead, as with no handler to run, would leave the handler
++ * waiting until the restarted call was done, for as long as that blocks.
++ * \res is the local the result is in; the body is in a loop.
++ */
++.macro WASM_SYSCALL_ASM_RESTART res
++	local.get \res
++	iLONG.const -512 /* -ERESTARTSYS */
++	iLONG.eq
++	local.get \res
++	iLONG.const -513 /* -ERESTARTNOINTR */
++	iLONG.eq
++	i32.or
++	br_if 0
+ .endm
+ 
+ .functype __wasm_user_fault(iLONG) -> (iLONG)
+@@ -212,6 +231,7 @@ wasm_user_fault:
+ 	local.get 2
+ 	call __wasm_user_fault
+ 	WASM_SYSCALL_ASM_FOOT
++	end_function
+ 
+ .functype __wasm_user_task_end() -> ()
+ 
+@@ -271,76 +291,125 @@ wasm_user_task_end:
+ .globl wasm_syscall_0
+ wasm_syscall_0:
+ 	.functype wasm_syscall_0(iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	call __wasm_syscall_0
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 3: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		call __wasm_syscall_0
++		local.set 3
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 3
++	end_loop
++	local.get 3
++	end_function
+ 
+ .globl wasm_syscall_1
+ wasm_syscall_1:
+ 	.functype wasm_syscall_1(iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	call __wasm_syscall_1
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 4: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		call __wasm_syscall_1
++		local.set 4
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 4
++	end_loop
++	local.get 4
++	end_function
+ 
+ .globl wasm_syscall_2
+ wasm_syscall_2:
+ 	.functype wasm_syscall_2(iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	call __wasm_syscall_2
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 5: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		call __wasm_syscall_2
++		local.set 5
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 5
++	end_loop
++	local.get 5
++	end_function
+ 
+ .globl wasm_syscall_3
+ wasm_syscall_3:
+ 	.functype wasm_syscall_3(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	call __wasm_syscall_3
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 6: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		call __wasm_syscall_3
++		local.set 6
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 6
++	end_loop
++	local.get 6
++	end_function
+ 
+ .globl wasm_syscall_4
+ wasm_syscall_4:
+ 	.functype wasm_syscall_4(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	local.get 6
+-	call __wasm_syscall_4
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 7: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		local.get 6
++		call __wasm_syscall_4
++		local.set 7
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 7
++	end_loop
++	local.get 7
++	end_function
+ 
+ .globl wasm_syscall_5
+ wasm_syscall_5:
+ 	.functype wasm_syscall_5(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	local.get 6
+-	local.get 7
+-	call __wasm_syscall_5
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 8: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		local.get 6
++		local.get 7
++		call __wasm_syscall_5
++		local.set 8
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 8
++	end_loop
++	local.get 8
++	end_function
+ 
+ .globl wasm_syscall_6
+ wasm_syscall_6:
+ 	.functype wasm_syscall_6(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	local.get 6
+-	local.get 7
+-	local.get 8
+-	call __wasm_syscall_6
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 9: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		local.get 6
++		local.get 7
++		local.get 8
++		call __wasm_syscall_6
++		local.set 9
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 9
++	end_loop
++	local.get 9
++	end_function
+diff --git a/arch/wasm/kernel/traps.c b/arch/wasm/kernel/traps.c
+index 908e533..ffcbec6 100644
+--- a/arch/wasm/kernel/traps.c
++++ b/arch/wasm/kernel/traps.c
+@@ -149,7 +149,14 @@ void wasm_kick_user_task(int cpu)
+ 				case -ERESTARTNOHAND:				\
+ 				case -ERESTARTSYS:				\
+ 				case -ERESTARTNOINTR:				\
+-					restart = true;				\
++					/*					\
++					 * Not with a handler to run first: the	\
++					 * host runs it after this returns, and	\
++					 * the call is made again after that	\
++					 * (entry.S: wasm_syscall_N).		\
++					 */					\
++					restart = !test_thread_flag(		\
++						TIF_DELIVER_SIGNAL);		\
+ 					break;					\
+ 				default:					\
+ 					restart = false;			\

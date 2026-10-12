@@ -1,0 +1,4 @@
+module org.kde.pipewire.monitor
+MediaMonitor 1.0 MediaMonitor.qml
+singleton MediaRole 1.0 MediaRole.qml
+singleton NodeState 1.0 NodeState.qml

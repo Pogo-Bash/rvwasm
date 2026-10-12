@@ -1,0 +1,64 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -53,8 +53,9 @@
+ 
+ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+     find_package(NL)
++    # nativeqt: optional (only the network plugin's helper uses libnl, and only with libpcap)
+     set_package_properties(NL PROPERTIES
+-        TYPE REQUIRED
++        TYPE OPTIONAL
+         PURPOSE "Used for gathering socket info via the sock_diag netlink subsystem."
+         URL "https://github.com/thom311/libnl/"
+     )
+@@ -76,8 +77,9 @@
+     endif()
+ 
+     find_package(Sensors)
++    # nativeqt: optional (systemstats reads lm-sensors only when it is found)
+     set_package_properties(Sensors PROPERTIES
+-        TYPE REQUIRED
++        TYPE OPTIONAL
+         PURPOSE "Used for reading hardware sensors")
+ endif()
+ 
+--- a/processcore/CMakeLists.txt
++++ b/processcore/CMakeLists.txt
+@@ -24,6 +24,10 @@
+ 
+ add_library(processcore ${ksysguard_LIB_SRCS})
+ add_library(KSysGuard::ProcessCore ALIAS processcore)
++# nativeqt: its Linux process list uses std::jthread / std::stop_token, experimental in LLVM 18's libc++
++if(CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
++    target_compile_options(processcore PRIVATE -fexperimental-library)
++endif()
+ 
+ generate_export_header(processcore)
+ 
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -121,6 +121,24 @@
+     ${CMAKE_CURRENT_BINARY_DIR}/KSysGuardConfigVersion.cmake
+     DESTINATION ${CMAKECONFIG_INSTALL_DIR})
+ 
++# nativeqt: static libraries carry what they link into their users: the resource objects of the QML modules
++# (*_resources_N) and SystemStats' D-Bus interface library go into the export set with them.
++if(NOT BUILD_SHARED_LIBS)
++    function(_nq_ksg_objects dir)
++        get_property(_targets DIRECTORY ${dir} PROPERTY BUILDSYSTEM_TARGETS)
++        foreach(_t IN LISTS _targets)
++            if(_t MATCHES "_resources_[0-9]+$" OR _t STREQUAL "dbusinterface")
++                install(TARGETS ${_t} EXPORT libksysguardLibraryTargets ${KDE_INSTALL_TARGETS_DEFAULT_ARGS}
++                    OBJECTS DESTINATION ${KDE_INSTALL_LIBDIR}/objects/${_t})
++            endif()
++        endforeach()
++        get_property(_subdirs DIRECTORY ${dir} PROPERTY SUBDIRECTORIES)
++        foreach(_d IN LISTS _subdirs)
++            _nq_ksg_objects(${_d})
++        endforeach()
++    endfunction()
++    _nq_ksg_objects(${CMAKE_CURRENT_SOURCE_DIR})
++endif()
+ install(EXPORT libksysguardLibraryTargets
+         NAMESPACE KSysGuard::
+         DESTINATION ${CMAKECONFIG_INSTALL_DIR}

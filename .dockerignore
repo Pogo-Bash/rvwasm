@@ -1,0 +1,10 @@
+.git
+build
+dist
+results
+docs
+third_party
+tools/chrome
+tools/lima
+tools/dl
+**/node_modules

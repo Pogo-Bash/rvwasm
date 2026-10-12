@@ -1,0 +1,11 @@
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1,6 +1,8 @@
+ include(ECMPoQmTools)
+ 
+ add_library(KF6WidgetsAddons)
++# nativeqt: KI18n has a removeAcceleratorMarker() of its own (one static binary)
++target_compile_definitions(KF6WidgetsAddons PRIVATE removeAcceleratorMarker=kwidgetsaddons_removeAcceleratorMarker)
+ add_library(KF6::WidgetsAddons ALIAS KF6WidgetsAddons)
+ 
+ set_target_properties(KF6WidgetsAddons PROPERTIES

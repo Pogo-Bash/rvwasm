@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+# The build image: everything it takes to build the machine from source (see docs/docker.md).
+#
+# What is in the image: the distribution's tools (riscv64 cross compilers, qemu-user, debootstrap, meson),
+# linux-wasm at the commit we build on with our patch to its script, its LLVM 18 (the long part: an hour or
+# more) and Emscripten (for the GPU executor, gpu/vrend). The rest (the kernel, musl, BusyBox, rv, the boot
+# image, the Debian disks) is built by docker/build.sh into a volume (/work) from the source tree, which is
+# mounted at /src: changing the source needs no new image.
+#
+#   docker compose --profile build build build       (build args: JOBS, LLVM_JOBS)
+
+ARG UBUNTU=ubuntu:24.04
+
+FROM ${UBUNTU} AS deps
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		build-essential git cmake ninja-build python3 flex bison bc rsync cpio \
+		ca-certificates curl wget xz-utils file sudo \
+		gcc-riscv64-linux-gnu g++-riscv64-linux-gnu binutils-riscv64-linux-gnu \
+		qemu-user qemu-user-static debootstrap debian-archive-keyring e2fsprogs \
+		meson pkg-config \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& git config --system user.name rvwasm && git config --system user.email rvwasm@localhost \
+	&& git config --system advice.detachedHead false
+
+# linux-wasm and its LLVM. (The commits are the ones the machine is built on; patches/ applies to them.)
+FROM deps AS llvm
+ARG LINUX_WASM_COMMIT=3103d5c877a8f6251b4b451c866a46941fd1fab3
+ARG LLVM_COMMIT=30dfc8fca8c206fa4f483e300937637291f61716
+ARG JOBS=10
+ARG LLVM_JOBS=6
+COPY patches/linux-wasm-script.diff /tmp/
+RUN git clone -q https://github.com/joelseverin/linux-wasm /opt/linux-wasm \
+	&& cd /opt/linux-wasm && git checkout -q "$LINUX_WASM_COMMIT" && git checkout -q -b rvwasm \
+	&& git apply /tmp/linux-wasm-script.diff && git commit -qam "rvwasm: patches/linux-wasm-script.diff"
+RUN cd /opt/linux-wasm \
+	&& git init -q workspace/src/llvm \
+	&& git -C workspace/src/llvm fetch -q --depth 1 https://github.com/joelseverin/llvm.git "$LLVM_COMMIT" \
+	&& git -C workspace/src/llvm checkout -q FETCH_HEAD \
+	&& LW_JOBS_LLVM_COMPILE="$LLVM_JOBS" LW_JOBS_LLVM_LINK=2 ./linux-wasm.sh build-llvm > /tmp/llvm.log 2>&1 \
+	|| { tail -50 /tmp/llvm.log; exit 1; } \
+	&& rm -rf workspace/src workspace/build
+
+# Emscripten, for virglrenderer's vrend (gpu/vrend/build.sh). Its first compile fills its cache (the headers
+# gpu/vrend/gen-gl-extra.py reads, the libraries).
+FROM deps AS emsdk
+ARG EMSDK_VERSION=6.0.11
+RUN git clone -q https://github.com/emscripten-core/emsdk /opt/emsdk \
+	&& cd /opt/emsdk && ./emsdk install "$EMSDK_VERSION" > /dev/null && ./emsdk activate "$EMSDK_VERSION" > /dev/null \
+	&& . ./emsdk_env.sh > /dev/null 2>&1 \
+	&& printf 'int main(void) { return 0; }\n' > /tmp/t.c && emcc -O2 /tmp/t.c -o /tmp/t.js && rm -f /tmp/t.*
+
+FROM deps AS build
+# (virglrenderer's generators read YAML.)
+RUN apt-get update && apt-get install -y --no-install-recommends python3-yaml && rm -rf /var/lib/apt/lists/*
+COPY --from=llvm /opt/linux-wasm /opt/linux-wasm
+COPY --from=emsdk /opt/emsdk /opt/emsdk
+ARG JOBS=10
+# The paths the scripts in tools/ take from the environment (their defaults are the build VM's). JOBS: the
+# parallel jobs of every build in the container (docker/build.sh; `run -e JOBS=4` for fewer).
+ENV RVWASM_WORK=/work RVWASM_MAIN=/src GPUHOST=/work/gpuhost EMSDK=/opt/emsdk \
+	LW_VARIANT=wasm64_nommu LW_KERNEL_CONFIG=rvwasm JOBS=${JOBS} USER=root
+WORKDIR /src
+ENTRYPOINT ["/src/docker/build.sh"]
+CMD ["all"]

@@ -1,0 +1,612 @@
+diff --git a/arch/wasm/configs/rvwasm.config b/arch/wasm/configs/rvwasm.config
+index 77bb70191..0d0d23731 100644
+--- a/arch/wasm/configs/rvwasm.config
++++ b/arch/wasm/configs/rvwasm.config
+@@ -62,3 +62,13 @@ CONFIG_DEBUG_STACK_USAGE=y
+ # usleep_range() of a driver, rounded up to the next tick and then some: a
+ # sleep of 1 ms took 9 ms on the median (probes/sched_bench.c sleep).
+ CONFIG_HIGH_RES_TIMERS=y
++
++# Sound: ALSA, and the card whose output the browser plays (Web Audio).
++# Programs use it through alsa-lib (/dev/snd), sound servers on top.
++CONFIG_SOUND=y
++CONFIG_SND=y
++CONFIG_SND_DRIVERS=y
++CONFIG_SND_WASM=y
++CONFIG_SND_PCM_TIMER=y
++CONFIG_SND_HRTIMER=y
++CONFIG_SND_PROC_FS=y
+diff --git a/arch/wasm/include/asm/irq.h b/arch/wasm/include/asm/irq.h
+index 2d12d8f8f..957e9e0bb 100644
+--- a/arch/wasm/include/asm/irq.h
++++ b/arch/wasm/include/asm/irq.h
+@@ -14,6 +14,7 @@
+  */
+ #define WASM_IRQ_INPUT			2	/* drivers/input/misc/wasm_input.c */
+ #define WASM_IRQ_NET			3	/* drivers/net/wasm_net.c */
++#define WASM_IRQ_AUDIO			4	/* sound/drivers/wasm_audio.c */
+ 
+ #include <asm-generic/irq.h>
+ 
+diff --git a/sound/drivers/Kconfig b/sound/drivers/Kconfig
+index 6debd8e95..dea282859 100644
+--- a/sound/drivers/Kconfig
++++ b/sound/drivers/Kconfig
+@@ -46,6 +46,15 @@ menuconfig SND_DRIVERS
+   
+ if SND_DRIVERS
+ 
++config SND_WASM
++	bool "Wasm host sound"
++	depends on WASM
++	select SND_PCM
++	help
++	  A sound card whose output the Wasm host plays: in a browser,
++	  through Web Audio. Four playback substreams, mixed by the host,
++	  and a master volume.
++
+ config SND_PCSP
+ 	tristate "PC-Speaker support (READ HELP!)"
+ 	depends on PCSPKR_PLATFORM && X86 && HIGH_RES_TIMERS
+diff --git a/sound/drivers/Makefile b/sound/drivers/Makefile
+index a08bdd70e..21f8d886b 100644
+--- a/sound/drivers/Makefile
++++ b/sound/drivers/Makefile
+@@ -13,6 +13,7 @@ snd-portman2x4-y := portman2x4.o
+ snd-serial-u16550-y := serial-u16550.o
+ snd-serial-generic-y := serial-generic.o
+ snd-virmidi-y := virmidi.o
++snd-wasm-y := wasm_audio.o
+ 
+ # Toplevel Module Dependency
+ obj-$(CONFIG_SND_DUMMY) += snd-dummy.o
+@@ -24,5 +25,6 @@ obj-$(CONFIG_SND_SERIAL_GENERIC) += snd-serial-generic.o
+ obj-$(CONFIG_SND_MTPAV) += snd-mtpav.o
+ obj-$(CONFIG_SND_MTS64) += snd-mts64.o
+ obj-$(CONFIG_SND_PORTMAN2X4) += snd-portman2x4.o
++obj-$(CONFIG_SND_WASM) += snd-wasm.o
+ 
+ obj-$(CONFIG_SND) += opl3/ opl4/ mpu401/ vx/ pcsp/
+diff --git a/sound/drivers/wasm_audio.c b/sound/drivers/wasm_audio.c
+new file mode 100644
+index 000000000..d99bd2ddf
+--- /dev/null
++++ b/sound/drivers/wasm_audio.c
+@@ -0,0 +1,537 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * The sound card of Linux/Wasm: what programs play, the browser plays.
++ *
++ * A PCM device with four playback substreams (so that four programs can play
++ * at once without a sound server or dmix: the host mixes them) and a mixer
++ * with a master volume and switch. There is no hardware: the "DMA buffer" of
++ * a substream is ordinary kernel memory, and the host (in a browser, an
++ * AudioWorklet of the page, tools/www/audio-worklet.js) reads the samples
++ * straight out of the machine's memory, which it shares, as a sound card's
++ * DMA engine would. What it has read it counts in the substream's block of a
++ * header in shared memory (struct wasm_audio_header), and that count is the
++ * hardware pointer: the pointer callback answers from it, so ALSA's idea of
++ * what has been played, and with it every program's timing and the
++ * detection of underruns, comes from what the browser has actually taken
++ * for its output.
++ *
++ * The host finds the header with the exported wasm_audio_header() (the
++ * runtime asks it from a Worker and tells the page: patch-runtime.py, 25).
++ * When it crosses a period boundary of a running substream it raises
++ * WASM_IRQ_AUDIO on IRQ_CPU, as the main thread raises WASM_IRQ_INPUT, and
++ * the interrupt tells ALSA at once (snd_pcm_period_elapsed()). A timer of
++ * the substream's period does the same in case an interrupt is lost.
++ *
++ * Nobody may be playing: a page with ?audio=0, a page nobody has clicked on
++ * yet (a browser lets a page make sound only after a click or a key), a
++ * host without a player at all (an older runtime, tools/node-machine.js).
++ * Programs must not hang then, so the header says whether the host plays
++ * (host_state) and the player ticks a heartbeat for every block of sound it
++ * makes. When nobody plays, or the heartbeat has stood still for a while,
++ * the timer moves the pointer on by the kernel's clock, as snd-dummy does:
++ * the sound is lost, the timing stays right. When the player comes back it
++ * goes on from where the pointer is.
++ *
++ * A block is the kernel's or the host's word by word (struct wasm_audio_stream
++ * says whose), so no word has two writers: the position of a substream is
++ * consumed (the host's count) minus base (the kernel's), and running on by
++ * the clock lowers base. The kernel also says up to where the program has
++ * written (valid_end, from the ack callback): the player plays silence past
++ * it instead of what was left in the ring, for underruns and the end of a
++ * drain.
++ *
++ * Capture (a microphone, getUserMedia() in the page) would be a second kind
++ * of block (direction 1) in the same header: the host writes, the kernel's
++ * pointer follows what was written. Not yet.
++ */
++#include <linux/hrtimer.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/math64.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/spinlock.h>
++#include <sound/control.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/tlv.h>
++
++#define WASM_AUDIO_MAGIC	0x55415652	/* "RVAU" */
++#define WASM_AUDIO_VERSION	1
++#define WASM_AUDIO_STREAMS	4
++#define WASM_AUDIO_BUFFER_MAX	(1024 * 1024)
++
++/* Master Playback Volume: 0..127 in steps of 0.5 dB, 127 is 0 dB, 0 is silence. */
++#define WASM_AUDIO_VOLUME_MAX	127
++#define WASM_AUDIO_DB_MIN	-6350	/* 0.01 dB */
++#define WASM_AUDIO_DB_STEP	50
++
++enum { WASM_AUDIO_STOPPED, WASM_AUDIO_RUNNING, WASM_AUDIO_PAUSED };
++enum { WASM_AUDIO_NO_PLAYER, WASM_AUDIO_PLAYING, WASM_AUDIO_STARTING };
++
++/*
++ * One substream's block, 128 bytes. The layout is the host's too
++ * (tools/www/audio-worklet.js): little-endian, at these offsets.
++ */
++struct wasm_audio_stream {
++	/* The kernel's. */
++	u32 generation;		/*  0: one more at every prepare: the rest of the kernel's words changed */
++	u32 state;		/*  4: WASM_AUDIO_STOPPED, _RUNNING or _PAUSED */
++	u64 buffer;		/*  8: where the ring is (the substream's DMA buffer) */
++	u32 buffer_frames;	/* 16 */
++	u32 period_frames;	/* 20 */
++	u32 rate;		/* 24: frames per second */
++	u32 channels;		/* 28: interleaved */
++	u32 format;		/* 32: SNDRV_PCM_FORMAT_* (U8, S16_LE, S24_LE, S32_LE, FLOAT_LE) */
++	u32 frame_bytes;	/* 36 */
++	u64 base;		/* 40: the position is consumed - base */
++	u64 valid_end;		/* 48: the position up to which the program has written */
++	u32 direction;		/* 56: 0, playback */
++	u32 open;		/* 60: a program has the substream open */
++	/* The host's. */
++	u64 consumed;		/* 64: frames the host has taken out of the ring, ever */
++	u32 underruns;		/* 72: blocks the host had to fill with silence while running */
++	u32 interrupts;		/* 76: WASM_IRQ_AUDIO it has raised for this substream */
++	u32 host_reserved[12];
++};
++
++struct wasm_audio_header {
++	/* The kernel's. */
++	u32 magic;		/*  0: WASM_AUDIO_MAGIC once the card is there */
++	u32 version;		/*  4 */
++	u32 streams;		/*  8: how many blocks follow */
++	u32 stream_size;	/* 12: the size of one (128) */
++	u32 stream_offset;	/* 16: where the first is (64) */
++	u32 volume;		/* 20: Master Playback Volume */
++	u32 volume_max;		/* 24 */
++	s32 db_min;		/* 28: the volume's scale: 0 is silence, v is db_min + v * db_step (0.01 dB) */
++	u32 db_step;		/* 32 */
++	u32 unmuted;		/* 36: Master Playback Switch */
++	u32 irq;		/* 40: the interrupt to raise at a period boundary */
++	u32 kernel_reserved;	/* 44 */
++	/* The host's. */
++	u32 host_state;		/* 48: WASM_AUDIO_NO_PLAYER, _PLAYING, or _STARTING (resuming its output) */
++	u32 heartbeat;		/* 52: one more for every block of sound the player makes */
++	u32 latency_us;		/* 56: from a sample taken out of the ring to the speaker */
++	u32 host_rate;		/* 60: the rate the player plays at */
++	struct wasm_audio_stream stream[WASM_AUDIO_STREAMS];	/* 64 */
++} __aligned(64);
++
++static_assert(sizeof(struct wasm_audio_stream) == 128);
++static_assert(offsetof(struct wasm_audio_header, stream) == 64);
++
++static struct wasm_audio_header wasm_audio_hdr;
++
++/* For the host: where the header is. (The kernel's exports are its functions.) */
++__visible unsigned long wasm_audio_header(void);
++__visible unsigned long wasm_audio_header(void)
++{
++	return (unsigned long)&wasm_audio_hdr;
++}
++
++/* The kernel's own state of a substream. */
++struct wasm_audio_pcm {
++	spinlock_t lock;
++	struct snd_pcm_substream *substream;	/* while open */
++	struct wasm_audio_stream *ring;
++	struct hrtimer timer;
++	ktime_t period_time;
++	atomic_t running;
++	u64 last_period;	/* the period the position was in when ALSA was last told */
++	u64 pointer_pos;	/* the position the last pointer() answered (ALSA's hw_ptr) */
++	ktime_t last_update;	/* when the position was last looked at */
++	ktime_t last_beat;	/* when the heartbeat was last seen to move */
++	u32 heartbeat;
++	u64 clock_ns;		/* time not yet made frames, running by the clock */
++};
++
++static struct wasm_audio_pcm wasm_audio_pcms[WASM_AUDIO_STREAMS];
++
++/* How long the heartbeat may stand still before the clock takes over. */
++static s64 wasm_audio_patience_ns(void)
++{
++	switch (READ_ONCE(wasm_audio_hdr.host_state)) {
++	case WASM_AUDIO_PLAYING:
++		return 200 * NSEC_PER_MSEC;
++	case WASM_AUDIO_STARTING:
++		return NSEC_PER_SEC;
++	default:
++		return 0;
++	}
++}
++
++/*
++ * The position now: the host's count, or the kernel's clock if nobody plays.
++ * With p->lock held; for a running substream.
++ */
++static u64 wasm_audio_advance(struct wasm_audio_pcm *p, struct snd_pcm_runtime *runtime)
++{
++	struct wasm_audio_stream *s = p->ring;
++	ktime_t now = ktime_get();
++	u32 beat = READ_ONCE(wasm_audio_hdr.heartbeat);
++
++	if (beat != p->heartbeat) {
++		p->heartbeat = beat;
++		p->last_beat = now;
++		p->clock_ns = 0;
++	} else if (ktime_to_ns(ktime_sub(now, p->last_beat)) >= wasm_audio_patience_ns()) {
++		u64 ns = ktime_to_ns(ktime_sub(now, p->last_update)) + p->clock_ns;
++		u64 frames = div_u64(ns * runtime->rate, NSEC_PER_SEC);
++
++		p->clock_ns = ns - div_u64(frames * NSEC_PER_SEC, runtime->rate);
++		WRITE_ONCE(s->base, READ_ONCE(s->base) - frames);
++	}
++	p->last_update = now;
++	return READ_ONCE(s->consumed) - READ_ONCE(s->base);
++}
++
++/* Tell ALSA if the position has crossed a period boundary since it was last told. */
++static void wasm_audio_update(struct wasm_audio_pcm *p)
++{
++	struct snd_pcm_substream *substream;
++	unsigned long flags;
++	bool elapsed = false;
++
++	spin_lock_irqsave(&p->lock, flags);
++	substream = p->substream;
++	if (substream && atomic_read(&p->running)) {
++		struct snd_pcm_runtime *runtime = substream->runtime;
++		u64 period = div_u64(wasm_audio_advance(p, runtime), runtime->period_size);
++
++		if (period != p->last_period) {
++			p->last_period = period;
++			elapsed = true;
++		}
++	}
++	spin_unlock_irqrestore(&p->lock, flags);
++	/* (Not under the lock: it calls back, pointer() among others.) */
++	if (elapsed)
++		snd_pcm_period_elapsed(substream);
++}
++
++static irqreturn_t wasm_audio_interrupt(int irq, void *dev_id)
++{
++	for (int i = 0; i < WASM_AUDIO_STREAMS; i++)
++		if (atomic_read(&wasm_audio_pcms[i].running))
++			wasm_audio_update(&wasm_audio_pcms[i]);
++	return IRQ_HANDLED;
++}
++
++static enum hrtimer_restart wasm_audio_tick(struct hrtimer *timer)
++{
++	struct wasm_audio_pcm *p = container_of(timer, struct wasm_audio_pcm, timer);
++
++	if (!atomic_read(&p->running))
++		return HRTIMER_NORESTART;
++	/* (This may stop the substream: an underrun, the end of a drain.) */
++	wasm_audio_update(p);
++	if (!atomic_read(&p->running))
++		return HRTIMER_NORESTART;
++	hrtimer_forward_now(timer, p->period_time);
++	return HRTIMER_RESTART;
++}
++
++static const struct snd_pcm_hardware wasm_audio_hw = {
++	.info = SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID | SNDRV_PCM_INFO_INTERLEAVED |
++		SNDRV_PCM_INFO_BLOCK_TRANSFER | SNDRV_PCM_INFO_PAUSE |
++		/* (appl_ptr through the ack callback, always: valid_end.) */
++		SNDRV_PCM_INFO_SYNC_APPLPTR,
++	/* The host converts and resamples: whatever is cheap for it. */
++	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_FLOAT_LE | SNDRV_PCM_FMTBIT_S32_LE |
++		   SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_U8,
++	.rates = SNDRV_PCM_RATE_CONTINUOUS | SNDRV_PCM_RATE_8000_192000,
++	.rate_min = 8000,
++	.rate_max = 192000,
++	.channels_min = 1,
++	.channels_max = 2,
++	.buffer_bytes_max = WASM_AUDIO_BUFFER_MAX,
++	.period_bytes_min = 256,
++	.period_bytes_max = WASM_AUDIO_BUFFER_MAX / 2,
++	.periods_min = 2,
++	.periods_max = 1024,
++};
++
++static int wasm_audio_open(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct wasm_audio_pcm *p = &wasm_audio_pcms[substream->number];
++	int err;
++
++	runtime->hw = wasm_audio_hw;
++	runtime->private_data = p;
++	err = snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);
++	if (err < 0)
++		return err;
++	spin_lock_irq(&p->lock);
++	p->substream = substream;
++	spin_unlock_irq(&p->lock);
++	WRITE_ONCE(p->ring->open, 1);
++	return 0;
++}
++
++static int wasm_audio_close(struct snd_pcm_substream *substream)
++{
++	struct wasm_audio_pcm *p = substream->runtime->private_data;
++
++	hrtimer_cancel(&p->timer);
++	spin_lock_irq(&p->lock);
++	p->substream = NULL;
++	spin_unlock_irq(&p->lock);
++	WRITE_ONCE(p->ring->state, WASM_AUDIO_STOPPED);
++	WRITE_ONCE(p->ring->open, 0);
++	return 0;
++}
++
++static int wasm_audio_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct wasm_audio_pcm *p = runtime->private_data;
++	struct wasm_audio_stream *s = p->ring;
++	unsigned int period = runtime->period_size, rate = runtime->rate;
++
++	hrtimer_cancel(&p->timer);
++	p->period_time = ktime_set(period / rate,
++				   div_u64((u64)(period % rate) * NSEC_PER_SEC + rate - 1, rate));
++
++	spin_lock_irq(&p->lock);
++	WRITE_ONCE(s->state, WASM_AUDIO_STOPPED);
++	WRITE_ONCE(s->buffer, (u64)(uintptr_t)runtime->dma_area);
++	WRITE_ONCE(s->buffer_frames, runtime->buffer_size);
++	WRITE_ONCE(s->period_frames, runtime->period_size);
++	WRITE_ONCE(s->rate, rate);
++	WRITE_ONCE(s->channels, runtime->channels);
++	WRITE_ONCE(s->format, (__force u32)runtime->format);
++	WRITE_ONCE(s->frame_bytes, frames_to_bytes(runtime, 1));
++	/* The position starts again from 0, as ALSA's hw_ptr does (reset). */
++	WRITE_ONCE(s->base, READ_ONCE(s->consumed));
++	WRITE_ONCE(s->valid_end, 0);
++	p->pointer_pos = 0;
++	p->last_period = 0;
++	/* (Last: the host takes the words above when it sees a new generation.) */
++	smp_store_release(&s->generation, s->generation + 1);
++	spin_unlock_irq(&p->lock);
++	return 0;
++}
++
++static int wasm_audio_trigger(struct snd_pcm_substream *substream, int cmd)
++{
++	struct wasm_audio_pcm *p = substream->runtime->private_data;
++	struct wasm_audio_stream *s = p->ring;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		spin_lock(&p->lock);
++		p->last_update = p->last_beat = ktime_get();
++		p->heartbeat = READ_ONCE(wasm_audio_hdr.heartbeat);
++		p->clock_ns = 0;
++		smp_store_release(&s->state, WASM_AUDIO_RUNNING);
++		atomic_set(&p->running, 1);
++		spin_unlock(&p->lock);
++		hrtimer_start(&p->timer, p->period_time, HRTIMER_MODE_REL_SOFT);
++		return 0;
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		atomic_set(&p->running, 0);
++		WRITE_ONCE(s->state, cmd == SNDRV_PCM_TRIGGER_PAUSE_PUSH ? WASM_AUDIO_PAUSED : WASM_AUDIO_STOPPED);
++		/* (Not waiting here, in the timer itself when an underrun stops it: sync_stop does.) */
++		hrtimer_try_to_cancel(&p->timer);
++		return 0;
++	}
++	return -EINVAL;
++}
++
++static int wasm_audio_sync_stop(struct snd_pcm_substream *substream)
++{
++	struct wasm_audio_pcm *p = substream->runtime->private_data;
++
++	hrtimer_cancel(&p->timer);
++	synchronize_irq(WASM_IRQ_AUDIO);
++	return 0;
++}
++
++static snd_pcm_uframes_t wasm_audio_pointer(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct wasm_audio_pcm *p = runtime->private_data;
++	u32 latency = READ_ONCE(wasm_audio_hdr.latency_us), pos;
++	u64 at;
++
++	spin_lock(&p->lock);
++	if (atomic_read(&p->running))
++		at = wasm_audio_advance(p, runtime);
++	else
++		at = READ_ONCE(p->ring->consumed) - READ_ONCE(p->ring->base);
++	p->pointer_pos = at;
++	spin_unlock(&p->lock);
++	/* What the browser has taken is not yet heard: the rest of the way, for programs that keep picture and sound together. */
++	runtime->delay = READ_ONCE(wasm_audio_hdr.host_state) == WASM_AUDIO_PLAYING ?
++			 div_u64((u64)latency * runtime->rate, USEC_PER_SEC) : 0;
++	div_u64_rem(at, runtime->buffer_size, &pos);
++	return pos;
++}
++
++/* The program has written (or taken back) samples: tell the host up to where the ring holds sound. */
++static int wasm_audio_ack(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct wasm_audio_pcm *p = runtime->private_data;
++	snd_pcm_sframes_t queued = snd_pcm_playback_hw_avail(runtime);
++
++	spin_lock(&p->lock);
++	WRITE_ONCE(p->ring->valid_end, p->pointer_pos + (queued > 0 ? queued : 0));
++	spin_unlock(&p->lock);
++	return 0;
++}
++
++static const struct snd_pcm_ops wasm_audio_ops = {
++	.open = wasm_audio_open,
++	.close = wasm_audio_close,
++	.prepare = wasm_audio_prepare,
++	.trigger = wasm_audio_trigger,
++	.sync_stop = wasm_audio_sync_stop,
++	.pointer = wasm_audio_pointer,
++	.ack = wasm_audio_ack,
++};
++
++/* The mixer: the host applies it. */
++
++static const DECLARE_TLV_DB_SCALE(wasm_audio_db_scale, WASM_AUDIO_DB_MIN, WASM_AUDIO_DB_STEP, 1);
++
++static int wasm_audio_volume_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = WASM_AUDIO_VOLUME_MAX;
++	return 0;
++}
++
++static int wasm_audio_volume_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *value)
++{
++	value->value.integer.value[0] = READ_ONCE(wasm_audio_hdr.volume);
++	return 0;
++}
++
++static int wasm_audio_volume_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *value)
++{
++	long v = value->value.integer.value[0];
++
++	if (v < 0 || v > WASM_AUDIO_VOLUME_MAX)
++		return -EINVAL;
++	if (v == READ_ONCE(wasm_audio_hdr.volume))
++		return 0;
++	WRITE_ONCE(wasm_audio_hdr.volume, v);
++	return 1;
++}
++
++static int wasm_audio_switch_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *value)
++{
++	value->value.integer.value[0] = READ_ONCE(wasm_audio_hdr.unmuted);
++	return 0;
++}
++
++static int wasm_audio_switch_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *value)
++{
++	u32 on = !!value->value.integer.value[0];
++
++	if (on == READ_ONCE(wasm_audio_hdr.unmuted))
++		return 0;
++	WRITE_ONCE(wasm_audio_hdr.unmuted, on);
++	return 1;
++}
++
++static const struct snd_kcontrol_new wasm_audio_controls[] = {
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "Master Playback Volume",
++		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE | SNDRV_CTL_ELEM_ACCESS_TLV_READ,
++		.info = wasm_audio_volume_info,
++		.get = wasm_audio_volume_get,
++		.put = wasm_audio_volume_put,
++		.tlv = { .p = wasm_audio_db_scale },
++	},
++	{
++		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++		.name = "Master Playback Switch",
++		.info = snd_ctl_boolean_mono_info,
++		.get = wasm_audio_switch_get,
++		.put = wasm_audio_switch_put,
++	},
++};
++
++static int __init wasm_audio_init(void)
++{
++	struct platform_device *pdev;
++	struct snd_card *card;
++	struct snd_pcm *pcm;
++	bool irq;
++	int err;
++
++	wasm_audio_hdr.version = WASM_AUDIO_VERSION;
++	wasm_audio_hdr.streams = WASM_AUDIO_STREAMS;
++	wasm_audio_hdr.stream_size = sizeof(struct wasm_audio_stream);
++	wasm_audio_hdr.stream_offset = offsetof(struct wasm_audio_header, stream);
++	wasm_audio_hdr.volume = WASM_AUDIO_VOLUME_MAX;
++	wasm_audio_hdr.volume_max = WASM_AUDIO_VOLUME_MAX;
++	wasm_audio_hdr.db_min = WASM_AUDIO_DB_MIN;
++	wasm_audio_hdr.db_step = WASM_AUDIO_DB_STEP;
++	wasm_audio_hdr.unmuted = 1;
++	wasm_audio_hdr.irq = WASM_IRQ_AUDIO;
++	for (int i = 0; i < WASM_AUDIO_STREAMS; i++) {
++		struct wasm_audio_pcm *p = &wasm_audio_pcms[i];
++
++		spin_lock_init(&p->lock);
++		p->ring = &wasm_audio_hdr.stream[i];
++		hrtimer_setup(&p->timer, wasm_audio_tick, CLOCK_MONOTONIC, HRTIMER_MODE_REL_SOFT);
++	}
++
++	/* (A device on a bus, as the frame buffer has one: sound servers look for the card's in sysfs.) */
++	pdev = platform_device_register_simple("wasm-audio", -1, NULL, 0);
++	if (IS_ERR(pdev))
++		return PTR_ERR(pdev);
++	err = snd_card_new(&pdev->dev, -1, "Wasm", THIS_MODULE, 0, &card);
++	if (err < 0)
++		goto fail_device;
++	strscpy(card->driver, "WasmAudio");
++	strscpy(card->shortname, "Wasm audio");
++	strscpy(card->longname, "Wasm audio (the browser's Web Audio)");
++	strscpy(card->mixername, "Wasm audio");
++
++	err = snd_pcm_new(card, "Wasm audio", 0, WASM_AUDIO_STREAMS, 0, &pcm);
++	if (err < 0)
++		goto fail_card;
++	strscpy(pcm->name, "Wasm audio");
++	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &wasm_audio_ops);
++	/* Allocated when a program sets its parameters, up to this. */
++	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS, NULL, 0, WASM_AUDIO_BUFFER_MAX);
++
++	for (int i = 0; i < ARRAY_SIZE(wasm_audio_controls); i++) {
++		err = snd_ctl_add(card, snd_ctl_new1(&wasm_audio_controls[i], NULL));
++		if (err < 0)
++			goto fail_card;
++	}
++
++	err = request_irq(WASM_IRQ_AUDIO, wasm_audio_interrupt, 0, "wasm-audio", NULL);
++	irq = !err;
++	if (err)
++		pr_warn("wasm-audio: no interrupt (%d): periods are told by a timer only\n", err);
++
++	err = snd_card_register(card);
++	if (err < 0)
++		goto fail_irq;
++	/* (Last: the host takes the header from here on.) */
++	smp_store_release(&wasm_audio_hdr.magic, WASM_AUDIO_MAGIC);
++	return 0;
++
++fail_irq:
++	if (irq)
++		free_irq(WASM_IRQ_AUDIO, NULL);
++fail_card:
++	snd_card_free(card);
++fail_device:
++	platform_device_unregister(pdev);
++	return err;
++}
++device_initcall(wasm_audio_init);

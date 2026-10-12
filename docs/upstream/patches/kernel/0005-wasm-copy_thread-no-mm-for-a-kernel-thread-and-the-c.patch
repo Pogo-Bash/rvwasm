@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 5/8] wasm: copy_thread: no mm for a kernel thread, and the
+ child's fields
+
+For every kernel thread p->mm is NULL, and copy_thread() read binfmt through
+it, from the first bytes of memory (Wasm has no null page fault; every stray
+NULL write of any program on the machine lands there too). When that word
+was 0 it then wrote zeroes through current->mm, NULL again for kthreadd.
+The fields meant are the child's.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/kernel/process.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/arch/wasm/kernel/process.c b/arch/wasm/kernel/process.c
+index 7cfbbd7..d50fc8b 100644
+--- a/arch/wasm/kernel/process.c
++++ b/arch/wasm/kernel/process.c
+@@ -236,13 +236,14 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 			child_switch_stack->tls = args->tls;
+ 	}
+ 
+-	if (!p->mm->binfmt) {
++	/* (A kernel thread has no mm; the fields are the child's, not ours.) */
++	if (p->mm && !p->mm->binfmt) {
+ 		/* These are normally not zeroed out in copy_process(). */
+-		current->mm->start_code = 0;
+-		current->mm->end_code = 0;
+-		current->mm->start_stack = 0;
+-		current->mm->start_data = 0;
+-		current->mm->end_data = 0;
++		p->mm->start_code = 0;
++		p->mm->end_code = 0;
++		p->mm->start_stack = 0;
++		p->mm->start_data = 0;
++		p->mm->end_data = 0;
+ 	}
+ 
+ 	return user_task_set_affinity(p);

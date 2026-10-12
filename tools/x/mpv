@@ -1,0 +1,20 @@
+#!/bin/sh
+# mpv on this machine (the release image's /usr/local/bin/mpv, ahead of Debian's /usr/bin/mpv in the PATH): inside
+# the desktop, with the page's GPU as a device (rv's render node, RV_VIRTGPU) and the page's video decoder through
+# VA-API (rvwasm_drv_video.so: the browser's WebCodecs), as `RVGPU=1 RVGPU_DRM=1 desktop wayland mpv` gives them, so
+# that a plain `mpv FILE` (Konsole, the launcher, Dolphin) decodes in the browser. /etc/mpv/mpv.conf asks for
+# hwdec=vaapi and OpenGL ES (virgl's desktop OpenGL is 2.1, whose GLSL is too old for mpv's better scalers).
+# Without the GPU server (no desktop, RVGPU=0, no executor in the page) it is Debian's mpv as it is; RVVDEC=0: no
+# page decoder. RV_CRASH_MAPS=1: if it ever dies of a fault, rv prints where (pc, ra and the mappings).
+r=${XDG_RUNTIME_DIR:-/tmp/runtime-root}
+if [ -z "$RV_VIRTGPU" ] && [ "$RVGPU" != 0 ] && [ -S "$r/rvgpu-0" ] && [ -f "$r/rvgpu-0.ready" ]; then
+	export RV_VIRTGPU="$r/rvgpu-0"
+	unset QT_QUICK_BACKEND LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER VTEST_SOCKET_NAME
+	if [ "$RVVDEC" != 0 ] && [ -z "$LIBVA_DRIVER_NAME" ] && grep -q '"vdec"' "$r/rvgpu-0.ready" 2> /dev/null; then
+		va=/run/rvgpu/va
+		[ -e "$va/rvwasm_drv_video.so" ] || va=/usr/lib/riscv64-linux-gnu/dri
+		export LIBVA_DRIVER_NAME=rvwasm LIBVA_DRIVERS_PATH=$va
+	fi
+fi
+export RV_CRASH_MAPS=${RV_CRASH_MAPS:-1}
+exec /usr/bin/mpv "$@"

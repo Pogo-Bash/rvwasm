@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 8/8] wasm: sys_mmap takes the offset in 4 KiB units, whatever
+ the page size
+
+The comment said the 64-bit mmap takes the offset in bytes, but the argument
+went to ksys_mmap_pgoff() as pages. musl makes SYS_mmap2 (number 222, which
+on a 64-bit kernel is this sys_mmap) with off / 4096 on both widths, so the
+two agreed only while PAGE_SIZE is 4096; with the 64 KiB pages the Kconfig
+offers, every offset was 16 times too large. Shift as mmap2 does.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/kernel/sys_wasm.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/arch/wasm/kernel/sys_wasm.c b/arch/wasm/kernel/sys_wasm.c
+index 35aa007..d7f337a 100644
+--- a/arch/wasm/kernel/sys_wasm.c
++++ b/arch/wasm/kernel/sys_wasm.c
+@@ -3,12 +3,20 @@
+ #include <linux/syscalls.h>
+ 
+ #ifdef CONFIG_64BIT
+-// SYS_mmap(): 64-bit mmap, with file offset counted in bytes.
++/*
++ * SYS_mmap(): 64-bit mmap. This is the system call number 32-bit kernels
++ * call mmap2, and the C library makes it the same way on both: with the file
++ * offset counted in blocks of 4096 bytes (musl's SYS_mmap2, off / 4096). The
++ * kernel's pgoff is in pages, which are 4096 bytes only by default.
++ */
+ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
+ 	unsigned long, prot, unsigned long, flags, unsigned long, fd,
+-	unsigned long, pgoff)
++	unsigned long, off_4k)
+ {
+-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff);
++	if (off_4k & ((1UL << (PAGE_SHIFT - 12)) - 1))
++		return -EINVAL;
++	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
++			       off_4k >> (PAGE_SHIFT - 12));
+ }
+ #endif
+ 

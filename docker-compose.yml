@@ -1,0 +1,156 @@
+# The machine in a browser, served by Docker (README.md "Run it", docs/docker.md).
+#
+#   docker compose up        then open http://localhost:8080/   (the landing page; its Start button, or
+#                            http://localhost:8080/desktop, boots the machine and the KDE desktop starts by itself)
+#
+# fetch   one-shot, before www: checks that the dist is there (${RV_DIST:-./dist}: docker/release.sh makes it),
+#         or downloads one from RV_RELEASE_URL (a tar archive of a dist) into it
+# www     the page's server (docker/serve.py: COOP/COEP, no caching) with the page, the kernel, the boot image
+#         and the disks of the dist, mounted read-only; it tells the page the relay's port and the disk
+#         (rv-site.json), so the address needs neither ?net= nor ?disk=
+# relay   the machine's network (tools/net-relay.py), with its TAP device and address translation
+#         (tools/net-setup.sh) in its own container: NET_ADMIN and /dev/net/tun, in this container only
+# Both are published on this computer's 127.0.0.1 only. Ports: RV_HTTP_PORT (8080), RV_NET_PORT (8081).
+#
+# Optional, off unless their profile is named:
+#   docker compose --profile public up -d      the public site: Caddy on 80/443 with a Let's Encrypt certificate for
+#                                              $RV_DOMAIN (docs/deploy.md); the relay is then in RV_NET_MODE=allowlist
+#                                              (the default) and RV_ORIGINS must say https://$RV_DOMAIN
+#   docker compose --profile blender up        Puter's Blender on :8040 (blenderweb/)
+#   docker compose --profile build run --rm build [STEP...]          build from source (docker/build.sh)
+#   docker compose --profile build run --rm build-debian STEP...     the Debian roots and disks (privileged)
+
+name: rvwasm
+
+x-run: &run
+  image: rvwasm-run:latest
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.run
+    target: run
+  restart: unless-stopped
+
+x-build: &build
+  image: rvwasm-build:latest
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.build
+    args:
+      JOBS: ${RV_JOBS:-6}
+      LLVM_JOBS: ${RV_LLVM_JOBS:-6}
+  profiles: [build]
+  mem_limit: ${RV_BUILD_MEM:-8g}
+  environment:
+    JOBS: ${RV_BUILD_JOBS:-6}
+    RV_DISKS: ${RV_DISKS-daily home}
+    RV_DEBIAN_ROOT: /debian-root
+    NQ_SYSROOT: /nq-sysroot
+  volumes:
+    - .:/src
+    - work:/work
+    - ${RV_DIST:-./dist}:/dist
+    # A Debian root with Node (hostnode takes Node's library out of it) and the nativeqt build (the release
+    # step's native plasmashell), from outside the volume when they were built there (docker/release.sh says
+    # which); empty directories otherwise.
+    - ${RV_DEBIAN_ROOT_DIR:-./docker/empty}:/debian-root:ro
+    - ${RV_NQ_SYSROOT_DIR:-./docker/empty}:/nq-sysroot:ro
+
+services:
+  fetch:
+    <<: *run
+    command: ["/opt/rvwasm/fetch.sh"]
+    restart: "no"
+    environment:
+      RV_RELEASE_URL: ${RV_RELEASE_URL:-}
+      RV_DIST: ${RV_DIST:-./dist}
+      RV_DISK: ${RV_DISK-release}
+    volumes:
+      - ${RV_DIST:-./dist}:/dist
+
+  www:
+    <<: *run
+    user: rv
+    command: ["python3", "/opt/rvwasm/serve.py", "--dist", "/dist", "--port", "8000",
+              "--net-port", "${RV_NET_PORT:-8081}", "--disk", "${RV_DISK-release}", "--dns", "10.0.5.1"]
+    depends_on:
+      fetch:
+        condition: service_completed_successfully
+    volumes:
+      - ${RV_DIST:-./dist}:/dist:ro
+      - ./site:/site:ro
+    ports:
+      - "127.0.0.1:${RV_HTTP_PORT:-8080}:8000"
+
+  relay:
+    <<: *run
+    command: ["/opt/rvwasm/relay.sh"]
+    environment:
+      RV_HTTP_PORT: ${RV_HTTP_PORT:-8080}
+      RV_ORIGINS: "${RV_ORIGINS:-} https://${RV_DOMAIN:-localhost}"
+      RV_NET_MODE: ${RV_NET_MODE:-allowlist}
+      RV_MAX_CLIENTS: ${RV_MAX_CLIENTS:-40}
+      RV_MAX_PER_IP: ${RV_MAX_PER_IP:-2}
+      RV_DNS_LOG: ${RV_DNS_LOG:-0}
+    volumes:
+      # the allowlist of the public relay: edit it, then `docker compose exec relay /opt/rvwasm/allowlist-reload.sh`
+      - ./docker/allowlist.txt:/etc/rvwasm/allowlist.txt:ro
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: 1
+    ports:
+      - "127.0.0.1:${RV_NET_PORT:-8081}:8001"
+
+  # The public site (docs/deploy.md): HTTPS with Let's Encrypt in front of the dist and the relay. Only this publishes
+  # ports on the host's addresses (80 and 443); `docker compose --profile public up -d`, with RV_DOMAIN in .env.
+  caddy:
+    image: caddy:2.10-alpine
+    profiles: [public]
+    restart: unless-stopped
+    depends_on:
+      fetch:
+        condition: service_completed_successfully
+      relay:
+        condition: service_started
+    environment:
+      RV_DOMAIN: ${RV_DOMAIN:-localhost}
+      RV_ALT_DOMAINS: ${RV_ALT_DOMAINS:-}
+      RV_WWW_DOMAIN: ${RV_WWW_DOMAIN:-www.localhost}
+      RV_DISK: ${RV_DISK-release}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${RV_DIST:-./dist}:/dist:ro
+      - ./site:/site:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "${RV_PUBLIC_HTTP_PORT:-80}:80"
+      - "${RV_PUBLIC_HTTPS_PORT:-443}:443"
+
+  blender:
+    image: rvwasm-blender:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.run
+      target: blender
+    profiles: [blender]
+    volumes:
+      - blender:/data
+    ports:
+      - "127.0.0.1:${RV_BLENDER_PORT:-8040}:8040"
+    restart: unless-stopped
+
+  build:
+    <<: *build
+
+  build-debian:
+    <<: *build
+    privileged: true   # debootstrap and chroot: mounts, device nodes
+    command: ["debian"]
+
+volumes:
+  work:
+  blender:
+  caddy-data:
+  caddy-config:

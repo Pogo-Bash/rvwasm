@@ -1,0 +1,127 @@
+#!/bin/bash
+# clang for native linux-wasm programs (wasm64, musl, PIC, threads, Wasm exceptions).
+# As tools/wasm-cc and linux-wasm's fake-llvm, without the Python in between, and for C++ too
+# (named nq-clang++ it is the C++ compiler, with our libc++).
+# A link (no -c/-S/-E) makes a linux-wasm executable: a "shared" Wasm module (dylink.0, imported
+# memory and table) that binfmt_wasm loads; -shared in the arguments is taken as that too.
+: "${NQ_SYSROOT:=$HOME/rvwasm/nativeqt/sysroot}"
+: "${NQ_LLVM:=$HOME/rvwasm/linux-wasm/workspace/install/llvm/bin}"
+cxx=0
+case "$0" in *++) cxx=1 ;; esac
+
+args=(--target=wasm64-unknown-unknown --sysroot="$NQ_SYSROOT"
+	-D__linux__ -D__unix__ -D__unix -D__USING_WASM_EXCEPTIONS__
+	-Xclang -target-feature -Xclang +atomics -Xclang -target-feature -Xclang +bulk-memory
+	-Xclang -target-feature -Xclang +mutable-globals -Xclang -target-feature -Xclang +sign-ext
+	-fPIC -pthread -fwasm-exceptions)
+# setjmp/longjmp that work (crt/nqsjlj.c): LLVM's Wasm SjLj lowering, on Wasm exception handling.
+args+=(-mllvm -wasm-enable-sjlj)
+# Our libc++'s headers, unless the command brings its own (libc++'s own build does, with -nostdinc++).
+case " $* " in *" -nostdinc++ "*) ;; *) [ $cxx = 1 ] && args+=(-nostdinc++ -isystem "$NQ_SYSROOT/usr/include/c++/v1") ;; esac
+args+=(-isystem "$NQ_SYSROOT/usr/include")
+
+link=1
+out=()
+for a in "$@"; do
+	case "$a" in
+	-c|-S|-E|-M|-MM|-fsyntax-only) link=0 ;;
+	esac
+	case "$a" in
+	-shared|-rdynamic|-Wl,--no-undefined|-Wl,-z,defs|-Wl,--as-needed|-Wl,--no-as-needed) ;;  # meaningless here
+	-Wl,--start-group|-Wl,--end-group|-Wl,-soname,*|-Wl,--version-script*|-Wl,-O1|-Wl,--enable-new-dtags|-Wl,-rpath*|-Wl,-rpath-link*) ;;
+	*) out+=("$a") ;;
+	esac
+done
+# A bare `clang --version` or -v: pass through.
+[ $# -eq 0 ] && exec "$NQ_LLVM/clang" --version
+
+if [ $link = 1 ]; then
+	# A position independent executable (wasm-ld -pie): dylink.0 for binfmt_wasm, memory and table
+	# imported, but every symbol bound inside the module (with -shared, weak definitions such as
+	# operator new and the C++ exception tag would be imported from a host that has none).
+	lflags=(-nostdlib "$NQ_SYSROOT/usr/lib/crt1.o" "$NQ_SYSROOT/usr/lib/nqstart.o")
+	post=()
+	# A static library's own dependencies, which a build system that knows only the library's name (Qt's
+	# FindEGL, a configure test) would not give: $NQ_SYSROOT/usr/lib/nq-deps/NAME lists what -lNAME (or
+	# .../libNAME.a) needs after it (written by the build script that installed it, e.g. build-mesa.sh).
+	deps=()
+	# (Big links come with their inputs in a response file, @FILE: those are looked at too.)
+	scan=()
+	for a in "${out[@]}"; do
+		case "$a" in
+		@*) [ -f "${a#@}" ] && scan+=($(tr -d "'\"" < "${a#@}")) ;;
+		*) scan+=("$a") ;;
+		esac
+	done
+	for a in "${scan[@]}"; do
+		n=
+		case "$a" in
+		-l*) n=${a#-l} ;;
+		*/lib*.a) n=${a##*/lib}; n=${n%.a} ;;
+		esac
+		[ -n "$n" ] && [ -f "$NQ_SYSROOT/usr/lib/nq-deps/$n" ] && deps+=($(cat "$NQ_SYSROOT/usr/lib/nq-deps/$n"))
+	done
+	post+=("${deps[@]}")
+	[ $cxx = 1 ] || case " ${deps[*]} " in *" -lc++ "*) cxx=1 ;; esac
+	[ $cxx = 1 ] && post+=(-lc++ -lc++abi -lunwind)
+	post+=(-lnqcrt -lc "$NQ_LLVM/../lib/clang/18/lib/libclang_rt.builtins-wasm64.a")
+	# Only what the runtime calls (linux-worker.js): V8 takes at most 100000 exports, fewer than the
+	# functions of a program with Qt and KDE's libraries in it (--export-all, as tools/wasm-cc).
+	# Not __wasm_call_ctors: the runtime would call it before libc is up (crt/nqstart.c).
+	exports=()
+	for e in _start __set_tls_base __libc_clone_callback __wasm_apply_data_relocs __libc_handle_signal; do
+		exports+=(-Wl,--export-if-defined=$e)
+	done
+	o=a.out
+	prev=
+	for a in "${out[@]}"; do [ "$prev" = -o ] && o=$a; prev=$a; done
+	"$NQ_LLVM/clang" "${args[@]}" -L"$NQ_SYSROOT/usr/lib" "${lflags[@]}" "${out[@]}" "${post[@]}" \
+		-Wl,-mwasm64 -Wl,--experimental-pic -Wl,-pie -Wl,--no-merge-data-segments -Wl,--no-entry "${exports[@]}" \
+		-Wl,--import-memory -Wl,--shared-memory -Wl,--max-memory=17179869184 \
+		-Wl,--import-table -Wl,--gc-sections -Wl,--error-limit=0 \
+		2> >(grep -v -E 'creating shared libraries|signature mismatch: main$|^>>> defined as|^$' >&2) || exit
+	# wasm-ld (this toolchain's) imports what is undefined instead of failing, and an import the
+	# runtime does not give fails only when the program starts. Fail the link here instead, so
+	# that configure checks see a missing function as missing.
+	bad=$(python3 "$(dirname "$0")/../wasm-imports.py" "$o" | grep -v -E '^env\.(memory|__indirect_function_table|__stack_pointer|__memory_base|__table_base|__table_base32|__wasm_abort|__wasm_syscall_[0-6]|__rv_jit_install|__run_js) ' | grep -v -E "${NQ_ALLOW_IMPORTS:-^\$}")
+	if [ -n "$bad" ]; then
+		echo "nq-clang: undefined symbols (not given by the runtime):" >&2
+		echo "$bad" | head -50 | sed 's/^env\./  /' >&2
+		rm -f "$o"
+		exit 1
+	fi
+	exit 0
+fi
+# Compile. This LLVM 18's WebAssembly CFG Stackify pass can crash (an assertion in getBranchDepth) on
+# functions with exception handling at -O1 and above; such a file is compiled again at -O0 (without the
+# precompiled header, which was made optimised), and the file is noted in $NQ/logs/o0-fallback.txt.
+err=$(mktemp)
+# NQ_CFLAGS_LAST: flags that must come after the build system's own (e.g. -Wno-error=format: this musl's
+# PRIu64 is "lu" where its uint64_t is unsigned long long, which -Werror=format refuses).
+"$NQ_LLVM/clang" "${args[@]}" "${out[@]}" $NQ_CFLAGS_LAST 2> "$err"
+rc=$?
+if [ $rc -ne 0 ] && grep -q "WebAssemblyCFGStackify" "$err"; then
+	retry=()
+	skip=0
+	for a in "${out[@]}"; do
+		if [ $skip -gt 0 ]; then skip=$((skip - 1)); continue; fi
+		case "$a" in
+		-include) skip=1; continue ;;
+		-Xclang)
+			# -Xclang -include-pch -Xclang FILE / -Xclang -include -Xclang FILE
+			retry+=("$a"); continue ;;
+		*cmake_pch*) # drop the PCH argument and the -Xclang -include(-pch) -Xclang before it
+			while [ ${#retry[@]} -gt 0 ] && case "${retry[${#retry[@]}-1]}" in -Xclang|-include|-include-pch) true ;; *) false ;; esac; do
+				unset 'retry[${#retry[@]}-1]'
+			done
+			continue ;;
+		esac
+		retry+=("$a")
+	done
+	echo "$(date +%F\ %T) $PWD ${out[*]: -1}" >> "${NQ:-$HOME/rvwasm/nativeqt}/logs/o0-fallback.txt"
+	"$NQ_LLVM/clang" "${args[@]}" "${retry[@]}" -O0 $NQ_CFLAGS_LAST 2> "$err"
+	rc=$?
+fi
+cat "$err" >&2
+rm -f "$err"
+exit $rc

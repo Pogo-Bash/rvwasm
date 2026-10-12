@@ -1,0 +1,10 @@
+! xterm's defaults in the window server's desktop (tools/x/desktop points XAPPLRESDIR here), on top of
+! Debian's own /etc/X11/app-defaults/XTerm.
+!
+! The clipboard with the keys Konsole has: Ctrl-Shift-C copies the selection to the clipboard (and from there
+! to the host's), Ctrl-Shift-V pastes the clipboard (the page puts the host's clipboard there first). On a Mac,
+! Cmd-C and Cmd-V are these keys in a terminal. Selecting with the mouse and pasting with the middle button
+! (the primary selection) is xterm's own and stays as it is.
+*VT100.translations: #override \n\
+	Shift Ctrl <Key>C: copy-selection(CLIPBOARD) \n\
+	Shift Ctrl <Key>V: insert-selection(CLIPBOARD)

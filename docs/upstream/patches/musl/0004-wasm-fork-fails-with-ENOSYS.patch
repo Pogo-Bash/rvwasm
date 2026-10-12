@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:50:44 -0500
+Subject: [PATCH 4/5] wasm: fork() fails with ENOSYS
+
+The generic _Fork() makes clone(SIGCHLD) without a stack. On Wasm the
+child's Worker then calls __libc_clone_callback, which takes a function and
+its argument from the top of the parent's stack, where nobody put them: the
+child died with SIGILL ("table index is out of bounds") and the parent saw a
+fork that had succeeded. Without an MMU there is no copy of the parent to
+give a child anyway: fork() fails, as on other systems without an MMU, so
+that a program can take another way (posix_spawn(), or clone() with a
+function). __post_Fork stays (clone() uses it).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/process/wasm/_Fork.c | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+ create mode 100644 src/process/wasm/_Fork.c
+
+diff --git a/src/process/wasm/_Fork.c b/src/process/wasm/_Fork.c
+new file mode 100644
+index 0000000..587760f
+--- /dev/null
++++ b/src/process/wasm/_Fork.c
+@@ -0,0 +1,40 @@
++#include <unistd.h>
++#include <errno.h>
++#include "syscall.h"
++#include "libc.h"
++#include "lock.h"
++#include "pthread_impl.h"
++#include "aio_impl.h"
++#include "fork_impl.h"
++
++static void dummy(int x) { }
++weak_alias(dummy, __aio_atfork);
++
++void __post_Fork(int ret)
++{
++	if (!ret) {
++		pthread_t self = __pthread_self();
++		self->tid = __syscall(SYS_set_tid_address, &__thread_list_lock);
++		self->robust_list.off = 0;
++		self->robust_list.pending = 0;
++		self->next = self->prev = self;
++		__thread_list_lock = 0;
++		libc.threads_minus_1 = 0;
++		if (libc.need_locks) libc.need_locks = -1;
++	}
++	UNLOCK(__abort_lock);
++	if (!ret) __aio_atfork(1);
++}
++
++/*
++ * Without an MMU there is no copy of the parent's memory to give a child, and
++ * on Wasm nowhere in it for the child to return to either: a new task runs
++ * the C library's clone callback, with a function and its stack. fork()
++ * fails, as on other systems without an MMU (the kernel refuses such a clone
++ * as well), so that a program can take another way: posix_spawn(), or clone()
++ * with a function.
++ */
++pid_t _Fork(void)
++{
++	return __syscall_ret(-ENOSYS);
++}

@@ -1,0 +1,50 @@
+--- a/src/ksvg/private/framesvg_helpers.h
++++ b/src/ksvg/private/framesvg_helpers.h
+@@ -16,7 +16,8 @@
+ /**
+  * @returns the element id name for said @p borders
+  */
+-QString borderToElementId(FrameSvg::EnabledBorders borders)
++// nativeqt: inline (a static program links both libraries that include this header)
++inline QString borderToElementId(FrameSvg::EnabledBorders borders)
+ {
+     if (borders == FrameSvg::NoBorder) {
+         return QStringLiteral("center");
+@@ -45,7 +46,7 @@
+ /**
+  * @returns the suggested geometry for the @p borders given a @p fullSize frame size and a @p contentRect
+  */
+-QRectF sectionRect(KSvg::FrameSvg::EnabledBorders borders, const QRectF &contentRect, const QSizeF &fullSize)
++inline QRectF sectionRect(KSvg::FrameSvg::EnabledBorders borders, const QRectF &contentRect, const QSizeF &fullSize)
+ {
+     // don't use QRect corner methods here, they have semantics that might come as unexpected.
+     // prefer constructing the points explicitly. e.g. from QRect::topRight docs:
+--- a/src/declarativeimports/CMakeLists.txt
++++ b/src/declarativeimports/CMakeLists.txt
+@@ -25,3 +25,9 @@
+ )
+ 
+ ecm_finalize_qml_module(corebindingsplugin DESTINATION ${KDE_INSTALL_QMLDIR})
++
++# nativeqt: this module has its own copies of Kirigami's ManagedTextureNode and ImageTexturesCache (the
++# latter with another layout); renamed here so that a static
++# program can link both.
++target_compile_definitions(corebindingsplugin PRIVATE ManagedTextureNode=KSvgManagedTextureNode
++    ImageTexturesCache=KSvgImageTexturesCache ImageTexturesCachePrivate=KSvgImageTexturesCachePrivate)
+--- a/src/ksvg/private/imageset_p.cpp
++++ b/src/ksvg/private/imageset_p.cpp
+@@ -92,7 +92,14 @@
+     , cachesToDiscard(NoCache)
+     , isDefault(true)
+     , useGlobal(true)
++#ifdef __wasm__
++    // nativeqt: no pixmap cache on linux-wasm. KImageCache is shared memory (KSharedDataCache) that falls back
++    // to anonymous memory without an MMU, and there the cache was not emptied when the colours changed: a colour
++    // scheme applied while Plasma ran kept the old colours' pixmaps (the panel stayed light under Breeze Dark).
++    , cacheImageSet(false)
++#else
+     , cacheImageSet(true)
++#endif
+     , fixedName(false)
+     , apiMajor(1)
+     , apiMinor(0)

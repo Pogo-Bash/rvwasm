@@ -1,0 +1,9 @@
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -9,4 +9,5 @@
+ add_subdirectory(formcard)
+ add_subdirectory(delegates)
+ add_subdirectory(settings)
+-add_subdirectory(statefulapplication)
++# nativeqt: not for Plasma; its copy of KConfigWidgets' KCommandBarModel collides with it in one static binary
++# add_subdirectory(statefulapplication)

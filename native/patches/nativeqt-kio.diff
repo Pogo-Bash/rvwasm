@@ -1,0 +1,132 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -148,7 +148,7 @@
+ 
+ # Used by KMountPoint
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+-    find_package(LibMount REQUIRED)
++    find_package(LibMount)  # nativeqt: optional (no util-linux here); KMountPoint reads /proc/self/mountinfo without it
+     set(HAVE_LIB_MOUNT ${LibMount_FOUND})
+ endif()
+ 
+--- a/src/core/worker.cpp
++++ b/src/core/worker.cpp
+@@ -19,6 +19,7 @@
+ #include <QFile>
+ #include <QLibraryInfo>
+ #include <QPluginLoader>
++#include <QFileInfo>
+ #include <QProcess>
+ #include <QStandardPaths>
+ #include <QTimer>
+@@ -332,6 +333,37 @@
+         return nullptr;
+     }
+ 
++    // nativeqt: a static program has its workers as static plugins (also in Qt's list of them, by their
++    // IID org.kde.kio.worker.NAME): run in a thread of the program, as kio_file always is, there being no
++    // plugin file for kioworker to load.
++    {
++        const QString iid = QLatin1String("org.kde.kio.worker.") + QFileInfo(_name).fileName().remove(QLatin1String("kio_"));
++        const auto statics = QPluginLoader::staticPlugins();
++        for (const QStaticPlugin &plugin : statics) {
++            if (plugin.metaData().value(QLatin1String("IID")).toString() != iid) {
++                continue;
++            }
++            auto *factory = qobject_cast<WorkerFactory *>(plugin.instance());
++            if (!factory) {
++                error_text = i18n("The KIO worker for protocol '%1' cannot run in this program's threads.", protocol);
++                error = KIO::ERR_CANNOT_CREATE_WORKER;
++                return nullptr;
++            }
++            auto *worker = new Worker(protocol);
++            const QUrl workerAddress = worker->m_workerConnServer->address();
++            if (workerAddress.isEmpty()) {
++                error_text = i18n("Can not create a socket for launching a KIO worker for protocol '%1'.", protocol);
++                error = KIO::ERR_CANNOT_CREATE_WORKER;
++                delete worker;
++                return nullptr;
++            }
++            auto *thread = new WorkerThread(worker, factory, workerAddress.toString().toLocal8Bit());
++            thread->start();
++            worker->setWorkerThread(thread);
++            return worker;
++        }
++    }
++
+     // find the KIO worker using QPluginLoader; kioworker would do this
+     // anyway, but if it doesn't exist, we want to be able to return
+     // a useful error message immediately
+--- a/src/kioworkers/file/file.cpp
++++ b/src/kioworkers/file/file.cpp
+@@ -53,7 +53,8 @@
+ 
+ Q_LOGGING_CATEGORY(KIO_FILE, "kf.kio.workers.file")
+ 
+-class KIOPluginFactory : public KIO::WorkerFactory
++// nativeqt: named as kcoreaddons_add_plugin names a plugin's factory (static plugins are found by it)
++class kio_file_factory : public KIO::WorkerFactory
+ {
+     Q_OBJECT
+     Q_PLUGIN_METADATA(IID "org.kde.kio.worker.file" FILE "file.json")
+@@ -71,6 +72,7 @@
+ 
+ static QString readLogFile(const QByteArray &_filename);
+ 
++#ifndef QT_STATICPLUGIN // nativeqt: a static worker runs in the program's threads, no kdemain (one per worker)
+ extern "C" Q_DECL_EXPORT int kdemain(int argc, char **argv)
+ {
+     QCoreApplication app(argc, argv); // needed for QSocketNotifier
+@@ -93,6 +95,7 @@
+     // qDebug() << "Done";
+     return 0;
+ }
++#endif
+ 
+ static QFile::Permissions modeToQFilePermissions(int mode)
+ {
+--- a/src/kioworkers/trash/kio_trash.cpp
++++ b/src/kioworkers/trash/kio_trash.cpp
+@@ -32,6 +32,22 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
++#ifdef QT_STATICPLUGIN
++// nativeqt: a static worker is a factory the program runs in a thread of its own (patches/nativeqt-kio.diff),
++// named as kcoreaddons_add_plugin names a plugin's factory (static plugins are found by it)
++#include <KIO/WorkerFactory>
++class kio_trash_factory : public KIO::WorkerFactory
++{
++    Q_OBJECT
++    Q_PLUGIN_METADATA(IID "org.kde.kio.worker.trash" FILE "trash.json")
++
++public:
++    std::unique_ptr<KIO::WorkerBase> createWorker(const QByteArray &pool, const QByteArray &app) override
++    {
++        return std::make_unique<TrashProtocol>(QByteArrayLiteral("trash"), pool, app);
++    }
++};
++#else
+ // Pseudo plugin class to embed meta data
+ class KIOPluginForMetaData : public QObject
+ {
+@@ -52,6 +68,7 @@
+     return 0;
+ }
+ }
++#endif
+ 
+ static bool isTopLevelEntry(const QUrl &url)
+ {
+--- a/src/filewidgets/knewfilemenu.cpp
++++ b/src/filewidgets/knewfilemenu.cpp
+@@ -997,6 +997,9 @@
+ 
+ void KNewFileMenuPrivate::slotFillTemplates()
+ {
++    // nativeqt: a static program drops the template resource's object file (nothing references it): no Folder,
++    // no Text File, no links in "Create New" on the desktop.
++    Q_INIT_RESOURCE(templates);
+     KNewFileMenuSingleton *instance = kNewMenuGlobals();
+     // qDebug();
+ 

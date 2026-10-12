@@ -1,0 +1,117 @@
+#!/bin/sh
+# `debian` on the Linux/Wasm system: enter the Debian riscv64 system in /debian
+# (tools/build-debian-image.sh). Without arguments, a login shell; with
+# arguments, that command line, run by Debian's bash.
+#
+# This script and chroot are native Wasm programs; everything from /usr/bin/env
+# on is riscv64, started through binfmt_misc and run by /bin/rv.
+
+D=/debian
+if [ ! -x $D/usr/bin/bash ]; then
+	echo "debian: no Debian system here (load the page with ?disk=debian-x or ?image=debian)" >&2
+	exit 1
+fi
+
+# The desktop is in the image that has X, not in the plain one.
+if [ "$1" = desktop ] && [ ! -x $D/usr/local/bin/desktop ]; then
+	echo "debian: this system has no X (load the page with ?disk=debian-x or ?image=debian-x)" >&2
+	exit 1
+fi
+
+# The first time: what a chroot does not bring along.
+if [ ! -e $D/proc/self ]; then
+	mount -t proc none $D/proc
+	mount -t sysfs none $D/sys
+	# In memory, also when the system is on a disk: what is here does not
+	# outlive the machine.
+	mount -t tmpfs none $D/dev
+	mount -t tmpfs none $D/run
+	mount -t tmpfs -o mode=1777 none $D/tmp
+	while read -r name major minor; do
+		mknod -m 666 $D/dev/$name c $major $minor
+	done <<-END
+		null 1 3
+		zero 1 5
+		full 1 7
+		random 1 8
+		urandom 1 9
+		tty 5 0
+		ptmx 5 2
+		fb0 29 0
+		tty0 4 0
+		tty1 4 1
+		tty2 4 2
+		tty3 4 3
+		tty4 4 4
+		tty5 4 5
+		tty6 4 6
+		tty7 4 7
+		tty8 4 8
+	END
+	mkdir -p $D/dev/input $D/dev/pts $D/dev/shm
+	mknod -m 660 $D/dev/input/event0 c 13 64
+	mknod -m 660 $D/dev/input/event1 c 13 65
+	mknod -m 660 $D/dev/input/event2 c 13 66	# the host's doorbell (wasm_input.c, wlserver/seat.js)
+	mount -t devpts none $D/dev/pts
+	# The sound card, as /init made it.
+	if [ -d /dev/snd ]; then
+		mkdir -p $D/dev/snd
+		cp -a /dev/snd/. $D/dev/snd/
+	fi
+	cp /etc/resolv.conf $D/etc/resolv.conf 2> /dev/null
+	# hostnode (hostnode/ in the source tree), which is on the machine's first file system, where Debian
+	# finds it: /run/hostnode/hostnode runs a Node.js program on the browser's JavaScript engine.
+	if [ -d /usr/lib/hostnode ]; then
+		mkdir -p $D/run/hostnode
+		mount -o bind /usr/lib/hostnode $D/run/hostnode
+	fi
+	# The window server (wlserver/ in the source tree): a program of the same kind, started by `desktop
+	# wayland` (tools/x/desktop) as HOSTNODE_HOME=/run/wlserver hostnode.
+	if [ -d /usr/lib/wlserver ]; then
+		mkdir -p $D/run/wlserver
+		mount -o bind /usr/lib/wlserver $D/run/wlserver
+		# The desktop script that came with it is newer than the disk's (made when the disk was): it wins.
+		if [ -f /usr/lib/wlserver/desktop ] && [ -f $D/usr/local/bin/desktop ]; then
+			mount -o bind /usr/lib/wlserver/desktop $D/usr/local/bin/desktop
+		fi
+	fi
+	# The GPU server (gpu/server/ in the source tree): the same kind again, started by `desktop wayland`
+	# when RVGPU=1 as HOSTNODE_HOME=/run/rvgpu hostnode (gpu/PROTOCOL.md).
+	if [ -d /usr/lib/rvgpu ]; then
+		mkdir -p $D/run/rvgpu
+		mount -o bind /usr/lib/rvgpu $D/run/rvgpu
+	fi
+	# hostopen (hostopen/ in the source tree): web addresses to the browser the machine runs in. Its bin/ is
+	# first in the PATH below: xdg-open, kde-open, x-www-browser and www-browser there send http and https
+	# addresses to the host and hand everything else to Debian's programs of the same name.
+	if [ -d /usr/lib/hostopen ]; then
+		mkdir -p $D/run/hostopen
+		mount -o bind /usr/lib/hostopen $D/run/hostopen
+	fi
+	ln -s /proc/self/fd $D/dev/fd
+	ln -s /proc/self/fd/0 $D/dev/stdin
+	ln -s /proc/self/fd/1 $D/dev/stdout
+	ln -s /proc/self/fd/2 $D/dev/stderr
+fi
+
+set -- "$@"
+# The time zone of the person at the page (tz=ZONE on the kernel's command line), if Debian knows it.
+ZONE=
+read -r cmdline < /proc/cmdline
+for arg in $cmdline; do
+	case $arg in
+	tz=*) [ -e "$D/usr/share/zoneinfo/${arg#tz=}" ] && ZONE="TZ=${arg#tz=}" ;;
+	esac
+done
+# For Firefox: its processes cannot be confined the way it does that (kernel
+# namespaces and system call filters, which there are none of here), and it
+# has no one to report a crash to.
+MOZILLA="MOZ_DISABLE_CONTENT_SANDBOX=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1 MOZ_DISABLE_UTILITY_SANDBOX=1 MOZ_CRASHREPORTER_DISABLE=1"
+# Web addresses go to the host's browser (hostopen above): $BROWSER for the programs that ask it
+# (sensible-browser, Python's webbrowser, git), the PATH for those that run xdg-open and the like.
+HOSTOPEN="BROWSER=/run/hostopen/bin/rv-host-open"
+ENV="$MOZILLA $ZONE $HOSTOPEN HOME=/root SHELL=/bin/bash USER=root LOGNAME=root TERM=${TERM:-xterm} LANG=C.UTF-8 PATH=/run/hostopen/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games"
+if [ $# -eq 0 ]; then
+	exec chroot $D /usr/bin/env -i $ENV /bin/bash -l
+fi
+exec chroot $D /usr/bin/env -i $ENV /bin/bash -c "$*"

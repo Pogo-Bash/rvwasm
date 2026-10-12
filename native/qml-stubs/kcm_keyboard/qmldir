@@ -1,0 +1,2 @@
+module org.kde.plasma.private.kcm_keyboard
+singleton Flags 1.0 Flags.qml

@@ -1,0 +1,24 @@
+#!/bin/sh
+# xdg-open, kde-open, x-www-browser, www-browser (links to this script in
+# /run/hostopen/bin, which is first in the PATH): an http or https address
+# goes to the host's browser (rv-host-open); anything else, and everything
+# when no page answers or `rv-host-open --off` was said, to the program of
+# that name in /usr/bin as before.
+name=${0##*/}
+real=/usr/bin/$name
+if [ $# -ge 1 ] && [ ! -e "$HOME/.config/rv-host-open/off" ]; then
+	case "$1" in
+	http://*|https://*|HTTP://*|HTTPS://*)
+		/run/hostopen/bin/rv-host-open "$1"
+		status=$?
+		[ $status -ne 3 ] && exit $status
+		echo "$name: not on the host; in the machine instead" >&2 ;;
+	esac
+fi
+if [ ! -x "$real" ]; then
+	echo "$name: no $real" >&2
+	exit 127
+fi
+# (Debian's xdg-open runs $BROWSER, which is rv-host-open: not when the address is to stay here.)
+unset BROWSER
+exec "$real" "$@"

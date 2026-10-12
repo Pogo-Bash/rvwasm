@@ -1,0 +1,164 @@
+diff --git a/src/mesa/util/detect_os.h b/src/mesa/util/detect_os.h
+index 994a1ef..f95ecd6 100644
+--- a/src/mesa/util/detect_os.h
++++ b/src/mesa/util/detect_os.h
+@@ -15,7 +15,8 @@
+ #ifndef DETECT_OS_H
+ #define DETECT_OS_H
+ 
+-#if defined(__linux__)
++/* Emscripten (the page): its libc is musl with Linux system calls emulated, so it is taken for Linux. */
++#if defined(__linux__) || defined(__EMSCRIPTEN__)
+ #define DETECT_OS_LINUX 1
+ #define DETECT_OS_UNIX 1
+ #endif
+diff --git a/src/mesa/util/os_file.c b/src/mesa/util/os_file.c
+index 5f79284..07755b7 100644
+--- a/src/mesa/util/os_file.c
++++ b/src/mesa/util/os_file.c
+@@ -191,7 +191,7 @@ os_read_file(const char *filename, size_t *size)
+    return buf;
+ }
+ 
+-#if DETECT_OS_LINUX
++#if DETECT_OS_LINUX && !defined(__EMSCRIPTEN__)
+ 
+ #include <sys/syscall.h>
+ #include <unistd.h>
+diff --git a/src/vrend_renderer.c b/src/vrend_renderer.c
+index c1f48aa..8cca9f2 100644
+--- a/src/vrend_renderer.c
++++ b/src/vrend_renderer.c
+@@ -4337,6 +4337,33 @@ static inline void vrend_fill_shader_key(struct vrend_sub_context *sub_ctx,
+                                   swizzle[3] << 9;
+          }
+       }
++#ifdef __EMSCRIPTEN__
++      /* WebGL2 has no GL_TEXTURE_SWIZZLE_*: the view's swizzle (the format's, e.g. A8 kept as R8 and read as
++       * 0, 0, 0, R, and the guest's own) is applied by the shader to what it samples. */
++      else {
++         uint16_t packed = 0;
++         bool identity = true;
++         for (int c = 0; c < 4; c++) {
++            int s;
++            switch (view->gl_swizzle[c]) {
++            case GL_RED: s = PIPE_SWIZZLE_X; break;
++            case GL_GREEN: s = PIPE_SWIZZLE_Y; break;
++            case GL_BLUE: s = PIPE_SWIZZLE_Z; break;
++            case GL_ALPHA: s = PIPE_SWIZZLE_W; break;
++            case GL_ZERO: s = PIPE_SWIZZLE_0; break;
++            case GL_ONE: s = PIPE_SWIZZLE_1; break;
++            default: s = c; break;
++            }
++            if (s != c)
++               identity = false;
++            packed |= s << (3 * c);
++         }
++         if (!identity) {
++            vrend_shader_sampler_views_mask_set(key->sampler_views_lower_swizzle_mask, i);
++            key->tex_swizzle[i] = packed;
++         }
++      }
++#endif
+    }
+ }
+ 
+@@ -7519,6 +7546,13 @@ bool vrend_check_no_error(struct vrend_context *ctx)
+ {
+    GLenum err;
+ 
++#ifdef __EMSCRIPTEN__
++   /* Called after every command: in WebGL glGetError is a round trip to the browser's GPU process each
++    * time (and waits for the work before it), which made a draw cost ~90 us. Errors are not looked for. */
++   (void)ctx;
++   (void)err;
++   return true;
++#endif
+    err = glGetError();
+    if (err == GL_NO_ERROR)
+       return true;
+@@ -9258,9 +9292,17 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
+          map_flags |= GL_MAP_UNSYNCHRONIZED_BIT;
+ 
+       glBindBufferARB(res->target, res->gl_id);
++#ifdef __EMSCRIPTEN__
++      /* WebGL has no mapped buffers (Emscripten emulates them with a copy and refuses UNSYNCHRONIZED):
++       * straight to glBufferSubData. */
++      (void)map_flags;
++      data = NULL;
++      if (data == NULL) {
++#else
+       data = glMapBufferRange(res->target, info->box->x, info->box->width, map_flags);
+       if (data == NULL) {
+          virgl_error("Map failed for element buffer\n");
++#endif
+          vrend_read_from_iovec_cb(iov, num_iovs, info->offset, info->box->width, &iov_buffer_upload, &d);
+       } else {
+          vrend_read_from_iovec(iov, num_iovs, info->offset, data, info->box->width);
+diff --git a/src/vrend_shader.c b/src/vrend_shader.c
+index 6a26fdf..a05004e 100644
+--- a/src/vrend_shader.c
++++ b/src/vrend_shader.c
+@@ -3123,6 +3123,19 @@ emit_lodq(struct dump_ctx *ctx,
+ }
+ 
+ // TODO Consider exposing non-const ctx-> members as args to make *ctx const
++#ifdef __EMSCRIPTEN__
++/* What wraps a texture() call so that the result is swizzled as the sampler view says (WebGL2 has no texture
++ * swizzle; vrend_renderer.c puts the swizzle into the key): "rv_swizzle(" and ", CODE)", or nothing. */
++static void tex_swizzle_wrap(const struct dump_ctx *ctx, int sreg, char open[32], char close[32])
++{
++   open[0] = close[0] = 0;
++   if (sreg < 0 || !vrend_shader_sampler_views_mask_get(ctx->key->sampler_views_lower_swizzle_mask, sreg))
++      return;
++   snprintf(open, 32, "rv_swizzle(");
++   snprintf(close, 32, ", %d)", ctx->key->tex_swizzle[sreg]);
++}
++#endif
++
+ static void translate_tex(struct dump_ctx *ctx,
+                           const struct tgsi_full_instruction *inst,
+                           const struct source_info *sinfo,
+@@ -3571,10 +3584,19 @@ static void translate_tex(struct dump_ctx *ctx,
+                          dinfo->dst_override_no_wm[0] ? "" : writemask);
+          }
+       } else {
++#ifdef __EMSCRIPTEN__
++         char wo[32], wc[32];
++         tex_swizzle_wrap(ctx, sinfo->sreg_index, wo, wc);
++         emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%stexture%s(%s, %s%s%s%s)%s%s));\n",
++                   dst, get_string(dinfo->dstconv), get_string(dtypeprefix), wo,
++                   tex_ext, srcs[sampler_index], srcs[0], src_swizzle,
++                   offset, bias, wc, dinfo->dst_override_no_wm[0] ? "" : writemask);
++#else
+          emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(texture%s(%s, %s%s%s%s)%s));\n",
+                    dst, get_string(dinfo->dstconv), get_string(dtypeprefix),
+                    tex_ext, srcs[sampler_index], srcs[0], src_swizzle,
+                    offset, bias, dinfo->dst_override_no_wm[0] ? "" : writemask);
++#endif
+       }
+    }
+ 
+@@ -6265,6 +6287,22 @@ static void emit_header(const struct dump_ctx *ctx, struct vrend_glsl_strbufs *g
+ 
+       emit_hdr(glsl_strbufs, "precision highp float;\n");
+       emit_hdr(glsl_strbufs, "precision highp int;\n");
++#ifdef __EMSCRIPTEN__
++      {
++         bool any = false;
++         for (unsigned i = 0; i < VREND_SHADER_SAMPLER_VIEWS_MASK_LENGTH; i++)
++            any |= ctx->key->sampler_views_lower_swizzle_mask[i] != 0;
++         if (any) {
++            /* (the code is three bits a channel: 0..3 the sample's x, y, z, w, 4 zero, 5 one) */
++            emit_hdr(glsl_strbufs, "vec4 rv_swizzle(vec4 t, int s) { float c[6] = float[6](t.x, t.y, t.z, t.w, 0.0, 1.0); "
++                     "return vec4(c[s & 7], c[(s >> 3) & 7], c[(s >> 6) & 7], c[(s >> 9) & 7]); }\n");
++            emit_hdr(glsl_strbufs, "ivec4 rv_swizzle(ivec4 t, int s) { int c[6] = int[6](t.x, t.y, t.z, t.w, 0, 1); "
++                     "return ivec4(c[s & 7], c[(s >> 3) & 7], c[(s >> 6) & 7], c[(s >> 9) & 7]); }\n");
++            emit_hdr(glsl_strbufs, "uvec4 rv_swizzle(uvec4 t, int s) { uint c[6] = uint[6](t.x, t.y, t.z, t.w, 0u, 1u); "
++                     "return uvec4(c[s & 7], c[(s >> 3) & 7], c[(s >> 6) & 7], c[(s >> 9) & 7]); }\n");
++         }
++      }
++#endif
+    } else {
+       if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE) {
+          emit_ver_ext(glsl_strbufs, "#version 330\n");

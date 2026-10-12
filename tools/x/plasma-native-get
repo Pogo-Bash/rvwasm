@@ -1,0 +1,18 @@
+#!/bin/bash
+# In the Debian system: fetch the native plasmashell (WebAssembly, branch nativeqt) that the dev setup serves
+# into /run/nq, where `desktop wayland plasma-native` looks for it.
+#   curl -s http://10.0.5.1:8019/get.sh | bash        (this file, as the setup serves it)
+# /run is in memory: after a reload of the page it has to be fetched again.
+set -e
+U=${U:-http://10.0.5.1:8019}
+mkdir -p /run/nq
+t0=$(date +%s)
+curl -sf "$U/plasmashell.gz" | gunzip > /run/nq/plasmashell.part
+mv /run/nq/plasmashell.part /run/nq/plasmashell
+chmod 755 /run/nq/plasmashell
+curl -sf "$U/info.txt" > /run/nq/info.txt || true
+# (the QML packages of the native build that Debian's disk has not: desktop wayland plasma-native adds
+# /run/nq/share to XDG_DATA_DIRS)
+rm -rf /run/nq/share && mkdir -p /run/nq/share
+curl -sf "$U/nq-share.tgz" | tar -xz -C /run/nq --no-same-owner 2> /dev/null || true
+echo "plasma-native-get: $(( $(stat -c %s /run/nq/plasmashell) / 1048576 )) MiB in /run/nq/plasmashell, $(find /run/nq/share -type f | wc -l) files in /run/nq/share, in $(( $(date +%s) - t0 )) s; $(cat /run/nq/info.txt 2> /dev/null)"

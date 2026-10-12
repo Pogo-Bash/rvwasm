@@ -1,0 +1,40 @@
+--- a/applets/colorpicker/plugin/grabwidget.cpp
++++ b/applets/colorpicker/plugin/grabwidget.cpp
+@@ -17,7 +17,8 @@
+ 
+ Q_DECLARE_METATYPE(QColor)
+ 
+-QDBusArgument &operator<<(QDBusArgument &argument, const QColor &color)
++// nativeqt: file-local (plasmashell has the same operators: one static binary)
++static QDBusArgument &operator<<(QDBusArgument &argument, const QColor &color)
+ {
+     argument.beginStructure();
+     argument << color.rgba();
+@@ -25,7 +26,7 @@
+     return argument;
+ }
+ 
+-const QDBusArgument &operator>>(const QDBusArgument &argument, QColor &color)
++static const QDBusArgument &operator>>(const QDBusArgument &argument, QColor &color)
+ {
+     argument.beginStructure();
+     QRgb rgba;
+--- a/applets/comic/engine/CMakeLists.txt
++++ b/applets/comic/engine/CMakeLists.txt
+@@ -4,6 +4,8 @@
+ add_library(plasma_engine_comic STATIC)
+ 
+ set_property(TARGET plasma_engine_comic PROPERTY POSITION_INDEPENDENT_CODE ON)
++# nativeqt: the picture of the day wallpaper has a CachedProvider too (one static binary)
++target_compile_definitions(plasma_engine_comic PUBLIC CachedProvider=ComicCachedProvider)
+ 
+ ecm_qt_declare_logging_category(plasma_engine_comic
+     HEADER comic_debug.h
+--- a/plasmacalendarplugins/alternatecalendar/config/plugin/CMakeLists.txt
++++ b/plasmacalendarplugins/alternatecalendar/config/plugin/CMakeLists.txt
+@@ -24,3 +24,5 @@
+ )
+ 
+ ecm_finalize_qml_module(plasmacalendaralternatecalendarconfig)
++# nativeqt: the calendar plugin has calendarsystem.h's Q_NAMESPACE as well (one static binary)
++target_compile_definitions(plasmacalendaralternatecalendarconfig PRIVATE CalendarSystem=ConfigCalendarSystem)

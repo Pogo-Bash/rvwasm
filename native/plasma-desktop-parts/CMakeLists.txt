@@ -1,0 +1,62 @@
+# The parts of plasma-desktop 6.3.6 that Debian's Plasma desktop loads (the riscv64 plasmashell's trace, and
+# the default panel's applets): the folder view's QML module (org.kde.private.desktopcontainment.folder, the
+# desktop containment's C++ half), the activity switcher's (org.kde.plasma.activityswitcher, which the shell's
+# Desktop.qml imports), the task manager's, the pager's and show desktop's plugins; with libksysguard's
+# ProcessCore (and its Formatter), which the task manager links. Their own CMake files, from plasma-desktop's source (PLASMA_DESKTOP_SRC), in a project of their
+# own: plasma-desktop's top level wants much that these do not.
+cmake_minimum_required(VERSION 3.16)
+project(plasma-desktop-parts VERSION 6.3.6)
+set(QT_MIN_VERSION "6.7.0")
+set(KF6_MIN_VERSION "6.10.0")
+find_package(ECM ${KF6_MIN_VERSION} REQUIRED NO_MODULE)
+set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+include(KDEInstallDirs)
+include(KDECMakeSettings)
+include(KDECompilerSettings NO_POLICY_SCOPE)
+include(ECMQtDeclareLoggingCategory)
+include(ECMQmlModule)
+find_package(Qt6 ${QT_MIN_VERSION} CONFIG REQUIRED COMPONENTS Core Quick Qml Widgets DBus)
+find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS CoreAddons I18n KIO Config Notifications XmlGui
+    GlobalAccel GuiAddons WindowSystem Auth Service ItemModels)
+find_package(PlasmaActivitiesStats ${PROJECT_VERSION} REQUIRED)
+find_package(LibNotificationManager ${PROJECT_VERSION} CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
+include(KDEClangFormat)
+include(KDEGitCommitHooks)
+include(ECMSetupVersion)
+include(ECMGenerateHeaders)
+include(GenerateExportHeader)
+include(KDEPackageAppTemplates OPTIONAL)
+find_package(Plasma ${PROJECT_VERSION} REQUIRED)
+find_package(Plasma ${PROJECT_VERSION} REQUIRED)
+find_package(PlasmaQuick ${PROJECT_VERSION} REQUIRED)
+find_package(PlasmaActivities ${PROJECT_VERSION} REQUIRED)
+find_package(LibTaskManager ${PROJECT_VERSION} CONFIG REQUIRED)
+add_definitions(-DQT_NO_URL_CAST_FROM_STRING)
+# plasma-desktop's configured headers, as its top level makes them (X11 as found; no Xcursor or
+# xorg-libinput here).
+find_package(X11)
+set(HAVE_X11 ${X11_FOUND})
+set(HAVE_XCURSOR 0)
+set(HAVE_XORGLIBINPUT 0)
+configure_file(${PLASMA_DESKTOP_SRC}/config-X11.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-X11.h)
+configure_file(${PLASMA_DESKTOP_SRC}/config-workspace.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-workspace.h)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
+add_subdirectory(${PLASMA_DESKTOP_SRC}/containments/desktop/plugins/folder folder)
+add_subdirectory(${PLASMA_DESKTOP_SRC}/imports/activitymanager activitymanager)
+include(${NQ_CMAKE_DIR}/nq-plugins.cmake)
+# libksysguard (built as a whole: build-kf.sh libksysguard), whose ProcessCore the task manager links
+find_package(KSysGuard REQUIRED)
+# (the task manager's settings file is one of plasma-desktop's KCMs': its sources are copied here)
+add_subdirectory(${PLASMA_DESKTOP_SRC}/applets/taskmanager taskmanager)
+nq_old_qml_plugin(taskmanagerplugin org.kde.plasma.private.taskmanager TaskManagerPlugin ${PLASMA_DESKTOP_SRC}/applets/taskmanager/plugin/qmldir)
+add_subdirectory(${PLASMA_DESKTOP_SRC}/applets/pager pager)
+add_subdirectory(${PLASMA_DESKTOP_SRC}/applets/showdesktop showdesktop)
+nq_old_qml_plugin(showdesktopplugin org.kde.plasma.private.showdesktop ShowDesktopPlugin ${PLASMA_DESKTOP_SRC}/applets/showdesktop/plugin/qmldir)
+# Plasma's device notifier's QML plugin (plasma-workspace's: it links ProcessCore, which is built here)
+find_package(KF6 ${KF6_MIN_VERSION} REQUIRED COMPONENTS Solid JobWidgets)
+add_subdirectory(${PLASMA_WORKSPACE_SRC}/applets/devicenotifier/plugin devicenotifier)
+# The trash applet's and the input method panel's QML plugins
+add_subdirectory(${PLASMA_DESKTOP_SRC}/applets/trash/plugin trash)
+add_subdirectory(${PLASMA_DESKTOP_SRC}/applets/kimpanel/plugin kimpanel)
+nq_old_qml_plugin(kimpanelplugin org.kde.plasma.private.kimpanel KimpanelPlugin ${PLASMA_DESKTOP_SRC}/applets/kimpanel/plugin/qmldir)

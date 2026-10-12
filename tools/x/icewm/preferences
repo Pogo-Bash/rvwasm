@@ -1,0 +1,16 @@
+# IceWM on the Linux/Wasm display (tools/x/desktop).
+# (The background colour is in prefoverride: the theme would win over it here.)
+IconThemes="Tango:hicolor:Adwaita"
+# The taskbar's monitors for things this machine does not have, or that cost a process each.
+TaskBarShowAPMStatus=0
+TaskBarShowMailboxStatus=0
+TaskBarShowNetStatus=0
+TaskBarShowCPUStatus=1
+TaskBarShowMEMStatus=1
+TaskBarShowWorkspaces=0
+WorkspaceNames=" 1 "
+# Windows are drawn in software: move and resize them as outlines.
+OpaqueMove=0
+OpaqueResize=0
+ShowMoveSizeStatus=1
+TerminalCommand="xterm -fa Monospace -fs 11"

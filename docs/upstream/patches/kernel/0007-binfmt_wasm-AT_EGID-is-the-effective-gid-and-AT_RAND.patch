@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 7/8] binfmt_wasm: AT_EGID is the effective gid, and AT_RANDOM
+ is given
+
+AT_EGID was from_kgid_munged(cred->gid), the real group. AT_RANDOM was
+missing: musl's __init_ssp() then derived the stack protector's canary from
+an address, and getauxval(AT_RANDOM) gave 0. 16 random bytes now go below
+the argument strings, as binfmt_elf puts them, and their address into the
+vector.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ fs/binfmt_wasm.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/fs/binfmt_wasm.c b/fs/binfmt_wasm.c
+index ccc48e9..59a7330 100644
+--- a/fs/binfmt_wasm.c
++++ b/fs/binfmt_wasm.c
+@@ -17,6 +17,7 @@
+ #include <linux/binfmts.h>
+ #include <linux/personality.h>
+ #include <linux/init.h>
++#include <linux/random.h>
+ #include <linux/uaccess.h>
+ #include <linux/vmalloc.h>
+ 
+@@ -44,22 +45,36 @@ static int create_wasm_tables(struct linux_binprm *bprm, unsigned long arg_start
+ 	unsigned long __user *sp;
+ 	long i, len;
+ 	const struct cred *cred = current_cred();
++	u8 random_bytes[16];
++	u8 __user *u_rand_bytes;
+ 
+ 	// We emulate common ELF auxillary vectors to help userland out a bit.
+-	const unsigned long wasm_auxv[] = {
++	unsigned long wasm_auxv[] = {
+ 		AT_NOTELF, 1UL,
+ 		AT_PAGESZ, PAGE_SIZE,
+ 		AT_UID, from_kuid_munged(cred->user_ns, cred->uid),
+ 		AT_EUID, from_kuid_munged(cred->user_ns, cred->euid),
+ 		AT_GID, from_kgid_munged(cred->user_ns, cred->gid),
+-		AT_EGID, from_kgid_munged(cred->user_ns, cred->gid),
++		AT_EGID, from_kgid_munged(cred->user_ns, cred->egid),
+ 		AT_SECURE, bprm->secureexec,
++		AT_RANDOM, 0UL /* below */,
+ 		AT_NULL, 0UL /* end */
+ 	};
+ 
+ 	p = (char __user *)arg_start;
+ 	sp = (unsigned long __user *)current->mm->start_stack;
+ 
++	/*
++	 * 16 random bytes below the strings, for the C library's stack
++	 * protector and pointer guards (AT_RANDOM), as binfmt_elf gives them.
++	 */
++	u_rand_bytes = (u8 __user *)ALIGN_DOWN((unsigned long)sp - sizeof(random_bytes), 16);
++	get_random_bytes(random_bytes, sizeof(random_bytes));
++	if (copy_to_user(u_rand_bytes, random_bytes, sizeof(random_bytes)))
++		return -EFAULT;
++	wasm_auxv[ARRAY_SIZE(wasm_auxv) - 3] = (unsigned long)u_rand_bytes;
++	sp = (unsigned long __user *)u_rand_bytes;
++
+ 	sp -= (sizeof(wasm_auxv) + (sizeof(unsigned long) - 1U)) /
+ 		sizeof(unsigned long);
+ 	sp -= bprm->envc + 1;
+@@ -412,6 +427,7 @@ static int load_wasm_binary(struct linux_binprm *bprm)
+ #endif
+ 	extra_stack += (bprm->argc + 1) * sizeof(char *);   /* the argv array */
+ 	extra_stack += (bprm->envc + 1) * sizeof(char *);   /* the envp array */
++	extra_stack += 32 + 20 * sizeof(unsigned long);     /* AT_RANDOM's bytes, the auxiliary vector */
+ 	extra_stack = ALIGN(extra_stack, WASM_STACK_ALIGN);
+ 
+ 	res = load_wasm_file(bprm, extra_stack);

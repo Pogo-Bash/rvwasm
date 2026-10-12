@@ -1,0 +1,393 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 2/8] wasm: end a task that runs its program when a fatal
+ signal comes
+
+A task's program runs in its Worker until it makes a system call, and only
+there does the kernel act on signals; nothing can interrupt Wasm code.
+SIGKILL did not end a program in a loop; an exit_group() of a process with
+a thread that computes, or an exec() from such a process, waited for that
+thread for good (zap_other_threads(), de_thread()), and the parent could not
+reap the zombie leader.
+
+The host can end the Worker, and that is safe while the Worker runs the
+program and never once it has entered the kernel. thread_info gets a
+user_state word: the task sets it to RUNNING last thing on its way back to
+the program and then looks for a fatal signal once more; on every entry
+(system calls, wasm_user_fault) it takes RUNNING or KILL back to IN_KERNEL
+with compare-and-swap. A fatal signal reaches the task's CPU as the
+reschedule IPI of kick_process(); arch_smp_send_reschedule() now looks at
+that CPU's current task (wasm_cpu_curr(), rq->curr) and, if it is a user
+task with a fatal signal pending whose state is RUNNING, sets KILL and calls
+the host's new import wasm_end_user_task(task, &user_state). The host sets
+KILL to ENDING (or does nothing: the task entered the kernel meanwhile and
+takes the signal there), terminates the Worker and runs the task in a new
+one through the new export wasm_user_task_end(task), which becomes the task
+as ret_from_fork does and takes the pending fatal signal like any return to
+user mode: get_signal(), do_group_exit(). A Worker that enters the kernel
+after the host has set ENDING waits there, holding nothing, to be ended.
+
+Non-fatal signals still wait for the program's next system call; a program
+that wants them sooner has to make one now and then.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/include/asm/entry.h       |   4 +
+ arch/wasm/include/asm/smp.h         |   4 +
+ arch/wasm/include/asm/thread_info.h |  18 +++++
+ arch/wasm/include/asm/wasm.h        |   8 ++
+ arch/wasm/kernel/entry.S            |  28 +++++++
+ arch/wasm/kernel/process.c          |   2 +
+ arch/wasm/kernel/smp.c              |   6 ++
+ arch/wasm/kernel/traps.c            | 118 ++++++++++++++++++++++++++++
+ kernel/sched/syscalls.c             |  11 +++
+ 9 files changed, 199 insertions(+)
+
+diff --git a/arch/wasm/include/asm/entry.h b/arch/wasm/include/asm/entry.h
+index 5e2d36b..425df01 100644
+--- a/arch/wasm/include/asm/entry.h
++++ b/arch/wasm/include/asm/entry.h
+@@ -24,4 +24,8 @@ __visible void raise_interrupt(int cpu, int irq_nr);
+ 
+ __visible void raise_exception(void);
+ 
++struct pt_regs;
++void wasm_user_state_return(struct pt_regs *regs);
++void wasm_kick_user_task(int cpu);
++
+ #endif /* _ASM_WASM_ENTRY_H */
+diff --git a/arch/wasm/include/asm/smp.h b/arch/wasm/include/asm/smp.h
+index b2ac289..946b764 100644
+--- a/arch/wasm/include/asm/smp.h
++++ b/arch/wasm/include/asm/smp.h
+@@ -7,6 +7,10 @@
+ 
+ #define raw_smp_processor_id() (current_thread_info()->cpu)
+ 
++struct task_struct;
++/* The task a CPU is running by the scheduler's account (kernel/sched/syscalls.c). */
++struct task_struct *wasm_cpu_curr(int cpu);
++
+ void __init setup_smp_ipi(void);
+ 
+ void arch_send_call_function_single_ipi(int cpu);
+diff --git a/arch/wasm/include/asm/thread_info.h b/arch/wasm/include/asm/thread_info.h
+index 4cf08ef..1a45dc6 100644
+--- a/arch/wasm/include/asm/thread_info.h
++++ b/arch/wasm/include/asm/thread_info.h
+@@ -36,6 +36,13 @@ struct thread_info {
+ 	int			instance_depth;	/* 0 = idle task, 1 = running */
+ 	unsigned long		syscall_work;	/* SYSCALL_WORK_ flags */
+ 
++	/*
++	 * Whether the task's Worker runs its program or is in the kernel
++	 * (WASM_USER_*, traps.c): for ending a program that never comes into
++	 * the kernel again, which only the host can do.
++	 */
++	unsigned int		user_state;
++
+ 	/* The kernel plays tricks like casting to atomic_long_t* for flags. */
+ 	unsigned long		flags __aligned(L1_CACHE_BYTES);
+ };
+@@ -48,6 +55,17 @@ struct thread_info {
+ 	.instance_depth = 0,			\
+ }
+ 
++/*
++ * thread_info.user_state (traps.c): IN_KERNEL while the task's Worker runs
++ * the kernel, RUNNING while it runs the program; KILL when a fatal signal
++ * found it RUNNING and asked the host to end that Worker; ENDING when the host
++ * has taken that on (and a new Worker takes the task through its exit).
++ */
++#define WASM_USER_IN_KERNEL	0U
++#define WASM_USER_RUNNING	1U
++#define WASM_USER_KILL		2U
++#define WASM_USER_ENDING	3U
++
+ #endif /* !__ASSEMBLER__ */
+ 
+ /* Use the generic TIF infrastructure: */
+diff --git a/arch/wasm/include/asm/wasm.h b/arch/wasm/include/asm/wasm.h
+index 36fd7b7..907ce56 100644
+--- a/arch/wasm/include/asm/wasm.h
++++ b/arch/wasm/include/asm/wasm.h
+@@ -25,4 +25,12 @@ extern void wasm_reload_program(void);
+ 
+ extern void wasm_clone_callback(void);
+ 
++/*
++ * A fatal signal for a task whose Worker runs its program, which never comes
++ * into the kernel by itself: the host ends that Worker (if *user_state is
++ * still WASM_USER_KILL, which it makes WASM_USER_ENDING) and runs the task's
++ * exit in a new one (wasm_user_task_end()).
++ */
++extern void wasm_end_user_task(struct task_struct *task, unsigned int *user_state);
++
+ #endif /* _ASM_WASM_WASM_H */
+diff --git a/arch/wasm/kernel/entry.S b/arch/wasm/kernel/entry.S
+index c1ff515..fbb0a2f 100644
+--- a/arch/wasm/kernel/entry.S
++++ b/arch/wasm/kernel/entry.S
+@@ -213,6 +213,34 @@ wasm_user_fault:
+ 	call __wasm_user_fault
+ 	WASM_SYSCALL_ASM_FOOT
+ 
++.functype __wasm_user_task_end() -> ()
++
++/*
++ * The host, in a new Worker, for a task whose Worker it has ended because a
++ * fatal signal found it running its program (traps.c): becomes the task, as
++ * ret_from_fork does, and takes it to its exit. Does not return.
++ */
++.globl wasm_user_task_end
++wasm_user_task_end:
++	.functype wasm_user_task_end(iLONG) -> ()
++
++	/* current = task */
++	local.get 0
++	global.set current
++
++	/* __stack_pointer = ALIGN_DOWN(current_switch_stack(), STACK_ALIGN) */
++	global.get current
++	iLONG.const zeroptr+TASK_STRUCT_STACK
++	iLONG.add
++	iLONG.load 0
++	iLONG.const zeroptr+THREAD_STACK_START
++	iLONG.add
++	global.set __stack_pointer
++
++	call __wasm_user_task_end
++
++	end_function
++
+ .functype __wasm_syscall_0(iLONG) -> (iLONG)
+ .functype __wasm_syscall_1(iLONG, iLONG) -> (iLONG)
+ .functype __wasm_syscall_2(iLONG, iLONG, iLONG) -> (iLONG)
+diff --git a/arch/wasm/kernel/process.c b/arch/wasm/kernel/process.c
+index 2f7a4df..6bdc5ff 100644
+--- a/arch/wasm/kernel/process.c
++++ b/arch/wasm/kernel/process.c
+@@ -172,6 +172,7 @@ __ret_from_fork(struct task_struct *prev_task, struct task_struct *next_task)
+ 	 */
+ 	syscall_exit_to_user_mode(current_pt_regs());
+ 	cpuflags_overwrite(current_pt_regs()->cpuflags);
++	wasm_user_state_return(current_pt_regs());
+ 
+ 	/*
+ 	 * After returning, the Wasm module binary will be initialized and run.
+@@ -196,6 +197,7 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 	struct switch_stack *child_switch_stack = task_switch_stack(p);
+ 
+ 	task_thread_info(p)->flags |= _TIF_NEVER_RUN;
++	task_thread_info(p)->user_state = WASM_USER_IN_KERNEL;
+ 
+ 	if (unlikely(args->fn)) {
+ 		/* Kernel thread */
+diff --git a/arch/wasm/kernel/smp.c b/arch/wasm/kernel/smp.c
+index 55d24e6..a6dc113 100644
+--- a/arch/wasm/kernel/smp.c
++++ b/arch/wasm/kernel/smp.c
+@@ -142,6 +142,12 @@ void arch_send_call_function_single_ipi(int cpu)
+ void arch_smp_send_reschedule(int cpu)
+ {
+ 	preempt_disable();
++	/*
++	 * Also how a signal is said to a task running on that CPU
++	 * (kick_process()), which a task running its program never hears: a
++	 * fatal one ends it (traps.c).
++	 */
++	wasm_kick_user_task(cpu);
+ 	send_ipi_message(cpu, IPI_RESCHEDULE);
+ 	preempt_enable();
+ }
+diff --git a/arch/wasm/kernel/traps.c b/arch/wasm/kernel/traps.c
+index 6f2a997..908e533 100644
+--- a/arch/wasm/kernel/traps.c
++++ b/arch/wasm/kernel/traps.c
+@@ -1,13 +1,16 @@
+ /* SPDX-License-Identifier: GPL-2.0-only */
+ 
+ #include <linux/entry-common.h>
++#include <linux/rcupdate.h>
+ #include <linux/sched/signal.h>
++#include <linux/sched/task.h>
+ #include <linux/syscalls.h>
+ #include <asm/cpuflags.h>
+ #include <asm/entry.h>
+ #include <asm/processor.h>
+ #include <asm/ptrace.h>
+ #include <asm/syscall.h>
++#include <asm/wasm.h>
+ 
+ static inline void _exception_enter(struct pt_regs *regs)
+ {
+@@ -20,6 +23,91 @@ static inline void _exception_exit(struct pt_regs *regs)
+ 	cpuflags_overwrite(regs->cpuflags);
+ }
+ 
++/*
++ * A task's program runs in its Worker until it calls into the kernel again,
++ * and nothing can interrupt Wasm code: a signal is only seen when the
++ * program makes a system call. A program that computes without making one
++ * (a loop, a thread busy with its work) cannot be stopped that way, not even
++ * by SIGKILL, and an exit_group() or exec() of another of its threads waits
++ * for it for good (zap_other_threads(), de_thread()). What the host can do is
++ * end the Worker: the program is not in the middle of anything the kernel
++ * cares about while it runs, so a new Worker can take the task through its
++ * exit (wasm_user_task_end()).
++ *
++ * Which is only safe while the Worker really is running the program, never
++ * once it has entered the kernel (it may hold locks there). thread_info's
++ * user_state says which, and a fatal signal and the task decide between them
++ * with compare-and-swap:
++ *
++ *  - The task sets it to RUNNING last thing before it returns to the program,
++ *    and then looks for a fatal signal once more (user_state_return()).
++ *  - A fatal signal that finds it RUNNING sets it to KILL and asks the host to
++ *    end the Worker (wasm_kick_user_task(), from the reschedule IPI that
++ *    signal_wake_up() sends to the task's CPU).
++ *  - The host sets KILL to ENDING before it ends the Worker; if it finds
++ *    anything else the task came into the kernel by itself, and will take
++ *    the signal there.
++ *  - The task, entering the kernel, takes RUNNING or KILL back to IN_KERNEL
++ *    (user_state_enter()). Finding ENDING, it waits to be ended.
++ *
++ * Either the signal sees RUNNING or the task sees the signal (a full barrier
++ * on both sides between the write and the read), so neither is missed.
++ */
++static noinline void user_state_wait_end(unsigned int *state)
++{
++	/* The host is ending this Worker, and another runs the task: touch nothing. */
++	for (;;)
++		__builtin_wasm_memory_atomic_wait32((int *)state, (int)WASM_USER_ENDING, -1LL);
++}
++
++static __always_inline void user_state_enter(void)
++{
++	unsigned int *state = &current_thread_info()->user_state;
++	unsigned int old = cmpxchg(state, WASM_USER_RUNNING, WASM_USER_IN_KERNEL);
++
++	if (likely(old == WASM_USER_RUNNING || old == WASM_USER_IN_KERNEL))
++		return;
++	if (old == WASM_USER_KILL &&
++	    cmpxchg(state, WASM_USER_KILL, WASM_USER_IN_KERNEL) == WASM_USER_KILL)
++		return;
++	user_state_wait_end(state);
++}
++
++static void user_exception(struct pt_regs *regs, int sig, int fatal);
++
++static __always_inline void user_state_return(struct pt_regs *regs)
++{
++	smp_store_mb(current_thread_info()->user_state, WASM_USER_RUNNING);
++	if (unlikely(fatal_signal_pending(current))) {
++		/* It came while we were on our way out, and found us in the kernel: take it now. */
++		user_state_enter();
++		user_exception(regs, 0, 0);
++	}
++}
++
++/* For a new task's first return to its program (process.c: __ret_from_fork()). */
++void wasm_user_state_return(struct pt_regs *regs)
++{
++	user_state_return(regs);
++}
++
++/* From the reschedule IPI to a CPU (smp.c): its task, if that runs its program with a fatal signal pending, is ended. */
++void wasm_kick_user_task(int cpu)
++{
++	struct task_struct *t;
++	unsigned int *state;
++
++	rcu_read_lock();
++	t = wasm_cpu_curr(cpu);
++	if (t && !(t->flags & PF_KTHREAD) && fatal_signal_pending(t)) {
++		state = &task_thread_info(t)->user_state;
++		smp_mb();
++		if (cmpxchg(state, WASM_USER_RUNNING, WASM_USER_KILL) == WASM_USER_RUNNING)
++			wasm_end_user_task(t, state);
++	}
++	rcu_read_unlock();
++}
++
+ #define WASM_SYSCALL_N(x, args, cast_args, ...)					\
+ 	__visible long __wasm_syscall_##x args;					\
+ 	__visible long __wasm_syscall_##x args					\
+@@ -30,6 +118,7 @@ static inline void _exception_exit(struct pt_regs *regs)
+ 		long syscall_args[] = {__MAP(x,__SC_ARGS,__VA_ARGS__)};		\
+ 		bool restart;							\
+ 										\
++		user_state_enter();						\
+ 		_exception_enter(regs);						\
+ 										\
+ 		regs->syscall_nr = n;						\
+@@ -75,6 +164,8 @@ static inline void _exception_exit(struct pt_regs *regs)
+ 		}								\
+ 										\
+ 		_exception_exit(regs);						\
++		if (user_mode(regs))						\
++			user_state_return(regs);				\
+ 										\
+ 		return regs->syscall_ret;					\
+ 	}
+@@ -256,10 +347,37 @@ __visible long __wasm_user_fault(long sig)
+ 	if (WARN_ON_ONCE(!cpuflags_test_any(CPUFLAGS_USER_MODE)))
+ 		return -EINVAL;
+ 
++	user_state_enter();
+ 	user_exception(regs, (int)sig, fatal);
++	user_state_return(regs);
+ 	return 0;
+ }
+ 
++/*
++ * The host has ended the Worker that ran this task's program, which a fatal
++ * signal found running (user_state ENDING), and runs the task here, in a new
++ * one (entry.S: wasm_user_task_end), to its exit.
++ */
++__visible void __wasm_user_task_end(void);
++__visible void __wasm_user_task_end(void)
++{
++	struct pt_regs *regs = current_pt_regs();
++
++	WRITE_ONCE(current_thread_info()->user_state, WASM_USER_IN_KERNEL);
++	/* What the old Worker would have done on its way back to the program is nobody's now. */
++	current_thread_info()->flags &= ~(_TIF_DELIVER_SIGNAL | _TIF_RETURN_SIGNAL | _TIF_RELOAD_PROGRAM);
++
++	/* The fatal signal is pending: taken as on any return to the program. */
++	user_exception(regs, 0, 0);
++
++	/* (Not reached: no way back to the program from here.) */
++	regs->syscall_nr = -1;
++	_exception_enter(regs);
++	irqentry_enter_from_user_mode(regs);
++	local_irq_enable();
++	do_group_exit(SIGKILL);
++}
++
+ /*
+ * This function is called from the host when things break either in kernel code
+ * or user code. That code will never continue to execute - we have to report the
+diff --git a/kernel/sched/syscalls.c b/kernel/sched/syscalls.c
+index cadb0e9..a76bff8 100644
+--- a/kernel/sched/syscalls.c
++++ b/kernel/sched/syscalls.c
+@@ -194,6 +194,17 @@ struct task_struct *idle_task(int cpu)
+ 	return cpu_rq(cpu)->idle;
+ }
+ 
++#ifdef CONFIG_WASM
++/*
++ * The task a CPU is running by the scheduler's account (rq->curr), for
++ * arch/wasm/kernel/traps.c: the one a reschedule IPI to that CPU is for.
++ */
++struct task_struct *wasm_cpu_curr(int cpu)
++{
++	return cpu_rq(cpu)->curr;
++}
++#endif
++
+ #ifdef CONFIG_SCHED_CORE
+ int sched_core_idle_cpu(int cpu)
+ {

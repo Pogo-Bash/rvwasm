@@ -1,0 +1,26 @@
+#!/bin/bash
+# The video check in one command, for Konsole inside the desktop (the release
+# image's /usr/local/bin/rv-video-check):
+#   rv-video-check [FILE] [SECONDS]        (default: the test video, 10 s of it, at most 90 s in all)
+# Plays FILE with mpv (the image's wrapper: the page's GPU and video decoder), without sound, with mpv's verbose log
+# in /root/mpv-diag.log and the VA driver's statistics, then prints what tells where it stood: which decoder, which
+# OpenGL, how far it got, the driver's counts (chunks sent to the page, frames waited for, errors, timeouts), the
+# GPU server's lines about video clients.
+f=${1:-/usr/local/share/rvwasm/test-h264-1080p.mp4}
+len=${2:-10}
+log=/root/mpv-diag.log
+r=${XDG_RUNTIME_DIR:-/tmp/runtime-root}
+echo "== GPU server: $( [ -f "$r/rvgpu-0.ready" ] && echo "ready, $(grep -o '"vdec"' "$r/rvgpu-0.ready" > /dev/null && echo 'with video decoding' || echo 'NO video decoding')" || echo "NOT ready (no executor in the page?)")"
+rm -f "$log"
+SECONDS=0
+timeout -k 5 90 mpv --msg-level=all=v --no-audio --length="$len" --log-file="$log" "$f" > /root/mpv-diag.out 2>&1 < /dev/null
+echo "== mpv: status $? after ${SECONDS} s (0: played to the end; 124: still going after 90 s)"
+grep -a -E "Using (hardware|software) decoding|VO: \[|GL_VERSION|GL_RENDERER|libva: .*(init|returns)|too old|[Ee]rror|[Ff]ailed|segmentation" "$log" |
+	grep -a -v -E "\]\[d\]|hook command|libplacebo|vulkan" | sed 's/^\[ *[0-9.]*\]//' | tail -20
+echo "== how far (mpv's last status lines)"
+tr '\r' '\n' < /root/mpv-diag.out | grep -a "V: [0-9]" | tail -1
+echo "== the VA driver (rvvdec)"
+tr '\r' '\n' < /root/mpv-diag.out | grep -a "rvvdec" | tail -4
+echo "== the GPU server (video clients)"
+grep -a -E "video (client|decoder|decoding)" /root/rvgpu.log 2> /dev/null | tail -4
+echo "(the whole log: $log; mpv's own output: /root/mpv-diag.out)"

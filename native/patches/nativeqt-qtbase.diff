@@ -1,0 +1,130 @@
+diff --git a/src/3rdparty/double-conversion/double-conversion/utils.h b/src/3rdparty/double-conversion/double-conversion/utils.h
+index 4f4dd71b..fc6e877a 100644
+--- a/src/3rdparty/double-conversion/double-conversion/utils.h
++++ b/src/3rdparty/double-conversion/double-conversion/utils.h
+@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
+     defined(__riscv) || defined(__e2k__) || \
+     defined(__or1k__) || defined(__arc__) || defined(__ARC64__) || \
+     defined(__microblaze__) || defined(__XTENSA__) || \
+-    defined(__EMSCRIPTEN__) || defined(__wasm32__)
++    defined(__EMSCRIPTEN__) || defined(__wasm32__) || defined(__wasm64__)
+ #define DOUBLE_CONVERSION_CORRECT_DOUBLE_OPERATIONS 1
+ #elif defined(__mc68000__) || \
+     defined(__pnacl__) || defined(__native_client__)
+diff --git a/src/corelib/io/qprocess_unix.cpp b/src/corelib/io/qprocess_unix.cpp
+--- a/src/corelib/io/qprocess_unix.cpp
++++ b/src/corelib/io/qprocess_unix.cpp
+@@ -640,12 +640,19 @@
+     return program;
+ }
+ 
++#ifndef __wasm__
+ extern "C" {
+ __attribute__((weak)) pid_t __interceptor_vfork();
+ }
++#endif
+ 
+ inline bool globalUsingVfork() noexcept
+ {
++#ifdef __wasm__
++    // linux-wasm has no MMU: there is no fork(), only vfork(). (And a weak
++    // undefined function would be an import the runtime does not give.)
++    return true;
++#endif
+ #if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+     // ASan writes to global memory, so we mustn't use vfork().
+     return false;
+@@ -669,7 +676,9 @@
+     // Dynamically detect whether libasan or libtsan are loaded into the
+     // process' memory. We need this because the user's code may be compiled
+     // with ASan or TSan, but not Qt.
++#ifndef __wasm__
+     return __interceptor_vfork == nullptr;
++#endif
+ }
+ 
+ inline bool QChildProcess::usingVfork() const noexcept
+--- a/src/corelib/io/qprocess_unix.cpp
++++ b/src/corelib/io/qprocess_unix.cpp
+@@ -52,6 +52,16 @@
+ #include <forkfd.h>
+ #endif
+ 
++// nativeqt: linux-wasm ends the code a task was running when it calls execve() by unwinding it with a JavaScript
++// exception, which the landing pad of a noexcept function turns into std::terminate(): there, the functions a
++// child runs up to its execve() are not noexcept. (And there is no vfork(): doFork() clones with a function.)
++#ifdef __wasm__
++#  define QT_CHILD_NOEXCEPT
++#  include <sched.h>
++#else
++#  define QT_CHILD_NOEXCEPT noexcept
++#endif
++
+ #ifndef O_PATH
+ #  define O_PATH        0
+ #endif
+@@ -322,6 +332,19 @@
+     template <typename Lambda> int doFork(Lambda &&childLambda)
+     {
+         pid_t pid;
++#ifdef __wasm__
++        // What vfork() does, by clone() with a function: the child shares the memory and runs on a stack of
++        // its own, the parent waits until it has called execve() or _exit().
++        using L = std::remove_reference_t<Lambda>;
++        const size_t stackSize = 256 * 1024;
++        char *stack = static_cast<char *>(malloc(stackSize));
++        if (!stack)
++            return -1;
++        pid = clone([](void *l) -> int { _exit((*static_cast<L *>(l))()); }, stack + stackSize,
++                    CLONE_VM | CLONE_VFORK | SIGCHLD, &childLambda);
++        free(stack);
++        return pid;
++#endif
+         if (isUsingVfork) {
+             QT_IGNORE_DEPRECATIONS(pid = vfork();)
+         } else {
+@@ -339,8 +362,8 @@
+     }
+ 
+ private:
+-    Q_NORETURN void startProcess() const noexcept;
+-    static int startProcess(void *self) noexcept
++    Q_NORETURN void startProcess() const QT_CHILD_NOEXCEPT;
++    static int startProcess(void *self) QT_CHILD_NOEXCEPT
+     {
+         static_cast<QChildProcess *>(self)->startProcess();
+         Q_UNREACHABLE_RETURN(-1);
+@@ -815,7 +838,7 @@
+ }
+ 
+ Q_NORETURN void
+-failChildProcess(const QProcessPrivate *d, const char *description, int code) noexcept
++failChildProcess(const QProcessPrivate *d, const char *description, int code) QT_CHILD_NOEXCEPT
+ {
+     ChildError error = {};
+     error.code = code;
+@@ -926,7 +949,7 @@
+ // This function is called in a vfork() context on some OSes (notably, Linux
+ // with forkfd), so it MUST NOT modify any non-local variable because it's
+ // still sharing memory with the parent process.
+-void QChildProcess::startProcess() const noexcept
++void QChildProcess::startProcess() const QT_CHILD_NOEXCEPT
+ {
+     // Render channels configuration.
+     d->commitChannels();
+--- a/src/3rdparty/forkfd/forkfd_linux.c
++++ b/src/3rdparty/forkfd/forkfd_linux.c
+@@ -157,7 +157,13 @@
+ 
+ int system_vforkfd(int flags, pid_t *ppid, int (*childFn)(void *), void *token, int *system)
+ {
++#ifdef __wasm__
++    /* nativeqt: the child runs QProcess's set-up of it, Wasm code at -O1 with more in a frame than SIGSTKSZ
++     * (8 KiB) allows for, and nothing guards the end of the stack. */
++    __attribute__((aligned(64))) char childStack[128 * 1024];
++#else
+     __attribute__((aligned(64))) char childStack[SIGSTKSZ];
++#endif
+     pid_t pid;
+     int pidfd;
+     unsigned long cloneflags = CLONE_PIDFD | CLONE_VFORK | CLONE_VM | SIGCHLD;

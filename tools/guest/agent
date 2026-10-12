@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""agent: Claude with a shell on this machine, in as little as it takes.
+
+    export ANTHROPIC_API_KEY=...        (yours; this program sends it to api.anthropic.com and nowhere else)
+    agent                               ask on the terminal, again and again
+    agent "what kind of machine is this?"
+    agent -f FILE                       the question is in FILE
+
+For a machine that Claude Code itself does not run on, or as a second
+opinion next to it: nothing but Python's standard library, one request per
+step to the Messages API, and one tool, the API's own bash tool
+(bash_20250124). Claude asks for commands; they are run here, and it is
+given what they print, until it answers without asking for another.
+
+Every command is shown before it runs. With -a each one waits for Enter (or
+n to refuse). Each runs in a shell of its own, in the directory this program
+was started in, for at most two minutes.
+
+    AGENT_MODEL    the model (default claude-fable-5-1)
+"""
+
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+URL = "https://api.anthropic.com/v1/messages"
+MODEL = os.environ.get("AGENT_MODEL", "claude-fable-5-1")
+LIMIT = 20000   # characters of a command's output that are passed on
+SYSTEM = ("You have a shell on a Linux machine through the bash tool. Each command runs in a new shell, "
+          "in the same directory every time, without a terminal, for at most two minutes. "
+          "Look before you conclude: say what you ran into, not what you expected.")
+
+
+def ask(key, messages):
+    body = json.dumps({
+        "model": MODEL,
+        "max_tokens": 8000,
+        "system": SYSTEM,
+        "tools": [{"type": "bash_20250124", "name": "bash"}],
+        "messages": messages,
+    }).encode()
+    request = urllib.request.Request(URL, body, {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=600) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        sys.exit("agent: the API said %d: %s" % (error.code, error.read().decode(errors="replace")[:600]))
+    except urllib.error.URLError as error:
+        sys.exit("agent: cannot reach the API: %s" % error.reason)
+
+
+def run(command):
+    try:
+        done = subprocess.run(["bash", "-c", command], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, timeout=120)
+        text = done.stdout.decode(errors="replace")
+        if done.returncode:
+            text += "\n[exit status %d]" % done.returncode
+    except subprocess.TimeoutExpired as expired:
+        text = (expired.stdout or b"").decode(errors="replace") + "\n[still running after two minutes: stopped]"
+    if len(text) > LIMIT:
+        text = text[:LIMIT // 2] + "\n[... %d characters left out ...]\n" % (len(text) - LIMIT) + text[-LIMIT // 2:]
+    return text or "[no output]"
+
+
+def turn(key, messages, confirm):
+    """Until Claude answers without asking for a command."""
+    while True:
+        reply = ask(key, messages)
+        messages.append({"role": "assistant", "content": reply["content"]})
+        results = []
+        for block in reply["content"]:
+            if block["type"] == "text" and block["text"].strip():
+                print("\n" + block["text"].strip())
+            elif block["type"] == "tool_use":
+                command = block["input"].get("command")
+                if command is None:   # {"restart": true}: there is no shell kept between commands
+                    output = "[every command already starts in a new shell]"
+                else:
+                    print("\n\033[2m$ " + command + "\033[0m")
+                    if confirm and input("  run it? [Enter, or n] ").strip().lower().startswith("n"):
+                        output = "[the person at the terminal refused this command]"
+                    else:
+                        output = run(command)
+                        shown = output if len(output) < 2000 else output[:2000] + "\n[...]"
+                        print("\033[2m" + shown.rstrip() + "\033[0m")
+                results.append({"type": "tool_result", "tool_use_id": block["id"], "content": output})
+        if reply["stop_reason"] != "tool_use":
+            if reply["stop_reason"] not in ("end_turn", "stop_sequence"):
+                print("\n[stopped: %s]" % reply["stop_reason"])
+            return
+        messages.append({"role": "user", "content": results})
+
+
+def main():
+    arguments = sys.argv[1:]
+    confirm = "-a" in arguments
+    arguments = [a for a in arguments if a != "-a"]
+    if arguments[:1] in (["-h"], ["--help"]):
+        sys.exit(__doc__)
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        sys.exit("agent: set ANTHROPIC_API_KEY first (export ANTHROPIC_API_KEY=...)")
+    messages = []
+    if arguments[:1] == ["-f"]:
+        with open(arguments[1]) as f:
+            arguments = [f.read()]
+    if arguments:
+        messages.append({"role": "user", "content": " ".join(arguments)})
+        turn(key, messages, confirm)
+        return
+    while True:
+        try:
+            line = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if line:
+            messages.append({"role": "user", "content": line})
+            turn(key, messages, confirm)
+
+
+if __name__ == "__main__":
+    main()

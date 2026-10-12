@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<!--
+  Development page for the Linux/Wasm system: the upstream page plus a small
+  scripting interface, so that tests can run commands without typing into the
+  terminal emulator.
+
+    await linuxReady                      resolves once the shell prompt appears
+    await linuxRun("command", timeoutMs)  -> { rc, out }  (out without the echoed command)
+    linuxType("text")                     types it, and does not wait
+
+  Served next to linux.js, linux-worker.js, xterm.js and the kernel/initramfs.
+-->
+<head>
+  <meta charset="utf-8">
+  <title>rvwasm: KDE Plasma on the web</title>
+  <!-- This is the machine itself (served as /desktop on the public site); the landing page at / is the one for search
+       engines, so this one is not indexed (the server also sends X-Robots-Tag: noindex). -->
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="xterm.css">
+  <script src="linux.js"></script>
+  <script src="xterm.js"></script>
+  <!-- The windows of the machine's Wayland clients, over the screen, when its window server runs (wlserver/). -->
+  <script src="display.js"></script>
+  <script src="gpu-exec.js"></script>
+  <!-- Guest players' video decoded by this browser's WebCodecs (vdec.js; ?vdec=off). -->
+  <script src="vdec.js"></script>
+  <!-- Web addresses from the machine, opened in this browser (hostopen/: rv-host-open, xdg-open). -->
+  <script src="hostopen.js"></script>
+  <!-- Blender on the host's GPU in a window of the desktop (blenderweb/: blender-gpu). -->
+  <script src="blenderweb.js"></script>
+  <!-- The machine's sound (audio.js: the sound card's player, in the page's one AudioContext; ?audio=0 for none). -->
+  <script src="audio.js"></script>
+  <!-- The machine at full speed while the page is not in front (background.js says how; ?background=off). -->
+  <script src="background.js"></script>
+  <script>
+    const variant = "wasm64_nommu";
+    const version = +new Date();   // never serve stale kernels or initramfs from cache
+    let output = "";
+    let os = null;
+    let resolveReady;
+    window.linuxReady = new Promise((resolve) => { resolveReady = resolve; });
+    window.linuxLog = [];
+
+    // Run one shell command. The marker is printed by the shell after the command, with
+    // its exit status; the echoed command line has "$?" there instead of digits.
+    window.linuxRun = (command, timeoutMs = 30000) => new Promise((resolve) => {
+      const marker = "__rc" + Math.random().toString(36).slice(2) + "_";
+      const start = output.length;
+      const pattern = new RegExp(marker + "(\\d+)");
+      const began = performance.now();
+      os.key_input(command + "; echo " + marker + "$?\r");
+      const timer = setInterval(() => {
+        const text = output.slice(start);
+        const match = text.match(pattern);
+        const elapsed = performance.now() - began;
+        if (!match && elapsed < timeoutMs) {
+          return;
+        }
+        clearInterval(timer);
+        // Drop the echo of what we typed (everything up to the first line break).
+        let out = match ? text.slice(0, match.index) : text;
+        out = out.slice(out.indexOf("\n") + 1).replace(/\r/g, "");
+        resolve({ rc: match ? Number(match[1]) : null, ms: Math.round(elapsed), out: out });
+      }, 20);
+    });
+
+    // The main thread says what it is doing, for a thread that watches it (watchdog.js, which says why): a count
+    // that goes up while it runs, and which call into the browser it is in, for the calls that can take long.
+    {
+      const words = new Int32Array(new SharedArrayBuffer(16));
+      const mark = (object, name, code) => {
+        const real = object[name];
+        object[name] = function (...args) {
+          const before = words[1];
+          words[1] = code;
+          try {
+            return real.apply(this, args);
+          } finally {
+            words[1] = before;
+          }
+        };
+      };
+      mark(CanvasRenderingContext2D.prototype, "putImageData", 1);
+      mark(HTMLCanvasElement.prototype, "toDataURL", 6);
+      mark(Worker.prototype, "postMessage", 2);
+      mark(Worker.prototype, "terminate", 7);
+      mark(Atomics, "notify", 8);
+      // And which message from a worker it is answering (linux.js: message_callbacks), by its place in this list.
+      const methods = ["", "start_primary", "start_secondary", "stop_secondary", "create_and_run_task", "release_task",
+                       "serialize_tasks", "console_read", "fb_show", "net_tx", "console_write", "log", "ready", "failed"];
+      const handler = Object.getOwnPropertyDescriptor(Worker.prototype, "onmessage");
+      Object.defineProperty(Worker.prototype, "onmessage", {
+        configurable: true,
+        get() {
+          return handler.get.call(this);
+        },
+        set(f) {
+          handler.set.call(this, typeof f != "function" ? f : function (event) {
+            const at = methods.indexOf(event.data && event.data.method);
+            words[3] = at < 0 ? 99 : at;
+            try {
+              return f.call(this, event);
+            } finally {
+              words[3] = 0;
+            }
+          });
+        },
+      });
+      mark(WebSocket.prototype, "send", 3);
+      if (window.Terminal) {
+        mark(Terminal.prototype, "write", 5);
+      }
+      const RealWorker = Worker;
+      window.Worker = function (...args) {
+        const before = words[1];
+        words[1] = 4;
+        try {
+          return new RealWorker(...args);
+        } finally {
+          words[1] = before;
+        }
+      };
+      window.Worker.prototype = RealWorker.prototype;
+      const frame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) => frame((time) => {
+        words[2] = 1;
+        try {
+          callback(time);
+        } finally {
+          words[2] = 0;
+        }
+      });
+      // (The count goes up when the watching thread asks, by a message: a timer of a page that is not in front
+      // runs once a minute, and that is not the main thread standing still.)
+      const watchdog = new RealWorker("watchdog.js?v=" + version, { name: "watchdog" });
+      watchdog.addEventListener("message", () => Atomics.add(words, 0, 1));
+      watchdog.postMessage({ words: words });
+    }
+
+    // Type into the terminal, without waiting for anything (tools/desktop-drive.js).
+    window.linuxType = (text) => os.key_input(text);
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      const term = new Terminal({ cols: 120, rows: 30 });
+      term.open(document.getElementById("terminal"));
+      const log = (text) => {
+        window.linuxLog.push(text);
+        term.write(("\x1B[2m" + text + "\x1B[0m\n").replaceAll("\n", "\r\n"));
+      };
+      const console_write = (data) => {
+        output += data;
+        term.write(data);
+        if (resolveReady && output.endsWith("# ")) {
+          resolveReady(true);
+          resolveReady = null;
+        }
+      };
+      try {
+        const vmlinux = await WebAssembly.compileStreaming(fetch("vmlinux-" + variant + ".wasm?v=" + version));
+        const pool_param = new URLSearchParams(location.search).get("pool");
+        const pool = pool_param !== null ? Number(pool_param) || 0
+                     : Math.max(2, Math.min(8, Math.ceil((navigator.hardwareConcurrency || 4) / 2)));
+        let boot_cmdline =
+          "maxcpus=3 nohz_full=0,2-63 rcu_nocbs=0,2-63 root=/dev/ram0 rootfstype=ramfs init=/init console=hvc console=ttyS0"
+          // The machine has no clock of its own: /init sets the date from this.
+          + " epoch=" + Math.floor(Date.now() / 1000)
+          // This page load's id (display.js): the window server names its BroadcastChannel to the page by it, so
+          // that another tab of this origin does not hear it (wlserver/boot.js reads it from /proc/cmdline).
+          + " rvtab=" + window.rvTabId
+          + " term=" + term.cols + "x" + term.rows
+          // CPUs that programs which can share one do share (the emulator and all it runs): half of this
+          // computer's, at least 2 and at most 8. ?pool=N says otherwise; ?pool=0 gives every task its own.
+          + " wasm_pool=" + pool;
+        {
+          const params = new URLSearchParams(location.search);
+          // The machine's memory: ?mem=MiB, or as much as this computer can comfortably give it. Every page of it
+          // the machine has touched once stays this tab's memory (nothing gives a page of a WebAssembly memory
+          // back), so a larger machine is a larger tab after heavy use; a page never touched costs nothing.
+          //
+          // What a page can know of the computer's memory is navigator.deviceMemory, in GB, rounded down to a
+          // power of two. Above 8 it is taken as it is, and the machine gets a quarter of it (32 GB, as Chrome
+          // 154 says on a 36 GB Mac: 8 GiB; 16 GB: 4 GiB). Many browsers say no more than 8, so 8 may mean much
+          // more: there the number of processors tells the computers with 8 GB from those with more (12 and more
+          // are a desktop or an M-series Pro or Max, with 16 GB at the least; 10 an M4 or an M-series Pro, with
+          // 16 GB at the least): 8 GiB with 12 processors or more, 6 GiB with 10 or 11, 4 GiB with fewer. Below
+          // 8 GB, or where the browser does not say (deviceMemory is Chrome's), the kernel's own 3 GiB. At most
+          // 16 GiB in any case (the runtime's maximum, V8's limit for a 64-bit memory).
+          //
+          // Only a kernel that has wasm_mem_pages_max (arch/wasm/kernel/setup.c) takes more than 3 GiB: an older
+          // one grows the memory to at most 4 GiB, and a program whose memory lay above 3 GiB had its system
+          // calls refused (EFAULT). With such a kernel only ?mem= changes anything, as before.
+          let mem = Number(params.get("mem"));
+          if (!(mem > 0)) {
+            const roomy = WebAssembly.Module.exports(vmlinux).some((e) => e.name == "wasm_mem_pages_max");
+            const gb = navigator.deviceMemory || 0, cpus = navigator.hardwareConcurrency || 0;
+            mem = !roomy || gb < 8 ? 0 : gb > 8 ? Math.min(16384, gb * 256)
+                  : cpus >= 12 ? 8192 : cpus >= 10 ? 6144 : 4096;
+            log("[Memory]: " + (mem ? mem + " MiB" : "the kernel's default") + " (this computer: "
+                + (gb ? (gb == 8 ? "8 GB or more" : gb + " GB") : "memory not told") + ", " + cpus + " processors"
+                + (roomy ? "" : "; this kernel takes 3 GiB") + "); ?mem=MiB says otherwise");
+          }
+          if (mem > 0) {
+            boot_cmdline += " mem=" + Math.round(Math.min(mem, 16384)) + "M";
+          }
+          // ?cache=MiB: the most page cache the kernel keeps (wasm_cache_max=): 256 unless the page says otherwise,
+          // ?cache=0 for no cap. (Measured: a cap of 256 keeps the tab 0.3-0.4 GB smaller after Firefox has run,
+          // 1 GB smaller with Konsole alone.) ?kargs=...: more for the kernel's command line, as given (for tests).
+          boot_cmdline += " wasm_cache_max=" + (params.get("cache") !== null ? Number(params.get("cache")) | 0 : 256);
+          if (params.get("kargs")) {
+            boot_cmdline += " " + params.get("kargs");
+          }
+          // ?autostart=0: the machine does not start what its disk says to start at boot (a disk with
+          // /etc/rvwasm/autostart, such as the release image's desktop; tools/initramfs-init): a shell prompt only.
+          if (params.get("autostart") === "0" || params.get("autostart") === "off") {
+            boot_cmdline += " autostart=0";
+          }
+        }
+        // ?image=debian loads the image that has a Debian system in /debian (tools/build-debian-image.sh).
+        const params = new URLSearchParams(location.search);
+        const image = params.get("image");
+        const initrd = await (await fetch("initramfs-" + (image ? image + "-" : "") + variant
+                                          + ".cpio.gz?v=" + version)).arrayBuffer();
+        // What the server says the defaults are (docker/serve.py's rv-site.json: the relay's port and the disk, as
+        // docker-compose.yml set them up); the dev server has no such file, and the defaults are the ones below.
+        let site = {};
+        try {
+          const answer = await fetch("rv-site.json", { cache: "no-store" });
+          if (answer.ok) {
+            site = await answer.json();
+          }
+        } catch (error) {
+        }
+        // The network relay (tools/net-relay.py): on this host, port 8001 (or the site's), unless ?net=URL or
+        // ?net=off says otherwise.
+        const net_param = params.get("net");
+        // (A server behind a reverse proxy names a path on its own address instead of a port: "net_path":
+        // "/relay" is wss://HOST/relay when the page came over https, docs/deploy.md.)
+        const net_default = typeof site.net_path == "string" && /^\/[A-Za-z0-9_\/-]*$/.test(site.net_path)
+          ? (location.protocol == "https:" ? "wss://" : "ws://") + location.host + site.net_path.replace(/\/$/, "")
+          : "ws://" + location.hostname + ":" + (Number(site.net_port) || 8001);
+        let net_url = net_param == "off" ? null : net_param || net_default;
+        // An address of this machine's own on the relay's network: the relay has one for every page that asks.
+        // (The last number of 10.0.5.N. If the relay does not answer, a random one, never the same for every
+        // visitor: a relay refuses a second machine with an address that is taken.)
+        let net_address = 2 + Math.floor(Math.random() * 249);
+        if (net_url) {
+          try {
+            const answer = await fetch(net_url.replace(/^ws/, "http") + "/address", { cache: "no-store" });
+            if (answer.ok) {
+              net_address = Number(await answer.text()) || net_address;
+            }
+          } catch (error) {
+          }
+          net_url += "/?ip=" + net_address;
+        }
+        // /init gives the interface that address, and the system the time zone of the person in front of it.
+        boot_cmdline += " ip=10.0.5." + net_address;
+        // The resolver the server names (a relay with a DNS allowlist answers on its own address), /init writes it
+        // into /etc/resolv.conf.
+        if (net_url && /^10\.0\.5\.\d{1,3}$/.test(site.dns || "")) {
+          boot_cmdline += " dns=" + site.dns;
+        }
+        try {
+          const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (/^[A-Za-z0-9_+\/-]+$/.test(zone || "")) {
+            boot_cmdline += " tz=" + zone;
+          }
+        } catch (error) {
+        }
+        // ?disk=NAME gives the machine a disk: the image whose pieces are in disk/NAME/ (tools/split-disk.py),
+        // fetched as they are needed and kept, with what the system writes, in this origin's private file system
+        // (disk-worker.js). /init mounts it on /debian. ?disk=NAME&fresh forgets what was kept.
+        // (Without ?disk at all, the site's disk if it names one: ?disk= with nothing after it is no disk.)
+        const disk_name = params.has("disk") ? params.get("disk") : site.disk || null;
+        const disk = !disk_name ? null : [{
+          worker: "disk-worker.js?v=" + version,
+          url: "disk/" + disk_name + "/",
+          name: disk_name,
+          reset: params.has("fresh"),
+        }];
+        // With it comes a second disk, a person's own: it starts as a copy of disk/home/, an empty file system
+        // (tools/build-debian-image.sh home), and from then on is what this browser has under the name "home",
+        // whatever the server has. /init mounts it as the home directory, so a person's files stay when the
+        // system's image is replaced by a newer one. ?home=NAME is another such disk, ?home=off none (home is
+        // then on the system's disk, and goes when that does), ?fresh-home forgets it.
+        if (disk && params.get("home") != "off") {
+          disk.push({
+            worker: "disk-worker.js?v=" + version,
+            url: "disk/home/",
+            keep: true,
+            name: "home-" + (params.get("home") || "home"),
+            reset: params.has("fresh-home"),
+          });
+        }
+        if (disk && navigator.storage && navigator.storage.persist) {
+          // Ask the browser not to throw the disk away when it runs short of space. (It decides by itself.)
+          navigator.storage.persist().then((granted) => {
+            log("[Disk]: the browser " + (granted ? "will keep the disk until you remove it"
+                                                  : "may remove the disk if it runs short of space"));
+          }, () => {});
+        }
+        os = await linux("linux-worker.js?v=" + version, variant, vmlinux, boot_cmdline, initrd, log, console_write,
+                         net_url, document.getElementById("screen"), disk);
+        term.onData((data) => os.key_input(data));
+        window.linuxOs = os;  // (for tools that look at the machine from outside: its memory, its disks' words)
+      } catch (error) {
+        log("Linux/Wasm failed with (" + error.name + "): " + error.message + "\n" + error.stack);
+        throw error;
+      }
+    });
+  </script>
+</head>
+<body>
+  <!-- The machine's display (click it to give it the keyboard), and below it the serial console. -->
+  <canvas id="screen" tabindex="0" width="1024" height="768"
+          style="display: block; max-width: 100%; background: #000; outline: none; margin-bottom: 8px;"></canvas>
+  <div id="display"></div>
+  <div id="terminal" tabindex="0"></div>
+</body>

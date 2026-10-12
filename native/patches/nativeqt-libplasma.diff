@@ -1,0 +1,94 @@
+--- a/src/plasma/private/contrasteffectwatcher_p.h
++++ b/src/plasma/private/contrasteffectwatcher_p.h
+@@ -12,10 +12,12 @@
+ 
+ #include <QAbstractNativeEventFilter>
+ 
+-#include <xcb/xcb.h>
+-
+ #include <config-plasma.h>
+ 
++#if HAVE_X11 // nativeqt: xcb only where X11 is (it was included unconditionally)
++#include <xcb/xcb.h>
++#endif
++
+ namespace Plasma
+ {
+ class ContrastManager;
+--- a/src/plasma/private/contrasteffectwatcher.cpp
++++ b/src/plasma/private/contrasteffectwatcher.cpp
+@@ -133,6 +133,9 @@
+         return m_contrastManager->isActive();
+     }
+ 
++#if !HAVE_X11 // nativeqt: the X11 half only where X11 is
++    return false;
++#else
+     if (m_property == XCB_ATOM_NONE || !m_x11Interface) {
+         return false;
+     }
+@@ -149,6 +152,7 @@
+         }
+     }
+     return false;
++#endif
+ }
+ 
+ } // namespace Plasma
+--- a/src/plasma/pluginloader.cpp
++++ b/src/plasma/pluginloader.cpp
+@@ -38,6 +38,13 @@
+     return &self;
+ }
+ 
++// nativeqt: a plugin by its id first, which finds static plugins too (a path names a file only)
++static KPluginMetaData nqPluginById(const QString &dir, const QString &id)
++{
++    KPluginMetaData md = KPluginMetaData::findPluginById(dir, id, KPluginMetaData::AllowEmptyMetaData);
++    return md.isValid() ? md : KPluginMetaData(dir + QLatin1Char('/') + id, KPluginMetaData::AllowEmptyMetaData);
++}
++
+ Applet *PluginLoader::loadApplet(const QString &name, uint appletId, const QVariantList &args)
+ {
+     if (name.isEmpty()) {
+@@ -54,7 +61,7 @@
+     // latter case, ensure we only use the name part of the path.
+     const QString pluginName = name.section(QLatin1Char('/'), -1);
+ 
+-    KPluginMetaData plugin(QStringLiteral("plasma/applets/") + pluginName, KPluginMetaData::AllowEmptyMetaData);
++    KPluginMetaData plugin = nqPluginById(QStringLiteral("plasma/applets"), pluginName);
+     const KPackage::Package p = KPackage::PackageLoader::self()->loadPackage(QStringLiteral("Plasma/Applet"), name);
+ 
+     if (!p.isValid()) {
+@@ -65,7 +72,7 @@
+     if (!plugin.isValid()) {
+         const QString parentPlugin = p.metadata().value(u"X-Plasma-RootPath");
+         if (!parentPlugin.isEmpty()) {
+-            plugin = KPluginMetaData(QStringLiteral("plasma/applets/") + parentPlugin, KPluginMetaData::AllowEmptyMetaData);
++            plugin = nqPluginById(QStringLiteral("plasma/applets"), parentPlugin);
+         }
+     }
+ 
+@@ -115,7 +122,7 @@
+         return nullptr;
+     }
+ 
+-    KPluginMetaData plugin(QStringLiteral("plasma/containmentactions/") + name, KPluginMetaData::AllowEmptyMetaData);
++    KPluginMetaData plugin = nqPluginById(QStringLiteral("plasma/containmentactions"), name);
+ 
+     if (plugin.isValid()) {
+         if (auto res = KPluginFactory::instantiatePlugin<Plasma::ContainmentActions>(plugin, nullptr, {QVariant::fromValue(plugin)})) {
+--- a/src/plasma/pluginloader.cpp
++++ b/src/plasma/pluginloader.cpp
+@@ -42,7 +42,11 @@
+ static KPluginMetaData nqPluginById(const QString &dir, const QString &id)
+ {
+     KPluginMetaData md = KPluginMetaData::findPluginById(dir, id, KPluginMetaData::AllowEmptyMetaData);
++#ifdef __wasm__
++    return md; // (a static program has no plugin files: a path would only make QPluginLoader say so)
++#else
+     return md.isValid() ? md : KPluginMetaData(dir + QLatin1Char('/') + id, KPluginMetaData::AllowEmptyMetaData);
++#endif
+ }
+ 
+ Applet *PluginLoader::loadApplet(const QString &name, uint appletId, const QVariantList &args)

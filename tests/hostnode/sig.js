@@ -1,0 +1,11 @@
+const cp = require("child_process");
+const fs = require("fs");
+const st = () => "";
+console.log("before", st());
+process.on("SIGTERM", () => { console.log("got SIGTERM from child", (performance.now() - t0) | 0); process.exit(0); });
+console.log("handler", st());
+const t0 = performance.now();
+const c = cp.spawn("/bin/sh", ["-c", "kill -TERM " + process.pid + "; echo kill rc $?"], { stdio: "inherit" });
+console.log("spawned", st());
+c.on("exit", (code, sig) => console.log("child exit", code, sig, (performance.now() - t0) | 0, st()));
+setTimeout(() => console.log("timeout fired", st()), 300);

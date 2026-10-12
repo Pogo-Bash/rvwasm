@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KDE Plasma on the Web: Linux desktop in your browser | rvwasm</title>
+<meta name="description" content="Run KDE Plasma in your browser tab. rvwasm is a Linux desktop on the web: Debian riscv64, Konsole, Dolphin, Kate, apt-get, audio and GPU. Free, no install.">
+<link rel="canonical" href="https://plasmaontheweb.com/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="theme-color" content="#11111b">
+<meta name="color-scheme" content="dark">
+<!-- Google Search Console: to verify by tag, put the meta tag Search Console gives you right here, e.g.
+     <meta name="google-site-verification" content="XXXX">
+     To verify by file instead, put the googleXXXX.html file it gives you in site/ (it is served from the site's root). -->
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="rvwasm">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="KDE Plasma on the Web: a Linux desktop in your browser">
+<meta property="og:description" content="rvwasm runs Debian riscv64 with KDE Plasma inside one Chrome tab: Konsole, Dolphin, Kate, apt-get, audio, GPU and video. Nothing is streamed; it runs on your computer.">
+<meta property="og:url" content="https://plasmaontheweb.com/">
+<meta property="og:image" content="https://plasmaontheweb.com/assets/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The KDE Plasma desktop running in a browser tab, with Konsole, Kate, Dolphin and System Settings open.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="KDE Plasma on the Web: a Linux desktop in your browser">
+<meta name="twitter:description" content="rvwasm runs Debian riscv64 with KDE Plasma inside one Chrome tab. Nothing is streamed; it runs on your computer.">
+<meta name="twitter:image" content="https://plasmaontheweb.com/assets/og-image.png">
+<meta name="twitter:image:alt" content="The KDE Plasma desktop running in a browser tab, with Konsole, Kate, Dolphin and System Settings open.">
+
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<link rel="preload" as="image" href="/assets/hero-960.webp" imagesrcset="/assets/hero-960.webp 960w, /assets/hero-1920.webp 1920w" imagesizes="(min-width: 720px) 672px, calc(100vw - 48px)" fetchpriority="high">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": "https://plasmaontheweb.com/#website",
+  "url": "https://plasmaontheweb.com/",
+  "name": "rvwasm",
+  "alternateName": ["Plasma on the Web", "plasmaontheweb.com"],
+  "description": "KDE Plasma on Debian riscv64, running in a browser tab.",
+  "inLanguage": "en"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "@id": "https://plasmaontheweb.com/#app",
+  "name": "rvwasm: KDE Plasma on the web",
+  "alternateName": "rvwasm",
+  "url": "https://plasmaontheweb.com/",
+  "description": "A Linux desktop in a browser tab: Debian riscv64 with KDE Plasma, Konsole, Dolphin, Kate and System Settings, running on linux-wasm with a riscv64 to WebAssembly JIT. Runs entirely on the visitor's computer.",
+  "applicationCategory": "UtilitiesApplication",
+  "applicationSubCategory": "Linux desktop environment",
+  "operatingSystem": "Web browser",
+  "browserRequirements": "Requires desktop Chrome, Edge or Brave with WebAssembly, SharedArrayBuffer and the Origin Private File System. 16 GB of RAM recommended.",
+  "memoryRequirements": "16 GB recommended, 8 GB for a light session",
+  "storageRequirements": "5 GB free for the browser's copy of the disk",
+  "softwareHelp": {"@type": "WebPage", "url": "https://plasmaontheweb.com/#faq"},
+  "featureList": [
+    "KDE Plasma 6 desktop in a browser tab",
+    "Debian riscv64 with Konsole, Dolphin, Kate, System Settings, Firefox and Chromium",
+    "apt-get install through a restricted network relay",
+    "Sound through an AudioWorklet",
+    "OpenGL on the visitor's GPU through WebGL2 or WebGPU",
+    "Hardware video decoding through WebCodecs"
+  ],
+  "screenshot": {
+    "@type": "ImageObject",
+    "contentUrl": "https://plasmaontheweb.com/assets/hero-1920.webp",
+    "caption": "KDE Plasma running in a browser tab with Konsole, Kate, Dolphin and System Settings"
+  },
+  "image": "https://plasmaontheweb.com/assets/og-image.png",
+  "isAccessibleForFree": true,
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD", "availability": "https://schema.org/InStock"},
+  "creator": {"@type": "Organization", "name": "rvwasm", "url": "https://plasmaontheweb.com/"},
+  "isBasedOn": [
+    {"@type": "SoftwareSourceCode", "name": "linux-wasm", "url": "https://github.com/joelseverin/linux-wasm"},
+    {"@type": "SoftwareApplication", "name": "Debian GNU/Linux", "url": "https://www.debian.org/"},
+    {"@type": "SoftwareApplication", "name": "KDE Plasma", "url": "https://kde.org/plasma-desktop/"}
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "What is rvwasm?", "acceptedAnswer": {"@type": "Answer", "text": "rvwasm is a Linux desktop that runs inside a browser tab. It boots Debian (riscv64) with KDE Plasma on linux-wasm, a Linux kernel compiled to WebAssembly, and runs Debian's programs through our own riscv64-to-WebAssembly JIT. rvwasm is the project; Plasma is what it runs."}},
+    {"@type": "Question", "name": "Is this really KDE Plasma running in the browser?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The desktop shell (plasmashell, built on Qt 6.8, KDE Frameworks 6 and Plasma 6.3) is compiled straight to WebAssembly and runs natively in your tab, so it is a web port of the Plasma desktop. Applications such as Konsole, Dolphin, Kate and System Settings are Debian's own riscv64 builds, run through the JIT."}},
+    {"@type": "Question", "name": "Is the desktop streamed from a server, like a remote desktop?", "acceptedAnswer": {"@type": "Answer", "text": "No. Nothing is streamed. The machine runs on your own computer, inside the page, using your CPU, GPU, sound output and hardware video decoder. The server only hands out files and, optionally, a restricted network relay."}},
+    {"@type": "Question", "name": "Is it free? Do I need an account?", "acceptedAnswer": {"@type": "Answer", "text": "It is free to use and needs no account and no installation: open the page and click Start Plasma."}},
+    {"@type": "Question", "name": "Is this official KDE software?", "acceptedAnswer": {"@type": "Answer", "text": "No. This is an unofficial project and is not affiliated with or endorsed by KDE e.V. KDE and Plasma are trademarks of KDE e.V. The desktop it runs is KDE's free software."}},
+    {"@type": "Question", "name": "Which browsers and computers does it work on?", "acceptedAnswer": {"@type": "Answer", "text": "Current desktop Chrome, Edge or Brave. Firefox, Safari, phones and tablets are not supported. A computer with fast single-core performance (Apple M1 or newer, a recent Intel Core or AMD Ryzen) and 16 GB of RAM is recommended; the tab uses 4 to 8 GB with the desktop. About 5 GB of free disk space is used for the browser's copy of the system disk."}},
+    {"@type": "Question", "name": "Why does the first start take a while?", "acceptedAnswer": {"@type": "Answer", "text": "The system disk is fetched in 1 MiB pieces as the machine reads them and is kept in your browser, so the first visit downloads the parts it uses (hundreds of megabytes up to a few gigabytes). Later visits start from what is already stored."}},
+    {"@type": "Question", "name": "Can I install software with apt-get?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. apt-get install works through the network relay, as do pip install, npm install, cargo and git clone from GitHub. The relay only allows a short list of domains, so general web browsing from inside the machine does not work."}},
+    {"@type": "Question", "name": "Can I browse the web inside the desktop?", "acceptedAnswer": {"@type": "Answer", "text": "Not on the public site. Firefox and Chromium are installed, but the machine can only reach the allowlisted domains (Debian's archive, PyPI, npm, GitHub and crates.io), on ports 80 and 443."}},
+    {"@type": "Question", "name": "Are my files saved?", "acceptedAnswer": {"@type": "Answer", "text": "Your home folder and everything you change on the disk are stored in your own browser, in its Origin Private File System, and never on the server. They stay until you clear this site's data."}},
+    {"@type": "Question", "name": "How fast is a Linux desktop in a browser tab?", "acceptedAnswer": {"@type": "Answer", "text": "The Plasma shell, the GPU, sound and video paths run at close to native speed in WebAssembly. Debian's riscv64 programs run through the JIT, which is several times faster than other WebAssembly emulators but slower than native, so heavy programs such as Firefox, Chromium and compilers feel slow on a low-power laptop."}}
+  ]
+}
+</script>
+
+<style>
+/* catppuccin mocha, the tokens the portfolio uses: crust #11111b, mantle #181825, base #1e1e2e, surface0 #313244, surface1 #45475a, overlay0 #6c7086, overlay1 #7f849c, subtext0 #a6adc8, subtext1 #bac2de, text #cdd6f4, mauve #cba6f7, green #a6e3a1, red #f38ba8 */
+:root{--crust:#11111b;--mantle:#181825;--base:#1e1e2e;--s0:#313244;--s1:#45475a;--o0:#6c7086;--o1:#7f849c;--sub0:#a6adc8;--sub1:#bac2de;--text:#cdd6f4;--mauve:#cba6f7;--green:#a6e3a1;--red:#f38ba8}
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--crust);color:var(--text);font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:thin;scrollbar-color:var(--s0) var(--crust)}
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;font-size:1rem}
+::selection{background:#cba6f733;color:var(--mauve)}
+h1,h2,h3,p,figure,ul,ol,dl,dd{margin:0}
+ul,ol{list-style:none;padding:0}
+a{color:inherit;text-decoration:none}
+p a,li a,summary a{color:var(--mauve);text-decoration:underline;text-decoration-color:#cba6f766;text-underline-offset:3px}
+p a:hover,li a:hover{text-decoration-color:var(--mauve)}
+:focus-visible{outline:2px solid var(--mauve);outline-offset:3px;border-radius:4px}
+.skip{position:absolute;left:-999px;top:8px;background:var(--mauve);color:var(--base);padding:8px 14px;border-radius:8px;z-index:9;font-weight:700}
+.skip:focus{left:8px}
+.col{max-width:42rem;margin:0 auto;width:100%}
+nav.top{border-bottom:1px solid var(--s0);padding:1rem 1.5rem}
+nav.top .col{display:flex;align-items:center;justify-content:space-between;gap:.5rem 1.5rem;flex-wrap:wrap}
+.brand{font-weight:700;color:var(--mauve);font-size:.875rem}
+.links{display:flex;gap:.25rem 1.5rem;flex-wrap:wrap;font-size:.875rem}
+.links a{color:var(--o1);transition:color .15s}
+.links a:hover{color:var(--text)}
+.links a[aria-current]{color:var(--mauve)}
+main{flex:1;padding:3rem 1.5rem}
+section{margin-bottom:4rem;scroll-margin-top:1rem}
+h1{font-size:1.875rem;line-height:2.25rem;font-weight:700;margin-bottom:.5rem}
+h1 span,.m{color:var(--mauve)}
+h2{font-size:.875rem;line-height:1.25rem;font-weight:700;color:var(--o1);text-transform:uppercase;letter-spacing:.1em;margin-bottom:1rem}
+h3{font-size:1rem;font-weight:700;color:var(--text);margin-bottom:.5rem}
+.lead{color:var(--sub0);margin-bottom:1.5rem}
+p{color:var(--sub1);margin-bottom:.75rem}
+.dim{color:var(--sub0)}
+.small{font-size:.875rem}
+.xs{font-size:.75rem}
+.start{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:.75rem;background:var(--mauve);color:var(--base);font-weight:700;font-size:1.125rem;padding:1rem 2rem;border-radius:.5rem;border:1px solid var(--mauve);transition:background .2s,border-color .2s,color .2s}
+.start svg{width:1.1rem;height:1.1rem;flex:none}
+.start::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);transform:translate(-100%);transition:transform .5s ease}
+.start:hover{background:#d8bcfa;color:var(--crust)}
+.start:hover::before{transform:translate(100%)}
+.start-sub{margin-top:.75rem;font-size:.75rem;color:var(--o1)}
+.start-sub code{color:var(--sub0)}
+.compat{display:none;margin-top:1rem;padding:.75rem 1rem;border:1px solid #f38ba866;border-radius:.5rem;color:var(--red);font-size:.8125rem}
+.compat.on{display:block}
+.shot{margin-top:2rem}
+.shot img{display:block;width:100%;height:auto;border:1px solid var(--s0);border-radius:.5rem}
+.shot figcaption{margin-top:.5rem;font-size:.75rem;color:var(--o0)}
+.stack>*+*{margin-top:1rem}
+.item{display:block;padding:1.25rem;border:1px solid var(--s0);border-radius:.5rem;transition:border-color .2s}
+.item:hover{border-color:#cba6f766}
+.item:hover h3{color:var(--mauve)}
+.item h3{transition:color .15s;margin-bottom:.5rem}
+.item p{font-size:.875rem;color:var(--sub0);margin-bottom:.75rem}
+.item p:last-child{margin-bottom:0}
+.tags{display:flex;gap:.5rem;flex-wrap:wrap}
+.tag{font-size:.75rem;padding:.125rem .5rem;border-radius:.25rem;background:var(--s0);color:var(--sub0)}
+.tag.ok{color:var(--green)}
+.tag.wip{color:var(--red)}
+code{font-family:inherit;font-size:.9em;background:var(--s0);color:var(--sub1);border-radius:.25rem;padding:.05rem .35rem;white-space:nowrap}
+ul.bul li{position:relative;padding-left:1.25rem;margin-bottom:.5rem;color:var(--sub1);font-size:.9375rem}
+ul.bul li::before{content:"-";position:absolute;left:0;color:var(--o0)}
+.diagram{border:1px solid var(--s0);border-radius:.5rem;padding:.75rem;margin:1rem 0 1.25rem;background:var(--mantle)}
+.diagram svg{display:block;width:100%;height:auto}
+.diagram text{font:700 12px "JetBrains Mono",ui-monospace,Menlo,monospace;fill:var(--text)}
+.diagram .s{font-weight:400;font-size:11px;fill:var(--sub0)}
+.diagram .t{font-size:10.5px;fill:var(--o1);letter-spacing:.06em}
+dl.specs{border:1px solid var(--s0);border-radius:.5rem;overflow:hidden;font-size:.875rem}
+dl.specs>div{display:grid;grid-template-columns:7rem 1fr;gap:1rem;padding:.75rem 1rem;border-top:1px solid var(--s0)}
+dl.specs>div:first-child{border-top:0}
+dl.specs dt{color:var(--o1)}
+dl.specs dd{color:var(--sub1)}
+dl.specs dd strong{color:var(--text);font-weight:500}
+.domains{display:flex;flex-wrap:wrap;gap:.5rem;margin:.25rem 0 1rem}
+details{border:1px solid var(--s0);border-radius:.5rem;margin-bottom:.75rem;transition:border-color .2s}
+details:hover,details[open]{border-color:#cba6f740}
+summary{cursor:pointer;padding:.875rem 1rem;font-weight:500;font-size:.9375rem;list-style:none;display:flex;justify-content:space-between;gap:1rem;color:var(--text)}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";color:var(--mauve)}
+details[open] summary::after{content:"-"}
+details>div{padding:0 1rem .25rem}
+details p{font-size:.875rem;color:var(--sub0)}
+.button88{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:1rem}
+.button88 img{image-rendering:pixelated;width:88px;height:31px;border:0}
+.button88 code{white-space:normal;word-break:break-all;display:block;font-size:.6875rem;padding:.4rem .6rem;-webkit-user-select:all;user-select:all}
+footer{border-top:1px solid var(--s0);padding:1.5rem}
+footer .col{text-align:center;font-size:.75rem;color:var(--o0)}
+footer p{color:inherit;margin:0 0 .5rem}
+footer a{color:var(--o1);text-decoration:underline;text-decoration-color:var(--s1);text-underline-offset:3px}
+footer a:hover{color:var(--text)}
+footer .legal{color:var(--sub0)}
+@media (max-width:520px){h1{font-size:1.625rem}dl.specs>div{grid-template-columns:1fr;gap:.125rem}.start{padding:.9rem 1.5rem;font-size:1rem}}
+@media (prefers-reduced-motion:reduce){.start::before{display:none}*{transition:none!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">skip to content</a>
+<nav class="top" aria-label="Page sections">
+  <div class="col">
+    <a class="brand" href="/">rvwasm</a>
+    <div class="links">
+      <a href="#about">about</a>
+      <a href="#how">how</a>
+      <a href="#works">works</a>
+      <a href="#requirements">specs</a>
+      <a href="#network">network</a>
+      <a href="#faq">faq</a>
+    </div>
+  </div>
+</nav>
+
+<main id="main">
+<div class="col">
+  <section id="start">
+    <h1>KDE Plasma <span>on the web</span></h1>
+    <p class="lead">a full Linux desktop in one browser tab. rvwasm boots Debian with KDE Plasma on your own computer: Konsole, Dolphin, Kate, <code>apt-get install</code>, sound, GPU drawing and video. nothing is streamed from a server.</p>
+    <a id="go" class="start" href="/desktop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z" fill="currentColor"/></svg>Start Plasma</a>
+    <p class="start-sub">one click boots it in this tab. free, no account. the first start downloads the parts of the disk it needs. prefer zero clicks? <a id="go2" href="/desktop">plasmaontheweb.com/desktop</a> boots at once.</p>
+    <p id="compat" class="compat" role="status"></p>
+    <figure class="shot">
+      <img src="/assets/hero-960.webp" srcset="/assets/hero-960.webp 960w, /assets/hero-1920.webp 1920w" sizes="(min-width: 720px) 672px, calc(100vw - 48px)" width="960" height="526" fetchpriority="high" decoding="async" alt="The KDE Plasma desktop running in a browser tab on rvwasm, with Konsole, Kate, Dolphin and System Settings tiled in four windows above the panel.">
+      <figcaption>a real capture: Plasma with Konsole, Kate, Dolphin and System Settings, in a Chrome tab.</figcaption>
+    </figure>
+  </section>
+
+  <section id="about">
+    <h2>what is rvwasm</h2>
+    <p><span class="m">rvwasm is a Linux desktop on the web.</span> it runs Debian (riscv64) with the KDE Plasma desktop inside a single Chrome tab, so you can use KDE Plasma in the browser with nothing to install. there is no remote screen and no virtual machine in a data centre: the machine runs on your computer, inside the page, on your CPU and GPU.</p>
+    <p>the Plasma shell is compiled straight to WebAssembly, so this is a real Plasma web port, not a video of a desktop. the applications are Debian's ordinary riscv64 programs, run through a JIT that translates them to WebAssembly while they run.</p>
+    <p>the project is called rvwasm; Plasma is what it runs. it is real enough to open a terminal, install packages with <code>apt-get</code>, play sound and run Firefox.</p>
+  </section>
+
+  <section id="how">
+    <h2>how it works</h2>
+    <p>the browser tab is the computer. a Linux kernel built for WebAssembly runs in it, and Debian's programs run on that kernel. small services of ours connect the programs to the page, which draws the windows, runs the GPU commands, plays the sound and decodes the video.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 420 460" role="img" aria-labelledby="dg-t dg-d">
+        <title id="dg-t">how rvwasm fits together</title>
+        <desc id="dg-d">Layers from top to bottom: the browser tab provides the display, GPU, video decoder, audio and network. Under it, a Linux kernel compiled to WebAssembly. Under that, the Plasma shell running natively in WebAssembly, and Debian riscv64 programs running through the rv JIT.</desc>
+        <rect x="6" y="6" width="408" height="150" rx="8" fill="#1e1e2e" stroke="#cba6f7" stroke-width="1.2"/>
+        <text class="t" x="18" y="28">YOUR BROWSER TAB = THE HARDWARE</text>
+        <g fill="#181825" stroke="#313244">
+          <rect x="18" y="42" width="118" height="46" rx="6"/><rect x="151" y="42" width="118" height="46" rx="6"/><rect x="284" y="42" width="118" height="46" rx="6"/>
+          <rect x="18" y="98" width="190" height="46" rx="6"/><rect x="220" y="98" width="182" height="46" rx="6"/>
+        </g>
+        <text x="28" y="62">display</text><text class="s" x="28" y="78">WebGL canvas</text>
+        <text x="161" y="62">gpu</text><text class="s" x="161" y="78">WebGL2 / WebGPU</text>
+        <text x="294" y="62">video</text><text class="s" x="294" y="78">WebCodecs</text>
+        <text x="28" y="118">audio</text><text class="s" x="28" y="134">AudioWorklet</text>
+        <text x="230" y="118">network</text><text class="s" x="230" y="134">WebSocket to relay</text>
+        <path d="M210 162v20m-5-6l5 7 5-7" stroke="#cba6f7" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <text class="s" x="224" y="177">one block of shared memory</text>
+        <rect x="6" y="190" width="408" height="76" rx="8" fill="#1e1e2e" stroke="#45475a" stroke-width="1.2"/>
+        <text class="t" x="18" y="212">LINUX KERNEL, COMPILED TO WEBASSEMBLY</text>
+        <text class="s" x="18" y="232">linux-wasm: no MMU, each process a Web Worker</text>
+        <text class="s" x="18" y="250">window, gpu, sound and video services in JS</text>
+        <path d="M105 272v20m-5-6l5 7 5-7M315 272v20m-5-6l5 7 5-7" stroke="#cba6f7" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="6" y="300" width="200" height="150" rx="8" fill="#1e1e2e" stroke="#a6e3a1" stroke-width="1.2"/>
+        <text class="t" x="18" y="322" style="fill:#a6e3a1">NATIVE WEBASSEMBLY</text>
+        <text x="18" y="346">Plasma desktop</text>
+        <text class="s" x="18" y="368">plasmashell, panel,</text>
+        <text class="s" x="18" y="384">launcher, widgets</text>
+        <text class="s" x="18" y="400">Qt 6 + KDE Frameworks</text>
+        <text class="s" x="18" y="416">compiled to WebAssembly</text>
+        <text class="s" x="18" y="432">no emulation: stays fast</text>
+        <rect x="214" y="300" width="200" height="150" rx="8" fill="#1e1e2e" stroke="#cba6f7" stroke-width="1.2"/>
+        <text class="t" x="226" y="322">DEBIAN + RV JIT</text>
+        <text x="226" y="346">Konsole, Dolphin,</text>
+        <text x="226" y="362">Kate, Settings...</text>
+        <text class="s" x="226" y="386">unmodified riscv64</text>
+        <text class="s" x="226" y="402">programs, translated</text>
+        <text class="s" x="226" y="418">to WebAssembly as</text>
+        <text class="s" x="226" y="434">they run</text>
+      </svg>
+    </div>
+    <ul class="bul">
+      <li><span class="m">kernel:</span> Joel Severin's <a href="https://github.com/joelseverin/linux-wasm" rel="noopener">linux-wasm</a>, Linux compiled to 64-bit WebAssembly, with our patches. each process is a Web Worker sharing one memory.</li>
+      <li><span class="m">the jit, rv:</span> runs Debian's unmodified riscv64 binaries by turning hot code into WebAssembly, which the browser compiles to machine code. RISC-V is simple and regular, so it translates cheaply.</li>
+      <li><span class="m">native desktop:</span> the Plasma shell skips emulation entirely, so the panel, menus and windows stay responsive.</li>
+      <li><span class="m">disks:</span> the system disk is fetched in 1 MiB pieces as the machine reads them and kept in your browser. your changes and home folder never leave it.</li>
+      <li><span class="m">the server</span> only hands out those files and a restricted network relay. it does not run your desktop.</li>
+    </ul>
+  </section>
+
+  <section id="works">
+    <h2>what works</h2>
+    <p>a Debian riscv64 system with the full KDE desktop, not a demo window.</p>
+    <div class="stack" style="margin-top:1rem">
+      <div class="item"><h3>plasma and apps</h3><p>the Plasma 6 desktop with panel, launcher and system tray, plus Konsole, Dolphin, Kate, System Settings, Firefox ESR and Chromium.</p><div class="tags"><span class="tag ok">works</span><span class="tag">Qt 6</span><span class="tag">KDE Frameworks 6</span></div></div>
+      <div class="item"><h3>apt and packages</h3><p><code>apt-get install</code> reaches Debian's riscv64 archive. <code>pip</code>, <code>npm</code>, <code>cargo</code> and <code>git clone</code> from GitHub work too.</p><div class="tags"><span class="tag ok">works</span><span class="tag">through the relay</span></div></div>
+      <div class="item"><h3>audio</h3><p>the kernel has a sound card; PulseAudio plays through an AudioWorklet to your speakers. Chrome needs one click on the page first.</p><div class="tags"><span class="tag ok">works</span><span class="tag">PulseAudio</span><span class="tag">AudioWorklet</span></div></div>
+      <div class="item"><h3>gpu</h3><p>programs draw with OpenGL through Mesa, and the commands run on your real GPU through WebGL2, or WebGPU with <code>?exec=webgpu</code>.</p><div class="tags"><span class="tag ok">works</span><span class="tag">WebGL2</span><span class="tag">WebGPU</span></div></div>
+      <div class="item"><h3>video</h3><p>players hand compressed video to the page, which decodes it with WebCodecs on your hardware decoder (H.264, HEVC, VP8, VP9, AV1). showing the picture in the player's window is still being finished.</p><div class="tags"><span class="tag wip">in progress</span><span class="tag">WebCodecs</span></div></div>
+      <div class="item"><h3>your files</h3><p>the home folder and every change are kept in your browser's private storage, so a second visit picks up where you left off.</p><div class="tags"><span class="tag ok">works</span><span class="tag">stays in your browser</span></div></div>
+    </div>
+    <p class="small" style="margin-top:1rem;color:var(--o1)">known limits: no <code>fork()</code> (programs use <code>vfork</code>), no systemd, Chrome only, and programs under the JIT run slower than natively.</p>
+  </section>
+
+  <section id="requirements">
+    <h2>requirements</h2>
+    <p>rvwasm runs on your computer, so your computer sets the speed. <span class="m">per-core speed matters most:</span> the JIT and the desktop are mostly single-threaded per task.</p>
+    <dl class="specs">
+      <div><dt>browser</dt><dd><strong>current desktop Chrome</strong>, Edge or Brave. Firefox, Safari, phones and tablets are not supported.</dd></div>
+      <div><dt>cpu</dt><dd><strong>fast single-core performance</strong>: Apple M1 or newer, a recent Intel Core or AMD Ryzen, at least 4 cores (8 or more is better).</dd></div>
+      <div><dt>memory</dt><dd><strong>16 GB of RAM</strong> recommended. the tab uses 4 to 8 GB with the desktop; 8 GB works for a light session.</dd></div>
+      <div><dt>disk</dt><dd>about 5 GB free for the browser's copy of the system disk.</dd></div>
+      <div><dt>gpu</dt><dd>any GPU with WebGL2. WebGPU is better for <code>?exec=webgpu</code>.</dd></div>
+    </dl>
+    <p class="small" style="margin-top:.75rem;color:var(--o1)">low-power laptops and Chromebooks boot it, but heavy programs such as Firefox, Chromium and compilers will be slow there.</p>
+  </section>
+
+  <section id="network">
+    <h2>network allowlist</h2>
+    <p>the machine reaches the internet only through a relay, and this public relay is <span class="m">restricted on purpose</span> so the demo cannot be used for spam or scanning. DNS answers only for allowlisted domains, connections go only to the addresses those names resolved to, on ports 80 and 443, with per-visitor limits.</p>
+    <p>the allowlist covers installing software:</p>
+    <div class="domains"><code>deb.debian.org</code><code>security.debian.org</code><code>pypi.org</code><code>files.pythonhosted.org</code><code>registry.npmjs.org</code><code>github.com</code><code>crates.io</code></div>
+    <p>so <code>apt-get install</code>, <code>pip install</code>, <code>npm install</code> and <code>git clone</code> from GitHub (and its download hosts) work. general web browsing from inside the machine does not, and neither do mail, SSH or other ports.</p>
+  </section>
+
+  <section id="faq">
+    <h2>faq</h2>
+    <details open><summary>What is rvwasm?</summary><div><p>rvwasm is a Linux desktop that runs inside a browser tab. It boots Debian (riscv64) with KDE Plasma on linux-wasm, a Linux kernel compiled to WebAssembly, and runs Debian's programs through our own riscv64-to-WebAssembly JIT. rvwasm is the project; Plasma is what it runs.</p></div></details>
+    <details><summary>Is this really KDE Plasma running in the browser?</summary><div><p>Yes. The desktop shell (plasmashell, built on Qt 6.8, KDE Frameworks 6 and Plasma 6.3) is compiled straight to WebAssembly and runs natively in your tab, so it is a web port of the Plasma desktop. Applications such as Konsole, Dolphin, Kate and System Settings are Debian's own riscv64 builds, run through the JIT.</p></div></details>
+    <details><summary>Is the desktop streamed from a server, like a remote desktop?</summary><div><p>No. Nothing is streamed. The machine runs on your own computer, inside the page, using your CPU, GPU, sound output and hardware video decoder. The server only hands out files and, optionally, a restricted network relay.</p></div></details>
+    <details><summary>Is it free? Do I need an account?</summary><div><p>It is free to use and needs no account and no installation: open the page and click Start Plasma.</p></div></details>
+    <details><summary>Is this official KDE software?</summary><div><p>No. This is an unofficial project and is not affiliated with or endorsed by KDE e.V. KDE and Plasma are trademarks of KDE e.V. The desktop it runs is KDE's free software.</p></div></details>
+    <details><summary>Which browsers and computers does it work on?</summary><div><p>Current desktop Chrome, Edge or Brave. Firefox, Safari, phones and tablets are not supported. A computer with fast single-core performance (Apple M1 or newer, a recent Intel Core or AMD Ryzen) and 16 GB of RAM is recommended; the tab uses 4 to 8 GB with the desktop. About 5 GB of free disk space is used for the browser's copy of the system disk.</p></div></details>
+    <details><summary>Why does the first start take a while?</summary><div><p>The system disk is fetched in 1 MiB pieces as the machine reads them and is kept in your browser, so the first visit downloads the parts it uses (hundreds of megabytes up to a few gigabytes). Later visits start from what is already stored.</p></div></details>
+    <details><summary>Can I install software with apt-get?</summary><div><p>Yes. <code>apt-get install</code> works through the network relay, as do <code>pip install</code>, <code>npm install</code>, <code>cargo</code> and <code>git clone</code> from GitHub. The relay only allows a short list of domains, so general web browsing from inside the machine does not work.</p></div></details>
+    <details><summary>Can I browse the web inside the desktop?</summary><div><p>Not on the public site. Firefox and Chromium are installed, but the machine can only reach the allowlisted domains (Debian's archive, PyPI, npm, GitHub and crates.io), on ports 80 and 443.</p></div></details>
+    <details><summary>Are my files saved?</summary><div><p>Your home folder and everything you change on the disk are stored in your own browser, in its Origin Private File System, and never on the server. They stay until you clear this site's data.</p></div></details>
+    <details><summary>How fast is a Linux desktop in a browser tab?</summary><div><p>The Plasma shell, the GPU, sound and video paths run at close to native speed in WebAssembly. Debian's riscv64 programs run through the JIT, which is several times faster than other WebAssembly emulators but slower than native, so heavy programs such as Firefox, Chromium and compilers feel slow on a low-power laptop.</p></div></details>
+  </section>
+
+  <section id="credits">
+    <h2>credits</h2>
+    <p>rvwasm stands on a lot of free software.</p>
+    <ul class="bul">
+      <li><a href="https://github.com/joelseverin/linux-wasm" rel="noopener">linux-wasm</a> by Joel Severin: the Linux kernel compiled to WebAssembly that everything runs on.</li>
+      <li><a href="https://www.debian.org/" rel="noopener">Debian</a>: the riscv64 system, its packages and its archive.</li>
+      <li><a href="https://kde.org/" rel="noopener">KDE</a>: Plasma, KDE Frameworks, Konsole, Dolphin, Kate and System Settings.</li>
+      <li>Qt, Mesa and virglrenderer, PulseAudio, mpv and libva, BusyBox, musl and LLVM.</li>
+    </ul>
+    <div class="button88">
+      <a href="https://plasmaontheweb.com/" aria-label="rvwasm, KDE Plasma on the web"><img src="/assets/button-88x31.png" width="88" height="31" alt="rvwasm: plasma on the web"></a>
+      <div class="xs dim" style="flex:1;min-width:14rem">link to us:<code>&lt;a href="https://plasmaontheweb.com/"&gt;&lt;img src="https://plasmaontheweb.com/assets/button-88x31.png" width="88" height="31" alt="rvwasm"&gt;&lt;/a&gt;</code></div>
+    </div>
+  </section>
+</div>
+</main>
+
+<footer>
+  <div class="col">
+    <p class="legal">Unofficial project. Not affiliated with or endorsed by KDE e.V. KDE&reg; and Plasma&trade; are trademarks of KDE e.V.</p>
+    <p>rvwasm runs KDE's Plasma and Debian's software in your browser; the rvwasm name and logo are this project's own. Debian is a registered trademark of Software in the Public Interest, Inc. Linux is a trademark of Linus Torvalds.</p>
+    <p><a href="/desktop">boot directly</a> &middot; <a href="#faq">faq</a></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // the nav link of the section in view turns mauve
+  var links = document.querySelectorAll(".links a"), secs = [];
+  links.forEach(function (a) { var s = document.querySelector(a.getAttribute("href")); if (s) secs.push([s, a]); });
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { links.forEach(function (l) { l.removeAttribute("aria-current"); }); secs.forEach(function (p) { if (p[0] === e.target) p[1].setAttribute("aria-current", "true"); }); } });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    secs.forEach(function (p) { io.observe(p[0]); });
+  }
+  var go = document.getElementById("go"), go2 = document.getElementById("go2"), note = document.getElementById("compat");
+  // Switches in this address (?mem=, ?autostart=0 ...) carry over to the machine.
+  if (location.search) { go.href += location.search; go2.href += location.search; }
+  var ua = navigator.userAgent, issues = [];
+  if (!/Chrome\//.test(ua) || /Android|Mobile|CriOS/.test(ua)) {
+    issues.push("this browser is not supported: rvwasm needs desktop Chrome, Edge or Brave. you can still try it.");
+  } else if (typeof SharedArrayBuffer === "undefined" || self.crossOriginIsolated === false) {
+    issues.push("this page is not cross-origin isolated here, which the machine needs for shared memory. open it over HTTPS in a current Chrome.");
+  }
+  if ((navigator.deviceMemory && navigator.deviceMemory < 4) || (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4)) {
+    issues.push("this computer looks small (under 4 cores or 4 GB). it may boot, but slowly.");
+  }
+  if (issues.length) { note.textContent = issues.join(" "); note.className = "compat on"; }
+})();
+</script>
+</body>
+</html>

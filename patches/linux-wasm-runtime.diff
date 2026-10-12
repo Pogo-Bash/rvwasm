@@ -1,0 +1,523 @@
+diff --git a/runtime/linux-worker.js b/runtime/linux-worker.js
+index aee2580..c1210e7 100644
+--- a/runtime/linux-worker.js
++++ b/runtime/linux-worker.js
+@@ -7,6 +7,15 @@
+   let Ulong;
+   let memory = null;  // Note: memory.buffer has to be re-accessed after growing the memory!
+   let locks = null;
++
++  /// For each disk, the words shared with its worker (see disk-worker.js), or null if there is no such disk.
++  let disks = [];
++
++  /// The ring of input events, shared with the main thread (see linux.js), or null.
++  let input = null;
++
++  /// The ring of received network frames, shared with the main thread (see linux.js), or null.
++  let net = null;
+   const text_decoder = new TextDecoder("utf-8");
+   const text_encoder = new TextEncoder();
+ 
+@@ -214,11 +223,25 @@
+ 
+     // Host callbacks by the Wasm-default clocksource.
+ 
+-    wasm_cpu_clock_get_monotonic: () => {
+-      // Convert this double in ms to u64 in us.
+-      // Modern browsers can on good days reach 5us accuracy, given that the platform supports it.
+-      return BigInt(Math.round(1000 * (performance.timeOrigin + performance.now()))) * 1000n;
+-    },
++    wasm_cpu_clock_get_monotonic: (() => {
++      // Every Worker has to tell the same time: the kernel has one clock and reads it wherever a task or a CPU
++      // runs. timeOrigin + now() alone does not: now() stands still while the computer sleeps and timeOrigin is
++      // the wall clock when the Worker started, so a Worker started after a sleep is ahead of one started before
++      // it by the length of the sleep (and one started after the wall clock was set is off by that much). A
++      // Worker whose clock has come apart from the wall clock, by more than rounding and the slow corrections a
++      // wall clock gets can explain, follows the wall clock from then on: all of them do, so they agree again.
++      let correction = 0;
++      return () => {
++        const now = performance.timeOrigin + performance.now();
++        const apart = Date.now() - (now + correction);
++        if (apart > 250 || apart < -250) {
++          correction += apart;
++        }
++        // Convert this double in ms to u64 in us.
++        // Modern browsers can on good days reach 5us accuracy, given that the platform supports it.
++        return BigInt(Math.round(1000 * (now + correction))) * 1000n;
++      };
++    })(),
+ 
+     // Host callbacks by the Wasm-default random number generator.
+     wasm_random_get_bytes: (buffer, count) => {
+@@ -233,6 +256,102 @@
+       return count;
+     },
+ 
++    // Host callbacks used by the disk (drivers/block/wasm_blk.c).
++
++    /// The size of disk number index in 512-byte sectors, or 0 if there is none.
++    wasm_driver_blk_sectors: (index) => {
++      const disk = disks[index];
++      return disk ? (disk[9] >>> 0) + disk[10] * 4294967296 : 0;
++    },
++
++    /// Read (op 0) or write (op 1) sectors from or to the kernel's memory at buffer, or flush (op 2); which disk
++    /// is in the bits of op from 8 up. The disk's worker does it (disk-worker.js, which has the meaning of the
++    /// shared words); this task sleeps meanwhile.
++    wasm_driver_blk_rw: (sector, buffer, count, op) => {
++      const disk = disks[op >>> 8];
++      if (!disk) {
++        return -5;  // EIO
++      }
++      op &= 0xff;
++      // One request at a time: word 0 is the lock.
++      while (Atomics.compareExchange(disk, 0, 0, 1) != 0) {
++        Atomics.wait(disk, 0, 1);
++      }
++      disk[3] = op;
++      disk[4] = sector % 4294967296 | 0;
++      disk[5] = Math.floor(sector / 4294967296);
++      disk[6] = buffer | 0;
++      disk[7] = count;
++      Atomics.store(disk, 2, 0);
++      Atomics.store(disk, 1, 1);
++      Atomics.notify(disk, 1);
++      Atomics.wait(disk, 2, 0);
++      const result = disk[8];
++      Atomics.store(disk, 0, 0);
++      Atomics.notify(disk, 0, 1);
++      return result;
++    },
++
++    // Host callbacks used by the display (drivers/video/fbdev/wasm_fb.c).
++
++    /// The pixels to show are at this address from now on: the main thread does the showing.
++    wasm_driver_fb_show: (pixels, width, height, stride) => {
++      port.postMessage({ method: "fb_show", pixels: pixels, width: width, height: height, stride: stride });
++    },
++
++    // Host callbacks used by the keyboard and pointer (drivers/input/misc/wasm_input.c).
++
++    /// Copy up to max waiting events (three 32-bit words each) into the kernel's buffer and return how many.
++    wasm_driver_input_rx: (events, max) => {
++      if (!input) {
++        return 0;
++      }
++      const out = new Int32Array(memory.buffer, events, max * 3);
++      const written = Atomics.load(input.index, 0);
++      let read = Atomics.load(input.index, 1);
++      let count = 0;
++      while (count < max && read != written) {
++        const slot = (read % input.slots) * 3;
++        out[count * 3] = input.words[slot];
++        out[count * 3 + 1] = input.words[slot + 1];
++        out[count * 3 + 2] = input.words[slot + 2];
++        read = (read + 1) | 0;
++        count++;
++      }
++      Atomics.store(input.index, 1, read);
++      return count;
++    },
++
++    // Host callbacks used by the network interface (drivers/net/wasm_net.c).
++
++    /// Send one Ethernet frame: the main thread has the connection.
++    wasm_driver_net_tx: (frame, count) => {
++      port.postMessage({
++        method: "net_tx",
++        frame: new Uint8Array(memory.buffer).slice(frame, frame + count),
++      });
++      return count;
++    },
++
++    /// Copy the next received frame into the kernel's buffer and return its length, or 0 if there is none.
++    wasm_driver_net_rx: (buffer, size) => {
++      if (!net) {
++        return 0;
++      }
++      const read = Atomics.load(net.index, 1);
++      if (read == Atomics.load(net.index, 0)) {
++        return 0;
++      }
++      const slot = (read % net.slots) * net.slot_size;
++      const length = net.bytes[slot] | (net.bytes[slot + 1] << 8);
++      const fits = length <= size;
++      if (fits) {
++        new Uint8Array(memory.buffer).set(net.bytes.subarray(slot + 2, slot + 2 + length), buffer);
++      }
++      Atomics.store(net.index, 1, (read + 1) | 0);
++      return fits ? length : 0;
++    },
++
+     // Host callbacks used by the Wasm-default console driver.
+ 
+     wasm_driver_hvc_put: (buffer, count) => {
+@@ -288,6 +407,9 @@
+       runner_name = message.runner_name;
+       memory = message.memory;
+       locks = message.locks;
++      net = message.net || null;
++      input = message.input || null;
++      disks = message.disks || [];
+       switch_to_last_task = message.last_task; // Only defined for tasks and CPU 0 (init task).
+ 
+       if (message.user_executable) {
+@@ -308,7 +430,8 @@
+ 
+       // This is a global error handler that is used when calling Wasm code.
+       const wasm_error = (error) => {
+-        log("Wasm crash: " + error.toString());
++        // With where it happened: the functions of a program have names (its "name" section).
++        log("Wasm crash: " + error.toString() + "\n" + String(error.stack || "").split("\n").slice(0, 14).join("\n"));
+         console.error(error);
+ 
+         if (vmlinux_instance) {
+@@ -430,6 +553,42 @@
+             __wasm_syscall_5: vmlinux_instance.exports.wasm_syscall_5,
+             __wasm_syscall_6: vmlinux_instance.exports.wasm_syscall_6,
+ 
++            // JIT support (rv/jit.c): compile the Wasm module the program built at
++            // [ptr, ptr + len) and put its exported function "r" into the program's
++            // function table, at `slot` or, if that is negative, in a new slot.
++            // Function imports of the module (namespace "rv") are resolved against
++            // the program's own exports, so generated code can call back into it.
++            // Returns the slot, or -1 if the module did not compile.
++            __rv_jit_install: (ptr, len, slot) => {
++              try {
++                const start = Number(ptr);
++                // A copy: a module cannot be compiled from shared memory.
++                const bytes = new Uint8Array(memory.buffer).slice(start, start + Number(len));
++                const module = new WebAssembly.Module(bytes);
++                // The table: regions jump to one another through it (tail calls).
++                const imports = {
++                  env: { memory: memory, table: user_executable_imports.env.__indirect_function_table },
++                  rv: {},
++                };
++                for (const item of WebAssembly.Module.imports(module)) {
++                  if (item.module == "rv") {
++                    imports.rv[item.name] = user_executable_instance.exports[item.name];
++                  }
++                }
++                const instance = new WebAssembly.Instance(module, imports);
++                const table = user_executable_imports.env.__indirect_function_table;
++                let index = Number(slot);
++                if (index < 0) {
++                  index = table.grow(1);
++                }
++                table.set(index, instance.exports.r);
++                return Ulong(index);
++              } catch (error) {
++                console.error("__rv_jit_install: " + error);
++                return Ulong(-1);
++              }
++            },
++
+             __wasm_abort: () => {
+               debugger
+               throw WebAssembly.RuntimeError('abort');
+@@ -527,6 +686,25 @@
+       // All tasks start in the kernel, some return to userland, where they should never return. If they return, we
+       // handle this as an error and wait. Our life ends when the kernel kills us by terminating the whole Worker. Oh,
+       // and exex() can trap us, in which case we have to circle back to loading new user code and executing it agian.
++      if (message.runner_type == "spare") {
++        // A spare runner (see linux.js): what does not depend on the task is done ahead of time, which is loading
++        // this script and instantiating vmlinux. The task itself arrives later, in an "assign" message.
++        const ready = vmlinux_setup();
++        message_callbacks.assign = (assignment) => {
++          message = assignment;
++          runner_name = message.runner_name;
++          if (message.user_executable) {
++            host_callbacks.wasm_load_executable(
++              message.user_executable.bin_start,
++              message.user_executable.bin_end,
++              message.user_executable.data_start,
++              message.user_executable.table_start);
++          }
++          ready.then(vmlinux_run).catch(wasm_error).then(user_executable_chain);
++        };
++        return;
++      }
++
+       vmlinux_setup().then(vmlinux_run).catch(wasm_error).then(user_executable_chain);
+     },
+   };
+diff --git a/runtime/linux.js b/runtime/linux.js
+index 5d32953..444a109 100644
+--- a/runtime/linux.js
++++ b/runtime/linux.js
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ 
+ /// Create a Linux machine and run it.
+-const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, console_write) => {
++const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, console_write, net_url, canvas, disk_options) => {
+   const arch_bits = variant.startsWith("wasm32_") ? 32 : 64;
+   const Ulong = (arch_bits == 32) ? Number : BigInt;
+ 
+@@ -17,6 +17,138 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+   const text_decoder = new TextDecoder("utf-8");
+   const text_encoder = new TextEncoder();
+ 
++  /// Input (drivers/input/misc/wasm_input.c): events wait in a ring in shared memory, three words each (kind, code,
++  /// value), until the kernel's input thread takes them. index[0] counts events put in, index[1] events taken out.
++  const input = {
++    slots: 1024,
++    index: new Int32Array(new SharedArrayBuffer(8)),
++  };
++  input.words = new Int32Array(new SharedArrayBuffer(input.slots * 3 * 4));
++  const INPUT_KEY = 0, INPUT_POSITION = 1, INPUT_BUTTON = 2, INPUT_WHEEL = 3;
++  const input_event = (kind, code, value) => {
++    const written = Atomics.load(input.index, 0);
++    if (((written - Atomics.load(input.index, 1)) | 0) >= input.slots) {
++      return;  // nobody is taking them: dropped
++    }
++    const slot = (written % input.slots) * 3;
++    input.words[slot] = kind;
++    input.words[slot + 1] = code;
++    input.words[slot + 2] = value;
++    Atomics.store(input.index, 0, (written + 1) | 0);
++  };
++
++  /// What the kernel calls the keys (linux/input-event-codes.h), by the browser's names for the physical keys.
++  const key_codes = {
++    Escape: 1, Digit1: 2, Digit2: 3, Digit3: 4, Digit4: 5, Digit5: 6, Digit6: 7, Digit7: 8, Digit8: 9, Digit9: 10,
++    Digit0: 11, Minus: 12, Equal: 13, Backspace: 14, Tab: 15, KeyQ: 16, KeyW: 17, KeyE: 18, KeyR: 19, KeyT: 20,
++    KeyY: 21, KeyU: 22, KeyI: 23, KeyO: 24, KeyP: 25, BracketLeft: 26, BracketRight: 27, Enter: 28, ControlLeft: 29,
++    KeyA: 30, KeyS: 31, KeyD: 32, KeyF: 33, KeyG: 34, KeyH: 35, KeyJ: 36, KeyK: 37, KeyL: 38, Semicolon: 39,
++    Quote: 40, Backquote: 41, ShiftLeft: 42, Backslash: 43, KeyZ: 44, KeyX: 45, KeyC: 46, KeyV: 47, KeyB: 48,
++    KeyN: 49, KeyM: 50, Comma: 51, Period: 52, Slash: 53, ShiftRight: 54, NumpadMultiply: 55, AltLeft: 56,
++    Space: 57, CapsLock: 58, F1: 59, F2: 60, F3: 61, F4: 62, F5: 63, F6: 64, F7: 65, F8: 66, F9: 67, F10: 68,
++    NumLock: 69, ScrollLock: 70, Numpad7: 71, Numpad8: 72, Numpad9: 73, NumpadSubtract: 74, Numpad4: 75,
++    Numpad5: 76, Numpad6: 77, NumpadAdd: 78, Numpad1: 79, Numpad2: 80, Numpad3: 81, Numpad0: 82,
++    NumpadDecimal: 83, IntlBackslash: 86, F11: 87, F12: 88, NumpadEnter: 96, ControlRight: 97, NumpadDivide: 98,
++    PrintScreen: 99, AltRight: 100, Home: 102, ArrowUp: 103, PageUp: 104, ArrowLeft: 105, ArrowRight: 106,
++    End: 107, ArrowDown: 108, PageDown: 109, Insert: 110, Delete: 111, Pause: 119, MetaLeft: 125, MetaRight: 126,
++    ContextMenu: 127,
++  };
++  const button_codes = [0x110, 0x112, 0x111];  // BTN_LEFT, BTN_MIDDLE, BTN_RIGHT, by the browser's button numbers
++
++  /// The display (drivers/video/fbdev/wasm_fb.c): where the kernel last said the pixels are, or null.
++  let fb = null;
++  if (canvas) {
++    const context = canvas.getContext("2d");
++    let image = null, image_words = null;
++    const draw = () => {
++      if (fb) {
++        if (!image || canvas.width != fb.width || canvas.height != fb.height) {
++          canvas.width = fb.width;
++          canvas.height = fb.height;
++          image = context.createImageData(fb.width, fb.height);
++          image_words = new Uint32Array(image.data.buffer);
++        }
++        // (A new view every time: the memory's buffer is another object after the memory has grown.)
++        if (fb.pixels + fb.height * fb.stride <= memory.buffer.byteLength && fb.stride == fb.width * 4) {
++          image.data.set(new Uint8Array(memory.buffer, fb.pixels, fb.height * fb.stride));
++          // The fourth byte of a pixel is not used by the kernel; to a canvas it is opacity.
++          for (let i = 0; i < image_words.length; i++) {
++            image_words[i] |= 0xff000000;
++          }
++          context.putImageData(image, 0, 0);
++        }
++      }
++      requestAnimationFrame(draw);
++    };
++    requestAnimationFrame(draw);
++
++    const position = (event) => {
++      const box = canvas.getBoundingClientRect();
++      const x = Math.max(0, Math.min(32767, Math.round((event.clientX - box.left) / box.width * 32767)));
++      const y = Math.max(0, Math.min(32767, Math.round((event.clientY - box.top) / box.height * 32767)));
++      input_event(INPUT_POSITION, x, y);
++    };
++    canvas.addEventListener("keydown", (event) => {
++      if (event.code in key_codes) {
++        if (!event.repeat) {  // the kernel repeats keys itself
++          input_event(INPUT_KEY, key_codes[event.code], 1);
++        }
++        event.preventDefault();
++      }
++    });
++    canvas.addEventListener("keyup", (event) => {
++      if (event.code in key_codes) {
++        input_event(INPUT_KEY, key_codes[event.code], 0);
++        event.preventDefault();
++      }
++    });
++    canvas.addEventListener("mousemove", position);
++    canvas.addEventListener("mousedown", (event) => {
++      canvas.focus();
++      position(event);
++      input_event(INPUT_BUTTON, button_codes[event.button] || 0x110, 1);
++      event.preventDefault();
++    });
++    canvas.addEventListener("mouseup", (event) => {
++      input_event(INPUT_BUTTON, button_codes[event.button] || 0x110, 0);
++      event.preventDefault();
++    });
++    canvas.addEventListener("wheel", (event) => {
++      input_event(INPUT_WHEEL, 0, event.deltaY < 0 ? 1 : -1);
++      event.preventDefault();
++    }, { passive: false });
++    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
++  }
++
++  /// The network (drivers/net/wasm_net.c): every binary message on this WebSocket is one Ethernet frame. Frames
++  /// that arrive wait in a ring in shared memory until the kernel's receive thread takes them: index[0] counts the
++  /// frames put in, index[1] the frames taken out, and each slot holds a 16-bit length and the frame.
++  const net = {
++    slots: 256,
++    slot_size: 2048,
++    index: new Int32Array(new SharedArrayBuffer(8)),
++  };
++  net.bytes = new Uint8Array(new SharedArrayBuffer(net.slots * net.slot_size));
++  let net_socket = null;
++  if (net_url) {
++    net_socket = new WebSocket(net_url);
++    net_socket.binaryType = "arraybuffer";
++    net_socket.onopen = () => log("[Main]: network relay connected: " + net_url);
++    net_socket.onerror = () => log("[Main]: no network relay at " + net_url);
++    net_socket.onmessage = (event) => {
++      const frame = new Uint8Array(event.data);
++      const written = Atomics.load(net.index, 0);
++      if (frame.length > net.slot_size - 2 || ((written - Atomics.load(net.index, 1)) | 0) >= net.slots) {
++        return;  // too large, or the kernel is not keeping up: dropped, as a network may
++      }
++      const slot = (written % net.slots) * net.slot_size;
++      net.bytes[slot] = frame.length & 0xff;
++      net.bytes[slot + 1] = frame.length >> 8;
++      net.bytes.set(frame, slot + 2);
++      Atomics.store(net.index, 0, (written + 1) | 0);
++    };
++  }
++
+   const lock_notify = (locks, lock, count) => {
+     Atomics.store(locks._memory, locks[lock], 1);
+     Atomics.notify(locks._memory, locks[lock], count || 1);
+@@ -106,6 +238,16 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+       Atomics.notify(message.console_read_messenger, 0, 1);
+     },
+ 
++    fb_show: (message) => {
++      fb = { pixels: message.pixels, width: message.width, height: message.height, stride: message.stride };
++    },
++
++    net_tx: (message) => {
++      if (net_socket && net_socket.readyState == WebSocket.OPEN) {
++        net_socket.send(message.frame);
++      }
++    },
++
+     console_write: (message) => {
+       console_write(message.message);
+     },
+@@ -115,6 +257,9 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+     },
+   };
+ 
++  /// For each disk, the words shared with its worker (see disk-worker.js), or null if there is no such disk.
++  const disks = [];
++
+   /// Memory shared between all CPUs.
+   const memory = new WebAssembly.Memory({
+     initial: Ulong(30), // TODO: extract this automatically from vmlinux.
+@@ -152,6 +297,11 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+     }
+   };
+ 
++  /// Runners kept ready for the next tasks: Workers that have loaded their script and instantiated vmlinux, which
++  /// together is most of the time it takes to create a task. Filled when the first task is created.
++  const spare_runners = [];
++  const SPARE_RUNNERS = 8;
++
+   /**
+    * Create and run one task. This task has been switch_to():ed by the scheduler for the first time.
+    *
+@@ -166,7 +316,21 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+       new_task: new_task,
+       user_executable: user_executable,
+     };
+-    tasks[new_task] = make_vmlinux_runner(name + " (" + new_task + ")", options);
++    const runner_name = name + " (" + new_task + ")";
++
++    // Use a spare runner if there is one: it has started and instantiated vmlinux already.
++    const spare = spare_runners.shift();
++    if (spare) {
++      spare.worker.postMessage({ ...options, method: "assign", runner_name: runner_name });
++      tasks[new_task] = spare;
++    } else {
++      tasks[new_task] = make_vmlinux_runner(runner_name, options);
++    }
++
++    // Replace it (after the hand-over above: this is not on the new task's critical path).
++    while (spare_runners.length < SPARE_RUNNERS) {
++      spare_runners.push(make_vmlinux_runner("spare", { runner_type: "spare" }));
++    }
+   };
+ 
+   const kill_task = (dead_task) => {
+@@ -220,6 +384,9 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+       vmlinux: vmlinux,
+       memory: memory,
+       locks: locks,
++      net: net,
++      input: input,
++      disks: disks,
+       last_task: last_task,
+       runner_name: name,
+     });
+@@ -233,10 +400,55 @@ const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, co
+     };
+   };
+ 
++  // The disks (drivers/block/wasm_blk.c), if the page wants any: disk_options is one of these, or a list of
++  // them (wda, wdb, ...): { worker: the URL of disk-worker.js, url: where the pieces of the disk's image are,
++  // name: what to call it in the origin's private file system, reset: forget what is kept there, keep: the
++  // disk is the image only the first time, and its own from then on }. A worker of its own keeps each; the
++  // kernel starts when they are ready.
++  await Promise.all([].concat(disk_options || []).map((options, index) => new Promise((resolve) => {
++    const label = "[Disk " + options.name + "]: ";
++    const control = new Int32Array(new SharedArrayBuffer(64));
++    const disk_worker = new Worker(options.worker, { name: "disk " + options.name });
++    disks[index] = null;
++    disk_worker.onmessage = (event) => {
++      if (event.data.method == "log") {
++        log(label + event.data.text);
++      } else {
++        if (event.data.method == "ready") {
++          disks[index] = control;
++        } else {
++          log(label + "no disk (" + event.data.text + ")");
++        }
++        resolve();
++      }
++    };
++    disk_worker.onerror = (error) => {
++      log(label + "no disk (" + error.message + ")");
++      resolve();
++    };
++    disk_worker.postMessage({
++      memory: memory,
++      control: control,
++      url: options.url,
++      keep: options.keep,
++      name: options.name,
++      reset: options.reset,
++    });
++  })));
++
+   // Create the primary cpu, it will later on callback to us and we start secondaries.
+   make_cpu(0);
+ 
+   return {
++    /// For looking at a machine that has stopped answering (tools/desktop-drive.js): its memory, and the words
++    /// each disk shares with its worker.
++    memory: memory,
++    disks: disks,
++
++    /// An input event as the canvas would make it: (0, key code, 1 or 0), (1, x, y) with both in 0..32767,
++    /// (2, button code, 1 or 0), (3, 0, wheel clicks).
++    screen_input: input_event,
++
+     key_input: (data) => {
+       const key_buffer = text_encoder.encode(data);  // Possibly UTF-8 (up to 16 bits).
+ 

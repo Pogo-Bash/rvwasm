@@ -1,0 +1,10 @@
+# Upstream checkout (own repository) and locally installed tooling.
+/linux-wasm/
+/tools/lima/
+/tools/dl/
+/tools/chrome/
+
+# Build output.
+build/
+*.o
+/dist/

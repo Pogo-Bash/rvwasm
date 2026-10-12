@@ -1,0 +1,121 @@
+--- a/src/util/kmodifierkeyinfoprovider_wayland.cpp
++++ b/src/util/kmodifierkeyinfoprovider_wayland.cpp
+@@ -14,16 +14,16 @@
+ 
+ #include "qwayland-keystate.h"
+ 
+-class KeyState : public QWaylandClientExtensionTemplate<KeyState>, public QtWayland::org_kde_kwin_keystate
++class KModifierKeyState : public QWaylandClientExtensionTemplate<KModifierKeyState>, public QtWayland::org_kde_kwin_keystate
+ {
+     Q_OBJECT
+ public:
+-    KeyState()
+-        : QWaylandClientExtensionTemplate<KeyState>(5)
++    KModifierKeyState()
++        : QWaylandClientExtensionTemplate<KModifierKeyState>(5)
+     {
+     }
+ 
+-    ~KeyState()
++    ~KModifierKeyState()
+     {
+         if (isInitialized() && qGuiApp) {
+             if (QtWayland::org_kde_kwin_keystate::version() >= ORG_KDE_KWIN_KEYSTATE_DESTROY_SINCE_VERSION) {
+@@ -36,43 +36,43 @@
+ 
+     void org_kde_kwin_keystate_stateChanged(uint32_t key, uint32_t state) override
+     {
+-        Q_EMIT stateChanged(toKey(static_cast<KeyState::key>(key)), toState(static_cast<KeyState::state>(state)));
++        Q_EMIT stateChanged(toKey(static_cast<KModifierKeyState::key>(key)), toState(static_cast<KModifierKeyState::state>(state)));
+     }
+ 
+-    KModifierKeyInfoProvider::ModifierState toState(KeyState::state state)
++    KModifierKeyInfoProvider::ModifierState toState(KModifierKeyState::state state)
+     {
+         switch (state) {
+-        case KeyState::state::state_unlocked:
++        case KModifierKeyState::state::state_unlocked:
+             return KModifierKeyInfoProvider::Nothing;
+-        case KeyState::state::state_locked:
++        case KModifierKeyState::state::state_locked:
+             return KModifierKeyInfoProvider::Locked;
+-        case KeyState::state::state_latched:
++        case KModifierKeyState::state::state_latched:
+             return KModifierKeyInfoProvider::Latched;
+-        case KeyState::state::state_pressed:
++        case KModifierKeyState::state::state_pressed:
+             return KModifierKeyInfoProvider::Pressed;
+         }
+         Q_UNREACHABLE();
+         return KModifierKeyInfoProvider::Nothing;
+     }
+ 
+-    Qt::Key toKey(KeyState::key key)
++    Qt::Key toKey(KModifierKeyState::key key)
+     {
+         switch (key) {
+-        case KeyState::key::key_capslock:
++        case KModifierKeyState::key::key_capslock:
+             return Qt::Key_CapsLock;
+-        case KeyState::key::key_numlock:
++        case KModifierKeyState::key::key_numlock:
+             return Qt::Key_NumLock;
+-        case KeyState::key::key_scrolllock:
++        case KModifierKeyState::key::key_scrolllock:
+             return Qt::Key_ScrollLock;
+-        case KeyState::key_alt:
++        case KModifierKeyState::key_alt:
+             return Qt::Key_Alt;
+-        case KeyState::key_shift:
++        case KModifierKeyState::key_shift:
+             return Qt::Key_Shift;
+-        case KeyState::key_control:
++        case KModifierKeyState::key_control:
+             return Qt::Key_Control;
+-        case KeyState::key_meta:
++        case KModifierKeyState::key_meta:
+             return Qt::Key_Meta;
+-        case KeyState::key_altgr:
++        case KModifierKeyState::key_altgr:
+             return Qt::Key_AltGr;
+         }
+         Q_UNREACHABLE();
+@@ -84,15 +84,15 @@
+ 
+ KModifierKeyInfoProviderWayland::KModifierKeyInfoProviderWayland()
+ {
+-    m_keystate = new KeyState;
++    m_keystate = new KModifierKeyState;
+ 
+-    QObject::connect(m_keystate, &KeyState::activeChanged, this, [this]() {
++    QObject::connect(m_keystate, &KModifierKeyState::activeChanged, this, [this]() {
+         if (m_keystate->isActive()) {
+             m_keystate->fetchStates();
+         }
+     });
+ 
+-    connect(m_keystate, &KeyState::stateChanged, this, &KModifierKeyInfoProviderWayland::stateUpdated);
++    connect(m_keystate, &KModifierKeyState::stateChanged, this, &KModifierKeyInfoProviderWayland::stateUpdated);
+ 
+     stateUpdated(Qt::Key_CapsLock, KModifierKeyInfoProvider::Nothing);
+     stateUpdated(Qt::Key_NumLock, KModifierKeyInfoProvider::Nothing);
+--- a/src/util/kmodifierkeyinfoprovider_wayland.h
++++ b/src/util/kmodifierkeyinfoprovider_wayland.h
+@@ -10,7 +10,7 @@
+ 
+ #include <kmodifierkeyinfoprovider_p.h>
+ 
+-class KeyState;
++class KModifierKeyState;
+ 
+ class KModifierKeyInfoProviderWayland : public KModifierKeyInfoProvider
+ {
+@@ -23,7 +23,7 @@
+     bool setKeyLocked(Qt::Key key, bool locked) override;
+ 
+ private:
+-    KeyState *m_keystate;
++    KModifierKeyState *m_keystate;
+ };
+ 
+ #endif

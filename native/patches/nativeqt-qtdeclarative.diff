@@ -1,0 +1,57 @@
+diff --git a/src/3rdparty/masm/wtf/OSAllocatorPosix.cpp b/src/3rdparty/masm/wtf/OSAllocatorPosix.cpp
+--- a/src/3rdparty/masm/wtf/OSAllocatorPosix.cpp
++++ b/src/3rdparty/masm/wtf/OSAllocatorPosix.cpp
+@@ -43,7 +43,9 @@
+ #endif
+ #endif
+ 
+-#if defined(__ANDROID__) && defined(SYS_memfd_create)
++#if (defined(__ANDROID__) || defined(__wasm__)) && defined(SYS_memfd_create)
++   // (linux-wasm: no MMU, a private mapping of a memfd is the file's own pages
++   // or a copy of them, and nothing to name; anonymous memory it is.)
+    // On Android it's been observed that permissions of memory mappings
+    // backed by a memfd could not be changed via mprotect for no obvious
+    // reason.
+@@ -109,8 +111,13 @@
+     UNUSED_PARAM(executable);
+     int fd = memfdForUsage(bytes, usage);
+ 
++#if defined(__wasm__)
++    // linux-wasm: what is reserved is memory at once (no MMU), readable and writable.
++    void* result = mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++#else
+     void* result = mmap(0, bytes, PROT_NONE, MAP_NORESERVE | MAP_PRIVATE |
+                         (fd == -1 ? MAP_ANON : 0), fd, 0);
++#endif
+     if (result == MAP_FAILED)
+         CRASH();
+ 
+@@ -203,7 +210,14 @@
+ 
+ void OSAllocator::commit(void* address, size_t bytes, bool writable, bool executable)
+ {
+-#if OS(QNX)
++#if defined(__wasm__)
++    // linux-wasm: no MMU. A reservation is memory from the start (mmap gave real,
++    // zeroed pages), there is no mprotect, and nothing to commit.
++    UNUSED_PARAM(address);
++    UNUSED_PARAM(bytes);
++    UNUSED_PARAM(writable);
++    UNUSED_PARAM(executable);
++#elif OS(QNX)
+     int protection = PROT_READ;
+     if (writable)
+         protection |= PROT_WRITE;
+@@ -240,6 +254,12 @@
+ 
+ void OSAllocator::decommit(void* address, size_t bytes)
+ {
++#if defined(__wasm__)
++    // linux-wasm: the pages stay; what was in them goes (callers count on decommitted
++    // memory reading as zero when committed again).
++    memset(address, 0, bytes);
++    return;
++#endif
+ #if OS(QNX)
+     // Use PROT_NONE and MAP_LAZY to decommit the pages.
+     mmap(address, bytes, PROT_NONE, MAP_FIXED | MAP_LAZY | MAP_PRIVATE | MAP_ANON, -1, 0);

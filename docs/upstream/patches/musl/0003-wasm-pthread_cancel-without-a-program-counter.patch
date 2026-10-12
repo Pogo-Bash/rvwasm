@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:50:44 -0500
+Subject: [PATCH 3/5] wasm: pthread_cancel without a program counter
+
+Cancellation points were plain system calls, and cancel_handler() called
+abort() when there was no MC_PC: pthread_cancel() aborted the process
+whenever cancellation was enabled, and a target blocked in a restartable
+call (read()) never even ran the handler (SIGCANCEL had SA_RESTART), so
+pthread_join() waited for good.
+
+Wasm has no program counter to move, so the checks are in C: SYSCALL_CP_C
+looks at self->cancel before the call and turns -EINTR with self->cancel set
+into the cancellation after it; SIGCANCEL is installed without SA_RESTART on
+Wasm, so that a cancellation point it interrupts fails with EINTR; and
+cancel_handler() only returns (the flag is set already). On Wasm a signal is
+only ever acted on at the return of a system call, never between two
+instructions of the program, so a cancel that comes after the first look is
+seen by the system call itself: a blocking one returns EINTR at once, one
+that does not block completes and the next cancellation point acts. (A
+non-cancellation-point system call that a cancel interrupts may return EINTR,
+which with SA_RESTART it would not.)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/thread/pthread_cancel.c | 41 ++++++++++++++++++++++++++++---------
+ 1 file changed, 31 insertions(+), 10 deletions(-)
+
+diff --git a/src/thread/pthread_cancel.c b/src/thread/pthread_cancel.c
+index 4ba7b8e..320b443 100644
+--- a/src/thread/pthread_cancel.c
++++ b/src/thread/pthread_cancel.c
+@@ -36,8 +36,20 @@ hidden long __syscall_cp_c4(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall
+ hidden long __syscall_cp_c5(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t);
+ hidden long __syscall_cp_c6(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t);
+ 
+-/* It's a TODO to handle this... */
+ /*
++ * A cancellation point on Wasm. Elsewhere __syscall_cp_asm looks at the
++ * cancel flag right before the system call instruction, and cancel_handler()
++ * moves a thread that a cancel interrupts between that look and the call to
++ * __cp_cancel by its program counter, which Wasm has none of. Here both are
++ * plain C: the flag is looked at before the call, and a call the cancel
++ * interrupted fails with EINTR (SIGCANCEL is installed without SA_RESTART
++ * on Wasm, init_cancellation()) and is turned into the cancellation after
++ * it. A signal is only ever acted on at the return of a system call on Wasm,
++ * never between two instructions of the program, so a cancel that comes
++ * after the look is seen by the system call itself: one that blocks returns
++ * EINTR at once; one that does not completes, and the next cancellation
++ * point acts on the flag.
++ */
+ #define SYSCALL_CP_C(num, ...) do {\
+ 		pthread_t self; \
+ 		long r; \
+@@ -47,16 +59,14 @@ hidden long __syscall_cp_c6(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall
+ 			&& (st==PTHREAD_CANCEL_DISABLE || nr==SYS_close)) \
+ 			return __syscall(__VA_ARGS__); \
+ 		\
+-		r = __syscall_cp_asm##num(&self->cancel, __VA_ARGS__); \
++		if (self->cancel) \
++			return __cancel(); \
++		r = __syscall(__VA_ARGS__); \
+ 		if (r==-EINTR && nr!=SYS_close && self->cancel && \
+ 			self->canceldisable != PTHREAD_CANCEL_DISABLE) \
+ 			r = __cancel(); \
+ 		return r; \
+ 	} while(0)
+-*/
+-#define SYSCALL_CP_C(num, ...) do {\
+-		return __syscall(__VA_ARGS__); \
+-	} while(0)
+ 
+ long __syscall_cp_c0(syscall_arg_t nr)
+ {
+@@ -126,12 +136,18 @@ static void cancel_handler(int sig, siginfo_t *si, void *ctx)
+ #endif
+ 		return;
+ 	}
+-#else
+-	/* TODO: handle this. */
+-	abort();
+-#endif
+ 
+ 	__syscall(SYS_tkill, self->tid, SIGCANCEL);
++#else
++	/*
++	 * No program counter to move (Wasm): the flag is set, and the
++	 * cancellation point that this signal interrupted fails with EINTR,
++	 * which SYSCALL_CP_C turns into the cancellation; elsewhere, the next
++	 * cancellation point acts on the flag. SIGCANCEL stays blocked
++	 * (above), as when it is raised again elsewhere.
++	 */
++	(void)pc;
++#endif
+ }
+ 
+ void __testcancel()
+@@ -144,7 +160,12 @@ void __testcancel()
+ static void init_cancellation()
+ {
+ 	struct sigaction sa = {
++#ifdef MC_PC
+ 		.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK,
++#else
++		/* (No SA_RESTART: a cancellation point it interrupts is to fail with EINTR, see SYSCALL_CP_C.) */
++		.sa_flags = SA_SIGINFO | SA_ONSTACK,
++#endif
+ 		.sa_sigaction = cancel_handler
+ 	};
+ 	memset(&sa.sa_mask, -1, _NSIG/8);

@@ -1,0 +1,112 @@
+For the kernel (to be folded into kernel-rvwasm.diff; applies on top of it): the machine's memory up to
+16 GiB. mem= was capped at 0xFFFF pages, and TASK_SIZE (3 GiB) made strncpy_from_user()/strnlen_user()
+refuse strings above 3 GiB. wasm_mem_pages_max() tells tools/www/dev.html that the kernel takes more.
+The boot's grow loop asked for the same again for ever when the memory could not grow that far; it asks
+for a sixteenth less each time now.
+
+diff --git a/arch/wasm/include/asm/processor.h b/arch/wasm/include/asm/processor.h
+index cf6051c..08aa1be 100644
+--- a/arch/wasm/include/asm/processor.h
++++ b/arch/wasm/include/asm/processor.h
+@@ -10,8 +10,24 @@
+ 
+ struct pt_regs;
+ 
+-/* 3 GB RAM for userspace, 1 GB for the kernel. */
++/*
++ * The highest address a program's memory can have. Without an MMU,
++ * access_ok() takes every address (asm-generic/access_ok.h), but
++ * strncpy_from_user() and strnlen_user() (lib/, GENERIC_STRNCPY_FROM_USER)
++ * still refuse a string that starts at TASK_SIZE or above with EFAULT: a
++ * path to open(), an argument or environment string to execve(). A
++ * program's memory is wherever the kernel found free pages, anywhere in the
++ * machine's memory, so this has to be all of it: on wasm64 up to 16 GiB,
++ * the most a 64-bit Wasm memory may have in the browsers (V8:
++ * kV8MaxWasmMemory64Pages) and what every program on the machine is linked
++ * with (--max-memory). (It was 3 GiB, the machine's default size; with a
++ * larger mem=, a string above 3 GiB was refused.)
++ */
++#ifdef CONFIG_64BIT
++#define TASK_SIZE (1UL << 34)
++#else
+ #define TASK_SIZE (0xC0000000)
++#endif
+ 
+ /*
+  * We run interrupts on CPU 1, keep it clear. Why not CPU 0? Because init needs
+diff --git a/arch/wasm/kernel/head.S b/arch/wasm/kernel/head.S
+index 0b0024c..a68651d 100644
+--- a/arch/wasm/kernel/head.S
++++ b/arch/wasm/kernel/head.S
+@@ -38,22 +38,32 @@ _start:
+ 	/* Try grow by the difference, (max - curr). */
+ 	iLONG.sub
+ 	local.set 0
++	/*
++	 * If that fails, ask for a sixteenth less, and so on. (It asked for
++	 * the same again, for ever, while the comment said it asked for less:
++	 * a mem= larger than the memory's maximum, which the host sets, never
++	 * booted. A browser that could not reserve the whole maximum gives the
++	 * memory a smaller one, so this is not only a wrong mem=.)
++	 */
++	block
+ 	loop
+ 		local.get 0
+ 		WASM_MEMORY_GROW /* iLONG new -> iLONG old_or_error. */
+ 		iLONG.const -1 /* -1 means allocation failed. */
+-		iLONG.eq
+-		br_if 0
++		iLONG.ne
++		br_if 1
+ 
+-		/*
+-		 * If we fail, keep decreasing. This often succeeds quite soon
+-		 * in browsers. The act of retrying allocations seem to work.
+-		 */
+ 		local.get 0
++		local.get 0
++		iLONG.const 4
++		iLONG.shr_u
+ 		iLONG.const 1
++		iLONG.add
+ 		iLONG.sub
+ 		local.set 0
++		br 0
+ 	end_loop
++	end_block
+ 
+ 	block
+ 		local.get 0
+diff --git a/arch/wasm/kernel/setup.c b/arch/wasm/kernel/setup.c
+index 497ff90..408805c 100644
+--- a/arch/wasm/kernel/setup.c
++++ b/arch/wasm/kernel/setup.c
+@@ -34,10 +34,27 @@ __visible unsigned long wasm_memory_grow(unsigned long delta_pages)
+  * anything else runs, to know how far to grow the Wasm memory: the host has
+  * written the command line into boot_command_line already, but nothing has
+  * parsed it, and nothing may be called that needs the kernel up. Between 128
+- * MiB and the 4 GiB a 32-bit-indexed Wasm memory can have (less one page).
++ * MiB and the most the Wasm memory can have: 16 GiB for a 64-bit one (the
++ * limit of V8, the browsers' engine, and the maximum the runtime gives the
++ * memory, linux.js), the 4 GiB of a 32-bit one less one page.
+  */
+ #define WASM_MEM_PAGES_MIN	((128UL << 20) >> 16)
++#ifdef CONFIG_64BIT
++#define WASM_MEM_PAGES_MAX	0x40000UL
++#else
+ #define WASM_MEM_PAGES_MAX	0xFFFFUL
++#endif
++
++/*
++ * Not called: that a kernel has this function (in the exports of vmlinux.wasm)
++ * tells the page that it takes a mem= larger than 3 GiB, up to
++ * WASM_MEM_PAGES_MAX pages (tools/www/dev.html: the machine's size).
++ */
++__visible unsigned long wasm_mem_pages_max(void);
++__visible unsigned long wasm_mem_pages_max(void)
++{
++	return WASM_MEM_PAGES_MAX;
++}
+ 
+ __visible unsigned long __init wasm_boot_mem_pages(void);
+ __visible unsigned long __init wasm_boot_mem_pages(void)

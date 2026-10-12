@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:40:28 -0500
+Subject: [PATCH 3/3] runtime: a signal at a new task's first return runs once
+ its program is there
+
+ret_from_fork calls _user_mode_tail right after __ret_from_fork(). If a
+signal with a handler is pending then (sent between clone() and the child's
+first run, which takes a Worker start: Ctrl-C to the foreground group, a
+SIGCHLD or SIGWINCH while a shell starts a child), the kernel sets up a frame
+and asks the host to run the handler, but the child's program has not been
+instantiated yet: user_executable_instance is null, the access throws a
+TypeError, and the task dies with SIGILL.
+
+The request is remembered, and the handler runs in user_executable_run(),
+once the instance exists (stack pointer and TLS as the kernel says, as for
+any signal), before _start() or __libc_clone_callback(). A first return can
+only deliver (flow 1): no handler can have returned yet.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ runtime/linux-worker.js | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/runtime/linux-worker.js b/runtime/linux-worker.js
+index 7d02208..f9be18f 100644
+--- a/runtime/linux-worker.js
++++ b/runtime/linux-worker.js
+@@ -45,6 +45,9 @@
+   /// How many traps in a row, a handler's own included: past a few, no handler is run any more.
+   let fault_depth = 0;
+ 
++  /// A signal the kernel delivered at the task's first return to its program, before the program was there.
++  let signal_at_start = false;
++
+   /// Flag that a clone callback should be called instead of _start().
+   let should_call_clone_callback = false;
+ 
+@@ -199,6 +202,12 @@
+         // This takes precedence of signal handlers or signal return - no reason to run any old user code!
+         throw new Trap("reload_program");
+       } else if (flow >= 1 && flow <= 3) {
++        // A new task's first return to its program (ret_from_fork), with a signal to deliver, comes before the
++        // program is instantiated: the handler runs when it is (user_executable_run).
++        if (flow == 1 && !user_executable_instance) {
++          signal_at_start = true;
++          return;
++        }
+         // First, handle any signal (possibly stacked). Then, handle any signal return (happens after stacked signals).
+         // If exec() happens, we will slip out in the catch-else clause, ensuring the sigreturn does not proceed.
+         if (flow & 1) {
+@@ -526,6 +535,11 @@
+       };
+ 
+       const user_executable_run = (instance) => {
++        if (signal_at_start) {
++          // The signal the kernel delivered before the program was there: its handler, before anything else.
++          signal_at_start = false;
++          host_callbacks.wasm_user_mode_tail(1);
++        }
+         if (should_call_clone_callback) {
+           // We have to reset this state, because if the clone callback calls exec, we have to run _start() instead!
+           should_call_clone_callback = false;

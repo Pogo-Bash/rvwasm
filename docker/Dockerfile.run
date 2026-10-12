@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+# The run image: the page's server (docker/serve.py) and the network relay (tools/net-relay.py), see README.md
+# "Run it" and docs/docker.md. The image has the programs only; what they serve, the dist (the page, the
+# kernel, the boot image, the disks: docker/release.sh or tools/pack-www.sh make it), is mounted from
+# ${RV_DIST:-./dist} by docker-compose.yml, or fetched into it first (docker/fetch.sh, RV_RELEASE_URL).
+
+FROM debian:trixie-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends python3 iproute2 iptables util-linux \
+		ca-certificates curl \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& useradd --system --create-home --shell /usr/sbin/nologin rv
+
+# Puter's Blender (blenderweb/, optional: docker compose --profile blender up).
+FROM base AS blender
+RUN apt-get update && apt-get install -y --no-install-recommends zstd \
+	&& rm -rf /var/lib/apt/lists/*
+COPY blenderweb/ /opt/rvwasm/blenderweb/
+RUN mkdir -p /data && chown rv:rv /data
+USER rv
+EXPOSE 8040
+CMD ["sh", "-c", "[ -e /data/blender-web/SOURCE.txt ] || /opt/rvwasm/blenderweb/fetch-release.sh /data/blender-web; exec python3 /opt/rvwasm/blenderweb/serve.py --bind 0.0.0.0 --port 8040 --release /data/blender-web"]
+
+FROM base AS run
+# (the relay's firewall and DNS server: docker/net-allowlist.sh, docker/dnsmasq-conf.sh)
+RUN apt-get update && apt-get install -y --no-install-recommends nftables dnsmasq-base procps \
+	&& rm -rf /var/lib/apt/lists/*
+COPY tools/net-relay.py tools/net-setup.sh docker/relay.sh docker/net-allowlist.sh docker/dnsmasq-conf.sh docker/allowlist-reload.sh docker/serve.py docker/fetch.sh /opt/rvwasm/
+COPY docker/allowlist.txt /etc/rvwasm/allowlist.txt
+EXPOSE 8000 8001
+CMD ["python3", "/opt/rvwasm/serve.py", "--dist", "/dist", "--port", "8000"]

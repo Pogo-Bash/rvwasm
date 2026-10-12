@@ -1,0 +1,110 @@
+# Caddy in front of the machine for a public server (docker-compose.yml, service caddy; docs/deploy.md):
+# HTTPS with an automatic Let's Encrypt certificate for $RV_DOMAIN, the page and the disk pieces served straight from
+# the dist (no application server in between), the relay's WebSocket and /address under /relay on the same name.
+#
+# The landing page at / and the boot page at /desktop: see the two handle blocks at the end of (rvsite).
+#
+# $RV_DOMAIN is the one setting that names the site (docker-compose.yml passes it from .env). localhost works too
+# (Caddy then makes its own certificate).
+{
+	# (HTTP/3 would need UDP 443 open as well; HTTP/1.1 and HTTP/2 over TCP 80/443 are all that is opened)
+	servers {
+		protocols h1 h2
+	}
+}
+
+(rvsite) {
+	encode zstd gzip
+
+	header {
+		# shared memory (SharedArrayBuffer) needs the page cross-origin isolated
+		Cross-Origin-Opener-Policy same-origin
+		Cross-Origin-Embedder-Policy require-corp
+		# (? = unless a more specific block below sets it: the landing page's og image is for other sites to embed)
+		?Cross-Origin-Resource-Policy same-origin
+		X-Content-Type-Options nosniff
+		Strict-Transport-Security "max-age=86400"
+		# the page's files change with every build: check with the server each time (ETag, so unchanged files
+		# answer 304); the disk keeps its own copy of what it fetched in the browser's private file system
+		?Cache-Control "no-cache"
+		-Server
+	}
+
+	# the machine's network: the relay's WebSocket (wss://DOMAIN/relay/?ip=N) and its /address. It checks the
+	# Origin itself (RV_ORIGINS = https://DOMAIN) and takes the visitor's address from X-Forwarded-For, which Caddy
+	# sets to the connection's own address (what the client sent is not trusted).
+	handle_path /relay/* {
+		reverse_proxy relay:8001
+	}
+
+	# what dev.html takes from the server (docker/serve.py does the same for the local setup): the relay is on this
+	# address under /relay, the machine's resolver is the relay's own DNS server, and the disk.
+	handle /rv-site.json {
+		header Content-Type application/json
+		respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}"}` 200
+	}
+
+	# the disk: 1 MiB pieces (named by number, no extension) and a manifest, ranges and ETags from the file server.
+	# Not compressed: ext4's pieces are mostly already-compressed files, and the CPU is better kept for the relay.
+	handle_path /disk/* {
+		root * /dist/disk
+		@piece path_regexp ^/[^/]+/[0-9]+$
+		header @piece Content-Type application/octet-stream
+		file_server
+	}
+
+	# The boot page: the machine itself (dev.html). The landing page's Start button goes here; search engines are
+	# told not to index it (the landing page at / is the page that ranks).
+	@desktopslash path /desktop/
+	redir @desktopslash /desktop 302
+	@desktop path /desktop /dev.html
+	handle @desktop {
+		header X-Robots-Tag "noindex, nofollow"
+		rewrite * /dev.html
+		root * /dist/www
+		file_server
+	}
+
+	# The landing page and its files (site/ in the tree, mounted at /site): /, robots.txt, sitemap.xml, the icons,
+	# assets/. A Search Console verification file (googleXXXX.html) dropped into site/ is served here too.
+	@site file {
+		root /site
+		try_files {path} {path}/index.html
+	}
+	handle @site {
+		root * /site
+		@static path /assets/*
+		header @static >Cache-Control "public, max-age=86400"
+		@og path /assets/og-image.png
+		header @og >Cross-Origin-Resource-Policy cross-origin
+		@manifest path /site.webmanifest
+		header @manifest Content-Type application/manifest+json
+		@ico path /favicon.ico
+		header @ico Content-Type image/x-icon
+		@robots path /robots.txt
+		header @robots Content-Type "text/plain; charset=utf-8"
+		@sitemap path /sitemap.xml
+		header @sitemap Content-Type "application/xml; charset=utf-8"
+		file_server
+	}
+
+	# everything else: the kernel, scripts and so on (without a /site mount, / is the machine, as before)
+	handle {
+		root * /dist/www
+		header X-Robots-Tag "noindex"
+		rewrite / /dev.html
+		file_server
+	}
+}
+
+# The site: $RV_DOMAIN, and any more names in $RV_ALT_DOMAINS (space separated, e.g. the sslip.io name). A name needs
+# its DNS A record on this server before Caddy can get its certificate.
+{$RV_DOMAIN:localhost} {$RV_ALT_DOMAINS:} {
+	import rvsite
+}
+
+# www.$RV_DOMAIN goes to the apex (RV_WWW_DOMAIN; the default, www.localhost, makes Caddy use its own CA, not Let's
+# Encrypt, so nothing is asked for until the www record exists and RV_WWW_DOMAIN names it).
+{$RV_WWW_DOMAIN:www.localhost} {
+	redir https://{$RV_DOMAIN:localhost}{uri} permanent
+}

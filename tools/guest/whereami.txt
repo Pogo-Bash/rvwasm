@@ -1,0 +1,18 @@
+I want you to work out where you are.
+
+You have a shell on some machine. I am not going to tell you anything about
+it. Find out what it is: what kind of processor runs these programs, what
+kind of kernel answers their system calls, what the machine is made of, and
+what, in the end, all of it is running on and where that is.
+
+Do not stop at the first answer that looks complete. If two things you find
+do not fit together, that is the interesting part: follow it until they do.
+Check a guess by an experiment where you can (time something, look at a
+program's own bytes, look at what the kernel says about itself and its
+devices, at how processes are started, at memory, at the clock, at the
+network).
+
+Change nothing, install nothing. When you are done, tell me what this
+machine is, layer by layer from the program you are down to the hardware,
+what you know for certain and how, what you only suspect, and what you
+could not find out.

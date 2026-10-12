@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:50:44 -0500
+Subject: [PATCH 5/5] wasm: programs whose main() takes no arguments start
+
+crt1 defined main(argc, argv, envp) calling __main_argc_argv, the name clang
+gives a main(int, char **) on Wasm. For int main(void) clang emits
+__main_void (and __original_main, and a main of its own taking argc and argv),
+so __main_argc_argv stayed an unresolved import and the program could not
+be instantiated ("function import requires a callable"); the link only
+warned about the two mains' signatures.
+
+crt1 now only calls __main_argc_argv; for a program that has only
+__main_void, libc.a has a __main_argc_argv that calls it
+(src/env/wasm/__main_argc_argv.c), which the linker takes only when the
+program has none. (Not a weak definition in crt1: crt1 comes first, and with
+the symbol defined there the linker would not take a program's main out of a
+static library; BusyBox's is in one.) crt1's own entry is __wasm_main (by
+#define main), so it does not clash with the main clang makes for main(void).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/crt_arch.h            | 25 +++++++++++++++----------
+ src/env/wasm/__main_argc_argv.c | 13 +++++++++++++
+ 2 files changed, 28 insertions(+), 10 deletions(-)
+ create mode 100644 src/env/wasm/__main_argc_argv.c
+
+diff --git a/arch/wasm/crt_arch.h b/arch/wasm/crt_arch.h
+index fe3ce01..f02c3c7 100644
+--- a/arch/wasm/crt_arch.h
++++ b/arch/wasm/crt_arch.h
+@@ -1,21 +1,26 @@
+ /*
+- * We provide a prototype for main here (it's declared without prototype in crt1.c etc.). The reason
+- * we have to do this is to avoid an issue with LLVM wrapping and renaming it __original_main, which
+- * will fail when programs later on provide a real main with correct prototype and link it.
++ * main(). On Wasm, clang names a program's main after its parameters: a
++ * main(int, char **) is __main_argc_argv, a main(void) is __main_void (and a
++ * main of its own, which takes argc and argv and calls that). crt1 calls
++ * __main_argc_argv; for a program that has only __main_void, the C library
++ * has a __main_argc_argv that calls it (src/env/wasm/__main_argc_argv.c),
++ * which the linker takes only when the program has none of its own. (Not a
++ * weak definition here: crt1 comes first, and with __main_argc_argv already
++ * defined the linker would not take a program's main out of a library.) A main
++ * of the C library's own would clash with the one clang makes for main(void):
++ * crt1's calls go to __wasm_main instead, by the name main below.
+  *
+- * Oh, and then it comes along and renames it __main_argc_argv because it has parameters, so we have
+- * to alias that as well and main will now be called __main_argc_argv. This cannot be a direct alias
+- * as it is not defined yet, so we just call it...
+- *
+- * To add salt to the injury, musl insists to call the 3-argument version with envp which is non-
+- * standard. What a wonderful mess... We need to clean this up someday, maybe auto-detect somehow.
++ * musl calls main with envp as a third argument, which is not standard and
++ * which neither of clang's has.
+  */
+ int __main_argc_argv(int argc, char *argv[]);
+-int main(int argc, char *argv[], char *envp[])
++
++static int __wasm_main(int argc, char *argv[], char *envp[])
+ {
+ 	(void)envp;
+ 	return __main_argc_argv(argc, argv);
+ }
++#define main __wasm_main
+ 
+ /*
+  * This must really be written in assembly (to capture the stack pointer properly), but we know that
+diff --git a/src/env/wasm/__main_argc_argv.c b/src/env/wasm/__main_argc_argv.c
+new file mode 100644
+index 0000000..6eb4946
+--- /dev/null
++++ b/src/env/wasm/__main_argc_argv.c
+@@ -0,0 +1,13 @@
++/*
++ * The main crt1 calls (arch/wasm/crt_arch.h), for a program whose main takes no
++ * arguments: clang names that one __main_void on Wasm. Taken from the library
++ * only when the program has no __main_argc_argv, a main(int, char **), itself.
++ */
++int __main_void(void);
++
++int __main_argc_argv(int argc, char *argv[])
++{
++	(void)argc;
++	(void)argv;
++	return __main_void();
++}

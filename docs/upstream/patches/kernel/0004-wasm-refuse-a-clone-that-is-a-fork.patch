@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 4/8] wasm: refuse a clone that is a fork
+
+musl's fork() is clone(SIGCHLD) without a stack. The kernel took it, and the
+child's Worker called __libc_clone_callback, which took a function and its
+argument from the top of the parent's stack, where nobody had put them:
+"table index is out of bounds", and the child died with SIGILL while the
+parent saw a fork that had succeeded. Without an MMU there is no copy of the
+parent's memory to give a child anyway; NOMMU kernels fail fork() with
+EINVAL, and programs then take vfork() or posix_spawn().
+
+A user clone with neither a new stack nor CLONE_VM now fails with EINVAL.
+(Without a stack but with CLONE_VM, the C library has put the function on
+the parent's stack, which the child borrows, CLONE_VFORK: that stays.)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/kernel/process.c | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/arch/wasm/kernel/process.c b/arch/wasm/kernel/process.c
+index 6bdc5ff..7cfbbd7 100644
+--- a/arch/wasm/kernel/process.c
++++ b/arch/wasm/kernel/process.c
+@@ -208,7 +208,23 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 		child_switch_stack->fn = args->fn;
+ 		child_switch_stack->fn_arg = args->fn_arg;
+ 	} else {
+-		/* User thread */
++		/*
++		 * User thread. The child's Worker runs the C library's clone
++		 * callback (__libc_clone_callback), which takes the function to
++		 * call and its argument from the top of the child's stack: the
++		 * new stack, or without one the parent's (where the C library
++		 * has put them, and which the child borrows, as with vfork(),
++		 * CLONE_VM | CLONE_VFORK). A clone with neither a stack nor
++		 * CLONE_VM is a fork(), which has put nothing there, and
++		 * without an MMU there is no copy of the parent for it to
++		 * return into: refused, as fork() is on other kernels without
++		 * an MMU, so that the program can take another way
++		 * (posix_spawn()). Its child would otherwise call whatever the
++		 * parent's stack held there, and die.
++		 */
++		if (!args->stack && !(args->flags & CLONE_VM))
++			return -EINVAL;
++
+ 		*child_pt_regs = *parent_pt_regs;
+ 		if (args->stack)
+ 			child_pt_regs->stack_pointer = args->stack;

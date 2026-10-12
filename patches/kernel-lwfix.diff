@@ -1,0 +1,791 @@
+diff --git a/arch/wasm/include/asm/entry.h b/arch/wasm/include/asm/entry.h
+index 5e2d36b37..425df01ee 100644
+--- a/arch/wasm/include/asm/entry.h
++++ b/arch/wasm/include/asm/entry.h
+@@ -24,4 +24,8 @@ __visible void raise_interrupt(int cpu, int irq_nr);
+ 
+ __visible void raise_exception(void);
+ 
++struct pt_regs;
++void wasm_user_state_return(struct pt_regs *regs);
++void wasm_kick_user_task(int cpu);
++
+ #endif /* _ASM_WASM_ENTRY_H */
+diff --git a/arch/wasm/include/asm/futex.h b/arch/wasm/include/asm/futex.h
+index 05f901e4e..603895dc0 100644
+--- a/arch/wasm/include/asm/futex.h
++++ b/arch/wasm/include/asm/futex.h
+@@ -7,28 +7,25 @@
+ #include <linux/uaccess.h>
+ #include <asm/errno.h>
+ 
+-#define FUTEX_MAX_LOOPS	128
+-
++/*
++ * Store the value found at uaddr in *uval, and newval there if it was oldval;
++ * 0 either way (the callers compare *uval with oldval to tell). A value that
++ * was not oldval is not a failure: wake_futex_pi() tells a futex word that
++ * changed under it (-EAGAIN, try again) from one with garbage in it (-EINVAL)
++ * by what it found, and a word that never matched would be retried for good.
++ */
+ static inline int futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
+ 						u32 oldval, u32 newval)
+ {
+-	int loops;
+-	u32 expected;
++	u32 expected = oldval;
+ 
+ 	if (!access_ok(uaddr, sizeof(u32)))
+ 		return -EFAULT;
+ 
+-	for (loops = 0; loops < FUTEX_MAX_LOOPS; ++loops) {
+-		expected = oldval;
+-		if (__atomic_compare_exchange_n((volatile u32 *)uaddr,
+-				&expected, newval, false, __ATOMIC_SEQ_CST,
+-				__ATOMIC_RELAXED)) {
+-			*uval = oldval;
+-			return 0;
+-		}
+-	}
+-
+-	return -EAGAIN;
++	__atomic_compare_exchange_n((volatile u32 *)uaddr, &expected, newval,
++				    false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
++	*uval = expected;
++	return 0;
+ }
+ 
+ static inline int arch_futex_atomic_op_inuser(int op, u32 oparg, int *oval,
+diff --git a/arch/wasm/include/asm/thread_info.h b/arch/wasm/include/asm/thread_info.h
+index cab3cb779..b81221d4f 100644
+--- a/arch/wasm/include/asm/thread_info.h
++++ b/arch/wasm/include/asm/thread_info.h
+@@ -60,6 +60,13 @@ struct thread_info {
+ 	unsigned long		switch_from __aligned(8);
+ 	unsigned int		switch_word;
+ 
++	/*
++	 * Whether the task's Worker runs its program or is in the kernel
++	 * (WASM_USER_*, traps.c): for ending a program that never comes into
++	 * the kernel again, which only the host can do.
++	 */
++	unsigned int		user_state;
++
+ 	/* The kernel plays tricks like casting to atomic_long_t* for flags. */
+ 	unsigned long		flags __aligned(L1_CACHE_BYTES);
+ };
+@@ -72,6 +79,17 @@ struct thread_info {
+ 	.instance_depth = 0,			\
+ }
+ 
++/*
++ * thread_info.user_state (traps.c): IN_KERNEL while the task's Worker runs
++ * the kernel, RUNNING while it runs the program; KILL when a fatal signal
++ * found it RUNNING and asked the host to end that Worker; ENDING when the host
++ * has taken that on (and a new Worker takes the task through its exit).
++ */
++#define WASM_USER_IN_KERNEL	0U
++#define WASM_USER_RUNNING	1U
++#define WASM_USER_KILL		2U
++#define WASM_USER_ENDING	3U
++
+ #endif /* !__ASSEMBLER__ */
+ 
+ /* Use the generic TIF infrastructure: */
+diff --git a/arch/wasm/include/asm/wasm.h b/arch/wasm/include/asm/wasm.h
+index 36fd7b70c..0610b3c36 100644
+--- a/arch/wasm/include/asm/wasm.h
++++ b/arch/wasm/include/asm/wasm.h
+@@ -25,4 +25,19 @@ extern void wasm_reload_program(void);
+ 
+ extern void wasm_clone_callback(void);
+ 
++/*
++ * wasm_release_task() with the task's address + 1 (task_structs are aligned):
++ * not a release but a fatal signal for a task whose Worker runs its program,
++ * which never comes into the kernel by itself. The host ends that Worker (if
++ * the task's user_state, wasm_task_user_state(), is still WASM_USER_KILL,
++ * which it makes WASM_USER_ENDING) and runs the task's exit in a new one
++ * (wasm_user_task_end()). (Through the old import, so that a runtime that
++ * does not know of it still starts the kernel: it says there is no such task
++ * to release, and the task takes the signal at its next system call.)
++ */
++static inline void wasm_end_user_task(struct task_struct *task)
++{
++	wasm_release_task((struct task_struct *)((unsigned long)task | 1UL));
++}
++
+ #endif /* _ASM_WASM_WASM_H */
+diff --git a/arch/wasm/kernel/entry.S b/arch/wasm/kernel/entry.S
+index 341013cc8..5ed5d90ba 100644
+--- a/arch/wasm/kernel/entry.S
++++ b/arch/wasm/kernel/entry.S
+@@ -193,8 +193,27 @@ ret_from_fork:
+ 	* and signal return, the call stack collapses (this call never returns).
+ 	*/
+ 	call _user_mode_tail
++.endm
+ 
+-	end_function
++/*
++ * A system call interrupted by a signal whose handler is to run first comes
++ * back with -ERESTARTSYS (SA_RESTART) or -ERESTARTNOINTR (traps.c): the
++ * handler has run in _user_mode_tail by now, and the call is made again, with
++ * the arguments it had (on other architectures the program counter is moved
++ * back to the system call instruction, with the same effect). Restarting it
++ * in the kernel instead, as with no handler to run, would leave the handler
++ * waiting until the restarted call was done, for as long as that blocks.
++ * \res is the local the result is in; the body is in a loop.
++ */
++.macro WASM_SYSCALL_ASM_RESTART res
++	local.get \res
++	iLONG.const -512 /* -ERESTARTSYS */
++	iLONG.eq
++	local.get \res
++	iLONG.const -513 /* -ERESTARTNOINTR */
++	iLONG.eq
++	i32.or
++	br_if 0
+ .endm
+ 
+ .functype __wasm_syscall_0(iLONG) -> (iLONG)
+@@ -227,76 +246,170 @@ ret_from_fork:
+ .globl wasm_syscall_0
+ wasm_syscall_0:
+ 	.functype wasm_syscall_0(iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	call __wasm_syscall_0
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 3: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		call __wasm_syscall_0
++		local.set 3
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 3
++	end_loop
++	local.get 3
++	end_function
+ 
+ .globl wasm_syscall_1
+ wasm_syscall_1:
+ 	.functype wasm_syscall_1(iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	call __wasm_syscall_1
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 4: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		call __wasm_syscall_1
++		local.set 4
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 4
++	end_loop
++	local.get 4
++	end_function
+ 
+ .globl wasm_syscall_2
+ wasm_syscall_2:
+ 	.functype wasm_syscall_2(iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	call __wasm_syscall_2
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 5: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		call __wasm_syscall_2
++		local.set 5
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 5
++	end_loop
++	local.get 5
++	end_function
+ 
+ .globl wasm_syscall_3
+ wasm_syscall_3:
+ 	.functype wasm_syscall_3(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	call __wasm_syscall_3
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 6: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		call __wasm_syscall_3
++		local.set 6
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 6
++	end_loop
++	local.get 6
++	end_function
+ 
+ .globl wasm_syscall_4
+ wasm_syscall_4:
+ 	.functype wasm_syscall_4(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	local.get 6
+-	call __wasm_syscall_4
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 7: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		local.get 6
++		call __wasm_syscall_4
++		local.set 7
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 7
++	end_loop
++	local.get 7
++	end_function
+ 
+ .globl wasm_syscall_5
+ wasm_syscall_5:
+ 	.functype wasm_syscall_5(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
+-	WASM_SYSCALL_ASM_HEAD
+-	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	local.get 6
+-	local.get 7
+-	call __wasm_syscall_5
+-	WASM_SYSCALL_ASM_FOOT
++	.local iLONG /* 8: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		local.get 6
++		local.get 7
++		call __wasm_syscall_5
++		local.set 8
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 8
++	end_loop
++	local.get 8
++	end_function
+ 
+ .globl wasm_syscall_6
+ wasm_syscall_6:
+ 	.functype wasm_syscall_6(iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG, iLONG) -> (iLONG)
++	.local iLONG /* 9: the result */
++	loop
++		WASM_SYSCALL_ASM_HEAD
++		local.get 2
++		local.get 3
++		local.get 4
++		local.get 5
++		local.get 6
++		local.get 7
++		local.get 8
++		call __wasm_syscall_6
++		local.set 9
++		WASM_SYSCALL_ASM_FOOT
++		WASM_SYSCALL_ASM_RESTART 9
++	end_loop
++	local.get 9
++	end_function
++
++.functype __wasm_user_fault(iLONG) -> (iLONG)
++
++/*
++ * The host, when the program has trapped: sp and tp as for a system call, and
++ * the signal it makes of the trap (traps.c: __wasm_user_fault). A handler for
++ * it runs on the way out, in _user_mode_tail, as for a signal at the return of
++ * a system call.
++ */
++.globl wasm_user_fault
++wasm_user_fault:
++	.functype wasm_user_fault(iLONG, iLONG, iLONG) -> (iLONG)
+ 	WASM_SYSCALL_ASM_HEAD
+ 	local.get 2
+-	local.get 3
+-	local.get 4
+-	local.get 5
+-	local.get 6
+-	local.get 7
+-	local.get 8
+-	call __wasm_syscall_6
++	call __wasm_user_fault
+ 	WASM_SYSCALL_ASM_FOOT
++	end_function
++
++.functype __wasm_user_task_end() -> ()
++
++/*
++ * The host, in a new Worker, for a task whose Worker it has ended because a
++ * fatal signal found it running its program (traps.c): becomes the task, as
++ * ret_from_fork does, and takes it to its exit. Does not return.
++ */
++.globl wasm_user_task_end
++wasm_user_task_end:
++	.functype wasm_user_task_end(iLONG) -> ()
++
++	/* current = task */
++	local.get 0
++	global.set current
++
++	/* __stack_pointer = ALIGN_DOWN(current_switch_stack(), STACK_ALIGN) */
++	global.get current
++	iLONG.const zeroptr+TASK_STRUCT_STACK
++	iLONG.add
++	iLONG.load 0
++	iLONG.const zeroptr+THREAD_STACK_START
++	iLONG.add
++	global.set __stack_pointer
++
++	call __wasm_user_task_end
++
++	end_function
+diff --git a/arch/wasm/kernel/process.c b/arch/wasm/kernel/process.c
+index 7f21f123c..d40cbe178 100644
+--- a/arch/wasm/kernel/process.c
++++ b/arch/wasm/kernel/process.c
+@@ -330,6 +330,7 @@ __ret_from_fork(struct task_struct *prev_task, struct task_struct *next_task)
+ 	syscall_exit_to_user_mode(current_pt_regs());
+ 	cpuflags_overwrite(current_pt_regs()->cpuflags);
+ 	wasm_flags_note_aux(10, prev_task->pid);
++	wasm_user_state_return(current_pt_regs());
+ 
+ 	/*
+ 	 * After returning, the Wasm module binary will be initialized and run.
+@@ -357,6 +358,7 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 	/* (The parent's thread_info was copied: the child has not been switched to.) */
+ 	task_thread_info(p)->switch_word = 0U;
+ 	task_thread_info(p)->switch_from = 0UL;
++	task_thread_info(p)->user_state = WASM_USER_IN_KERNEL;
+ 
+ 	if (unlikely(args->fn)) {
+ 		/* Kernel thread */
+@@ -367,7 +369,23 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 		child_switch_stack->fn = args->fn;
+ 		child_switch_stack->fn_arg = args->fn_arg;
+ 	} else {
+-		/* User thread */
++		/*
++		 * User thread. The child's Worker runs the C library's clone
++		 * callback (__libc_clone_callback), which takes the function to
++		 * call and its argument from the top of the child's stack: the
++		 * new stack, or without one the parent's (where the C library
++		 * has put them, and which the child borrows, as with vfork(),
++		 * CLONE_VM | CLONE_VFORK). A clone with neither a stack nor
++		 * CLONE_VM is a fork(), which has put nothing there, and
++		 * without an MMU there is no copy of the parent for it to
++		 * return into: refused, as fork() is on other kernels without
++		 * an MMU, so that the program can take another way
++		 * (posix_spawn()). Its child would otherwise call whatever the
++		 * parent's stack held there, and die.
++		 */
++		if (!args->stack && !(args->flags & CLONE_VM))
++			return -EINVAL;
++
+ 		*child_pt_regs = *parent_pt_regs;
+ 		if (args->stack)
+ 			child_pt_regs->stack_pointer = args->stack;
+@@ -379,13 +397,14 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 			child_switch_stack->tls = args->tls;
+ 	}
+ 
+-	if (!p->mm->binfmt) {
++	/* (A kernel thread has no mm; the fields are the child's, not ours.) */
++	if (p->mm && !p->mm->binfmt) {
+ 		/* These are normally not zeroed out in copy_process(). */
+-		current->mm->start_code = 0;
+-		current->mm->end_code = 0;
+-		current->mm->start_stack = 0;
+-		current->mm->start_data = 0;
+-		current->mm->end_data = 0;
++		p->mm->start_code = 0;
++		p->mm->end_code = 0;
++		p->mm->start_stack = 0;
++		p->mm->start_data = 0;
++		p->mm->end_data = 0;
+ 	}
+ 
+ 	return user_task_set_affinity(p);
+diff --git a/arch/wasm/kernel/smp.c b/arch/wasm/kernel/smp.c
+index e01bfb8c2..b540978a0 100644
+--- a/arch/wasm/kernel/smp.c
++++ b/arch/wasm/kernel/smp.c
+@@ -157,6 +157,12 @@ void arch_send_call_function_single_ipi(int cpu)
+ void arch_smp_send_reschedule(int cpu)
+ {
+ 	preempt_disable();
++	/*
++	 * Also how a signal is said to a task running on that CPU
++	 * (kick_process()), which a task running its program never hears: a
++	 * fatal one ends it (traps.c).
++	 */
++	wasm_kick_user_task(cpu);
+ 	send_ipi_message(cpu, IPI_RESCHEDULE);
+ 	preempt_enable();
+ }
+diff --git a/arch/wasm/kernel/sys_wasm.c b/arch/wasm/kernel/sys_wasm.c
+index 35aa00783..d7f337a0a 100644
+--- a/arch/wasm/kernel/sys_wasm.c
++++ b/arch/wasm/kernel/sys_wasm.c
+@@ -3,12 +3,20 @@
+ #include <linux/syscalls.h>
+ 
+ #ifdef CONFIG_64BIT
+-// SYS_mmap(): 64-bit mmap, with file offset counted in bytes.
++/*
++ * SYS_mmap(): 64-bit mmap. This is the system call number 32-bit kernels
++ * call mmap2, and the C library makes it the same way on both: with the file
++ * offset counted in blocks of 4096 bytes (musl's SYS_mmap2, off / 4096). The
++ * kernel's pgoff is in pages, which are 4096 bytes only by default.
++ */
+ SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
+ 	unsigned long, prot, unsigned long, flags, unsigned long, fd,
+-	unsigned long, pgoff)
++	unsigned long, off_4k)
+ {
+-	return ksys_mmap_pgoff(addr, len, prot, flags, fd, pgoff);
++	if (off_4k & ((1UL << (PAGE_SHIFT - 12)) - 1))
++		return -EINVAL;
++	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
++			       off_4k >> (PAGE_SHIFT - 12));
+ }
+ #endif
+ 
+diff --git a/arch/wasm/kernel/traps.c b/arch/wasm/kernel/traps.c
+index 378e05f2c..85bbba713 100644
+--- a/arch/wasm/kernel/traps.c
++++ b/arch/wasm/kernel/traps.c
+@@ -2,7 +2,10 @@
+ 
+ #include <linux/entry-common.h>
+ #include <linux/printk.h>
++#include <linux/rcupdate.h>
+ #include <linux/stdarg.h>
++#include <linux/sched/signal.h>
++#include <linux/sched/task.h>
+ #include <linux/sched/task_stack.h>
+ #include <linux/syscalls.h>
+ #include <asm/cpuflags.h>
+@@ -11,6 +14,7 @@
+ #include <asm/ptrace.h>
+ #include <asm/smp.h>
+ #include <asm/syscall.h>
++#include <asm/wasm.h>
+ 
+ struct task_struct *wasm_cpu_curr(int cpu);
+ 
+@@ -205,6 +209,97 @@ static noinline void stack_overrun(struct pt_regs *regs)
+ 	      current->pid, current->comm, regs->syscall_nr, *end_of_stack(current));
+ }
+ 
++/*
++ * A task's program runs in its Worker until it calls into the kernel again,
++ * and nothing can interrupt Wasm code: a signal is only seen when the
++ * program makes a system call. A program that computes without making one
++ * (a loop, a thread busy with its work) cannot be stopped that way, not even
++ * by SIGKILL, and an exit_group() or exec() of another of its threads waits
++ * for it for good. What the host can do is end the Worker: the program is
++ * not in the middle of anything the kernel cares about while it runs, so a
++ * new Worker can take the task through its exit (wasm_user_task_end()).
++ *
++ * Which is only safe while the Worker really is running the program, never
++ * once it has entered the kernel (it may hold locks there, or be the one
++ * running its CPU). thread_info.user_state says which, and a fatal signal and
++ * the task decide between them with compare-and-swap:
++ *
++ *  - The task sets it to RUNNING last thing before it returns to the program,
++ *    and then looks for a fatal signal once more (user_state_return()).
++ *  - A fatal signal that finds it RUNNING sets it to KILL and asks the host to
++ *    end the Worker (wasm_kick_user_task(), from the reschedule IPI that
++ *    signal_wake_up() sends to the task's CPU; wasm_end_user_task()).
++ *  - The host sets KILL to ENDING before it ends the Worker; if it finds
++ *    anything else the task came into the kernel by itself, and will take
++ *    the signal there.
++ *  - The task, entering the kernel, takes RUNNING or KILL back to IN_KERNEL
++ *    (user_state_enter()). Finding ENDING, it waits to be ended.
++ *
++ * Either the signal sees RUNNING or the task sees the signal (a full barrier
++ * on both sides between the write and the read), so neither is missed.
++ */
++static noinline void user_state_wait_end(unsigned int *state)
++{
++	/* The host is ending this Worker, and another runs the task: touch nothing. */
++	for (;;)
++		__builtin_wasm_memory_atomic_wait32((int *)state, (int)WASM_USER_ENDING, -1LL);
++}
++
++static __always_inline void user_state_enter(void)
++{
++	unsigned int *state = &current_thread_info()->user_state;
++	unsigned int old = cmpxchg(state, WASM_USER_RUNNING, WASM_USER_IN_KERNEL);
++
++	if (likely(old == WASM_USER_RUNNING || old == WASM_USER_IN_KERNEL))
++		return;
++	if (old == WASM_USER_KILL &&
++	    cmpxchg(state, WASM_USER_KILL, WASM_USER_IN_KERNEL) == WASM_USER_KILL)
++		return;
++	user_state_wait_end(state);
++}
++
++static void user_exception(struct pt_regs *regs, int sig, int fatal);
++
++static __always_inline void user_state_return(struct pt_regs *regs)
++{
++	smp_store_mb(current_thread_info()->user_state, WASM_USER_RUNNING);
++	if (unlikely(fatal_signal_pending(current))) {
++		/* It came while we were on our way out, and found us in the kernel: take it now. */
++		user_state_enter();
++		user_exception(regs, 0, 0);
++	}
++}
++
++/* For a new task's first return to its program (process.c: __ret_from_fork()). */
++void wasm_user_state_return(struct pt_regs *regs)
++{
++	user_state_return(regs);
++}
++
++/* For the host (wasm_end_user_task()): the word it changes from KILL to ENDING before it ends the task's Worker. */
++__visible unsigned long wasm_task_user_state(struct task_struct *task);
++__visible unsigned long wasm_task_user_state(struct task_struct *task)
++{
++	return (unsigned long)&task_thread_info(task)->user_state;
++}
++
++/* From the reschedule IPI to a CPU (smp.c): its task, if that runs its program with a fatal signal pending, is ended. */
++void wasm_kick_user_task(int cpu)
++{
++	struct task_struct *t;
++	unsigned int *state;
++
++	rcu_read_lock();
++	t = wasm_cpu_curr(cpu);
++	if (t && !(t->flags & PF_KTHREAD) && fatal_signal_pending(t)) {
++		state = &task_thread_info(t)->user_state;
++		smp_mb();
++		if (cmpxchg(state, WASM_USER_RUNNING, WASM_USER_KILL) == WASM_USER_RUNNING)
++			wasm_end_user_task(t);
++	}
++	rcu_read_unlock();
++}
++
+ #define WASM_SYSCALL_N(x, args, cast_args, ...)					\
+ 	__visible long __wasm_syscall_##x args;					\
+ 	__visible long __wasm_syscall_##x args					\
+@@ -214,6 +309,7 @@ static noinline void stack_overrun(struct pt_regs *regs)
+ 		long syscall_args[] = {__MAP(x,__SC_ARGS,__VA_ARGS__)};		\
+ 		bool restart;							\
+ 										\
++		user_state_enter();						\
+ 		check_current("entering a system call", (int)n);		\
+ 		_exception_enter(regs);						\
+ 		if (user_mode(regs))						\
+@@ -250,7 +346,14 @@ static noinline void stack_overrun(struct pt_regs *regs)
+ 				case -ERESTARTNOHAND:				\
+ 				case -ERESTARTSYS:				\
+ 				case -ERESTARTNOINTR:				\
+-					restart = true;				\
++					/*					\
++					 * Not with a handler to run first: the	\
++					 * host runs it after this returns, and	\
++					 * the call is made again after that	\
++					 * (entry.S: wasm_syscall_N).		\
++					 */					\
++					restart = !test_thread_flag(		\
++						TIF_DELIVER_SIGNAL);		\
+ 					break;					\
+ 				default:					\
+ 					restart = false;			\
+@@ -270,6 +373,8 @@ static noinline void stack_overrun(struct pt_regs *regs)
+ 										\
+ 		_exception_exit(regs);						\
+ 		wasm_flags_note_aux(2, regs->syscall_nr);			\
++		if (user_mode(regs))						\
++			user_state_return(regs);				\
+ 										\
+ 		return regs->syscall_ret;					\
+ 	}
+@@ -387,6 +492,98 @@ static void do_exception(struct pt_regs *regs)
+ 	}
+ }
+ 
++/*
++ * An entry from the program that is not a system call: a trap of its code
++ * (sig: the signal the host made of it, which the program may handle; fatal:
++ * it is to die by it now, its handler, if any, having run and returned: a trap
++ * cannot be resumed), or a fatal signal to take (sig 0). A handler is run by
++ * the host after this returns (_user_mode_tail, the frame set up as for any
++ * signal).
++ */
++static void user_exception(struct pt_regs *regs, int sig, int fatal)
++{
++	regs->syscall_nr = -1;
++	_exception_enter(regs);
++	irqentry_enter_from_user_mode(regs);
++	if (sig && fatal) {
++		force_fatal_sig(sig);
++	} else if (sig) {
++		switch (sig) {
++		case SIGSEGV:
++			force_sig_fault(SIGSEGV, SEGV_MAPERR, (void __user *)0UL);
++			break;
++		case SIGBUS:
++			force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)0UL);
++			break;
++		case SIGFPE:
++			force_sig_fault(SIGFPE, FPE_INTDIV, (void __user *)0UL);
++			break;
++		default:
++			force_sig_fault(SIGILL, ILL_ILLOPC, (void __user *)0UL);
++		}
++	}
++	irqentry_exit_to_user_mode(regs);
++	_exception_exit(regs);
++}
++
++/*
++ * The program trapped (the host passes what the trap was as a signal:
++ * SIGSEGV, SIGFPE, SIGBUS or SIGILL); called through wasm_user_fault in
++ * entry.S, which saves the program's stack pointer and TLS as a system call
++ * does and runs the handler, if there is one, on the way out. -sig: the
++ * handler has returned, and the program dies by the signal.
++ */
++__visible long __wasm_user_fault(long sig);
++__visible long __wasm_user_fault(long sig)
++{
++	struct pt_regs *regs = current_pt_regs();
++	int fatal = sig < 0;
++
++	if (fatal)
++		sig = -sig;
++	if (sig != SIGSEGV && sig != SIGFPE && sig != SIGBUS)
++		sig = SIGILL;
++
++	/* (The host asks only when the CPU is in user mode: wasm_cpuflags_now().) */
++	if (WARN_ON_ONCE(!cpuflags_test_any(CPUFLAGS_USER_MODE)))
++		return -EINVAL;
++	user_state_enter();
++	check_current("taking a fault of the program", -1);
++	wasm_flags_note_aux(9, (int)sig);
++	user_exception(regs, (int)sig, fatal);
++	check_current("leaving a fault of the program", -1);
++	wasm_flags_note_aux(2, -1);
++	user_state_return(regs);
++	return 0;
++}
++
++/*
++ * The host has ended the Worker that ran this task's program, which a fatal
++ * signal found running (user_state ENDING), and runs the task here, in a new
++ * one (entry.S: wasm_user_task_end), to its exit.
++ */
++__visible void __wasm_user_task_end(void);
++__visible void __wasm_user_task_end(void)
++{
++	struct pt_regs *regs = current_pt_regs();
++
++	WRITE_ONCE(current_thread_info()->user_state, WASM_USER_IN_KERNEL);
++	/* What the old Worker would have done on its way back to the program is nobody's now. */
++	current_thread_info()->flags &= ~(_TIF_DELIVER_SIGNAL | _TIF_RETURN_SIGNAL | _TIF_RELOAD_PROGRAM);
++	check_current("ending a program", -1);
++	wasm_flags_note_aux(11, -1);
++
++	/* The fatal signal is pending: taken as on any return to the program. */
++	user_exception(regs, 0, 0);
++
++	/* (Not reached: no way back to the program from here.) */
++	regs->syscall_nr = -1;
++	_exception_enter(regs);
++	irqentry_enter_from_user_mode(regs);
++	local_irq_enable();
++	do_group_exit(SIGKILL);
++}
++
+ /*
+ * This function is called from the host when things break either in kernel code
+ * or user code. That code will never continue to execute - we have to report the
+diff --git a/fs/binfmt_wasm.c b/fs/binfmt_wasm.c
+index c192b2a7b..862ef29a3 100644
+--- a/fs/binfmt_wasm.c
++++ b/fs/binfmt_wasm.c
+@@ -17,6 +17,7 @@
+ #include <linux/binfmts.h>
+ #include <linux/personality.h>
+ #include <linux/init.h>
++#include <linux/random.h>
+ #include <linux/uaccess.h>
+ #include <linux/vmalloc.h>
+ 
+@@ -50,22 +51,36 @@ static int create_wasm_tables(struct linux_binprm *bprm, unsigned long arg_start
+ 	unsigned long __user *sp;
+ 	long i, len;
+ 	const struct cred *cred = current_cred();
++	u8 random_bytes[16];
++	u8 __user *u_rand_bytes;
+ 
+ 	// We emulate common ELF auxillary vectors to help userland out a bit.
+-	const unsigned long wasm_auxv[] = {
++	unsigned long wasm_auxv[] = {
+ 		AT_NOTELF, 1UL,
+ 		AT_PAGESZ, PAGE_SIZE,
+ 		AT_UID, from_kuid_munged(cred->user_ns, cred->uid),
+ 		AT_EUID, from_kuid_munged(cred->user_ns, cred->euid),
+ 		AT_GID, from_kgid_munged(cred->user_ns, cred->gid),
+-		AT_EGID, from_kgid_munged(cred->user_ns, cred->gid),
++		AT_EGID, from_kgid_munged(cred->user_ns, cred->egid),
+ 		AT_SECURE, bprm->secureexec,
++		AT_RANDOM, 0UL /* below */,
+ 		AT_NULL, 0UL /* end */
+ 	};
+ 
+ 	p = (char __user *)arg_start;
+ 	sp = (unsigned long __user *)current->mm->start_stack;
+ 
++	/*
++	 * 16 random bytes below the strings, for the C library's stack
++	 * protector and pointer guards (AT_RANDOM), as binfmt_elf gives them.
++	 */
++	u_rand_bytes = (u8 __user *)ALIGN_DOWN((unsigned long)sp - sizeof(random_bytes), 16);
++	get_random_bytes(random_bytes, sizeof(random_bytes));
++	if (copy_to_user(u_rand_bytes, random_bytes, sizeof(random_bytes)))
++		return -EFAULT;
++	wasm_auxv[ARRAY_SIZE(wasm_auxv) - 3] = (unsigned long)u_rand_bytes;
++	sp = (unsigned long __user *)u_rand_bytes;
++
+ 	sp -= (sizeof(wasm_auxv) + (sizeof(unsigned long) - 1U)) /
+ 		sizeof(unsigned long);
+ 	sp -= bprm->envc + 1;
+@@ -428,6 +443,7 @@ static int load_wasm_binary(struct linux_binprm *bprm)
+ #endif
+ 	extra_stack += (bprm->argc + 1) * sizeof(char *);   /* the argv array */
+ 	extra_stack += (bprm->envc + 1) * sizeof(char *);   /* the envp array */
++	extra_stack += 32 + 20 * sizeof(unsigned long);     /* AT_RANDOM's bytes, the auxiliary vector */
+ 	extra_stack = ALIGN(extra_stack, WASM_STACK_ALIGN);
+ 
+ 	res = load_wasm_file(bprm, extra_stack);

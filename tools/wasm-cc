@@ -1,0 +1,35 @@
+#!/bin/bash
+# Compile and link a native Linux/Wasm program (wasm64, musl, position independent).
+#
+# Usage: wasm-cc [clang options] -o prog file.c...     compile and link
+#        wasm-cc [clang options] -c -o file.o file.c   compile only
+#
+# Goes through linux-wasm's fake-llvm wrapper, which rewrites the triple and
+# adds the linker flags a Linux/Wasm executable needs (shared memory, imported
+# memory and table, dylink.0 section). The wrapper only adds those when it sees
+# a -l flag, hence the explicit -lc when linking.
+
+set -e
+
+: "${LW_ROOT:=${RVWASM_WORK:-$HOME/rvwasm}/linux-wasm}"
+: "${LW_VARIANT:=wasm64_nommu}"
+LW_ARCH="${LW_VARIANT%%_*}"
+LW_INSTALL="$LW_ROOT/workspace/install"
+
+export REAL_LLVM="$LW_INSTALL/llvm/bin"
+
+link_flags=("-m$LW_ARCH" -shared -lc)
+for arg in "$@"; do
+	if [ "$arg" = "-c" ]; then
+		link_flags=()
+	fi
+done
+
+# The wrapper logs every command line it rewrites; keep that out of build output.
+exec "$LW_ROOT/tools/fake-llvm/clang" \
+	--target=wasm-linux-musl "-march=$LW_ARCH" \
+	"--sysroot=$LW_INSTALL/musl-$LW_VARIANT" \
+	-isystem "$LW_INSTALL/kernel-$LW_VARIANT/include" \
+	-fPIC -O2 \
+	"$@" \
+	"${link_flags[@]}" 2> >(grep -v -E '^clang -> ' >&2)

@@ -1,0 +1,12 @@
+94:install(TARGETS KF6KCMUtils EXPORT KF6KCMUtilsTargets ${KF_INSTALL_TARGETS_DEFAULT_ARGS})
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -125,3 +125,8 @@
+ )
+ 
+ add_subdirectory(kcmshell)
++
++# nativeqt: a static KF6KCMUtils links kcmutils_logging_STATIC, which must then be in the export set too.
++if(NOT BUILD_SHARED_LIBS)
++    install(TARGETS kcmutils_logging_STATIC EXPORT KF6KCMUtilsTargets ${KF_INSTALL_TARGETS_DEFAULT_ARGS})
++endif()

@@ -1,0 +1,240 @@
+/* The frames the page draws around the window server's windows (display.js:
+   chrome). Plain on purpose: the shell restyles them later. The sizes that
+   matter to the server (the title bar's height, the border) come from the
+   table; the elements are placed in the screen's pixels inside #rv-chrome,
+   which is scaled to the canvas. */
+
+#rv-chrome {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  transform-origin: 0 0;
+  font: 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rv-frame {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.rv-title {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 4px 0 10px;
+  background: #4a5560;
+  color: #d8dee4;
+  border-radius: 6px 6px 0 0;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.rv-frame.rv-active .rv-title {
+  background: #2f6fae;
+  color: #fff;
+}
+
+.rv-title-text {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-btn {
+  width: 22px;
+  height: 20px;
+  margin-left: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  padding: 0;
+  cursor: default;
+}
+
+.rv-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.rv-btn.rv-close:hover {
+  background: #c0392b;
+}
+
+/* The edges to resize by: the border around the window, wider at the corners. */
+.rv-edge {
+  position: absolute;
+  pointer-events: auto;
+  background: #4a5560;
+}
+
+.rv-frame.rv-active .rv-edge {
+  background: #2f6fae;
+}
+
+.rv-n { cursor: n-resize; }
+.rv-s { cursor: s-resize; }
+.rv-e { cursor: e-resize; }
+.rv-w { cursor: w-resize; }
+.rv-ne { cursor: ne-resize; background: transparent !important; }
+.rv-nw { cursor: nw-resize; background: transparent !important; }
+.rv-se { cursor: se-resize; background: transparent !important; }
+.rv-sw { cursor: sw-resize; background: transparent !important; }
+
+/* Minimized windows, to bring back. */
+#rv-dock {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  pointer-events: none;
+}
+
+.rv-dock-item {
+  max-width: 180px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: #4a5560;
+  color: #fff;
+  font: inherit;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* The stage: the screen, the canvas over it, and what the page draws over that. It is what goes fullscreen. */
+#rv-stage {
+  position: relative;
+  width: fit-content;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#rv-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+
+/* The bar above the screen: the page's own controls. */
+#rv-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin-bottom: 4px;
+  font: 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #333;
+}
+
+.rv-bar-btn, .rv-bar-select {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #aab;
+  border-radius: 4px;
+  background: #f4f5f7;
+  color: inherit;
+  font: inherit;
+}
+
+.rv-bar-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rv-bar-status {
+  margin-left: 8px;
+  color: #666;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The window switcher (Alt-Tab), in the middle of the screen. */
+#rv-switcher {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 280px;
+  max-width: 70%;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(30, 36, 44, 0.94);
+  color: #e8ecf0;
+  font: 14px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  z-index: 10000;
+  pointer-events: none;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.rv-switcher-head {
+  padding: 2px 8px 8px;
+  color: #9aa6b2;
+  font-size: 12px;
+}
+
+.rv-switcher-item, .rv-list-item {
+  padding: 6px 10px;
+  border-radius: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-switcher-item.rv-selected {
+  background: #2f6fae;
+  color: #fff;
+}
+
+.rv-minimized {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* The list of windows (the bar's Windows button, or Super alone), at the top left of the screen. */
+#rv-list {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  max-width: 60%;
+  padding: 4px;
+  border-radius: 6px;
+  background: rgba(30, 36, 44, 0.94);
+  font: 13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  z-index: 10000;
+}
+
+.rv-list-item {
+  border: 0;
+  background: transparent;
+  color: #e8ecf0;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.rv-list-item:hover, .rv-list-item.rv-selected {
+  background: #2f6fae;
+}
+
+.rv-list-empty {
+  padding: 6px 10px;
+  color: #9aa6b2;
+}

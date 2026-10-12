@@ -1,0 +1,11 @@
+{"system":"qemu","run":1,"boot_ms":4012,"jit":{"workers":4,"compiling_workers":1,"modules":7050,"bytes":6373715},"hidden":false,"bench":{"coremark_ticks":[3119,"0x4983"],"sha256_16M":[2530,"080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"],"md5_16M":[980,"2c7ab85a893283e98c931e9511add182"],"gzip":[3910,"cf3e61dd28d40567b00cb156bef40950"],"sort":[28400,"e3f5c6d1c219f7b0016239a8cf596c8a"],"awk":[28680,"2147483647"],"spawn200":[6910,"200"],"pipeline":[3780,"20"]}}
+
+qemu, 1 runs: median (min-max) ms, check
+coremark_ticks       3119 (3119-3119)  0x4983
+sha256_16M           2530 (2530-2530)  080acf35a507ac98
+md5_16M               980 (980-980)  2c7ab85a893283e9
+gzip                 3910 (3910-3910)  cf3e61dd28d40567
+sort                28400 (28400-28400)  e3f5c6d1c219f7b0
+awk                 28680 (28680-28680)  2147483647
+spawn200             6910 (6910-6910)  200
+pipeline             3780 (3780-3780)  20

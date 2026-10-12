@@ -1,0 +1,11 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -80,7 +80,7 @@
+ 
+ if (NOT APPLE AND NOT ANDROID AND NOT WIN32 AND NOT HAIKU OR (WIN32 AND NOT WITH_SNORETOAST))
+     find_package(Qt6 ${REQUIRED_QT_VERSION} CONFIG REQUIRED DBus)
+-    find_package(Canberra REQUIRED)
++    find_package(Canberra)  # nativeqt: optional (no libcanberra here)
+     set_package_properties(Canberra PROPERTIES
+         PURPOSE "Needed to build audio notification support")
+     if (TARGET Canberra::Canberra)

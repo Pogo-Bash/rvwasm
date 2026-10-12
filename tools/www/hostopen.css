@@ -1,0 +1,68 @@
+/* The prompt for a web address from the machine (hostopen.js): a small box in
+   the top right corner of the screen, in the panel's plain colours. */
+
+#rv-hostopen {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100% - 16px));
+  box-sizing: border-box;
+  padding: 6px 6px 6px 10px;
+  border-radius: 6px;
+  background: rgba(32, 38, 46, 0.96);
+  color: #e8ecf0;
+  font: 13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 9600;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rv-hostopen-label {
+  flex: none;
+  opacity: 0.75;
+}
+
+.rv-hostopen-link {
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #2f6fae;
+  color: #fff;
+  text-decoration: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-hostopen-link:hover {
+  background: #3a80c4;
+}
+
+.rv-hostopen-more {
+  flex: none;
+  opacity: 0.65;
+}
+
+.rv-hostopen-more:empty {
+  display: none;
+}
+
+.rv-hostopen-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: 16px/1 system-ui, sans-serif;
+  cursor: default;
+}
+
+.rv-hostopen-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+}

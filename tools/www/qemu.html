@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<!--
+  qemu-wasm booting our riscv64 guest, for the comparison with rv. This is the
+  project's riscv64 example page (examples/riscv64/src/htdocs) with the same
+  QEMU arguments, plus a way to read the terminal from a script:
+
+    qemuText()        everything the guest has printed so far
+    qemuType("ls\r")  type into the guest's console
+
+  URL parameters:
+    ?append=bench     extra kernel command line ("bench": run tests/bench.sh at boot)
+    ?mttcg=1          multi-threaded TCG with 4 guest CPUs (the example's alternative)
+    ?cpu=MODEL        QEMU's -cpu, e.g. rv64,zbb=off to hide an extension from the guest
+-->
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>qemu-wasm riscv64</title>
+    <link rel="stylesheet" href="./vendor/xterm.css" />
+  </head>
+  <body>
+    <div id="terminal"></div>
+    <script src="./load.js"></script>
+    <script type="module">
+      import './vendor/xterm.js';
+      import './vendor/xterm-pty.js';
+      import initEmscriptenModule from './out.js';
+
+      const params = new URLSearchParams(location.search);
+      const accel = params.get("mttcg")
+        ? ['-accel', 'tcg,tb-size=500,thread=multi', '-smp', '4,sockets=4']
+        : ['-accel', 'tcg,tb-size=500'];
+      const cpu = params.get("cpu") ? ['-cpu', params.get("cpu")] : [];
+      Module['arguments'] = [
+        '-nographic', '-m', '512M', ...accel,
+        '-machine', 'virt', ...cpu,
+        '-L', '/pack/',
+        '-nic', 'none',
+        '-drive', 'if=virtio,format=raw,file=/pack/rootfs.bin',
+        '-kernel', '/pack/Image',
+        '-append', 'earlyprintk=ttyS0 console=ttyS0 root=/dev/vda rootwait ro quiet virtio_net.napi_tx=false loglevel=7 '
+                   + (params.get("append") || ""),
+      ];
+
+      const xterm = new Terminal({ cols: 120, rows: 40, scrollback: 10000 });
+      xterm.open(document.getElementById("terminal"));
+      const { master, slave } = openpty();
+      xterm.loadAddon(master);
+
+      window.qemuStarted = performance.now();
+      window.qemuText = () => {
+        const buffer = xterm.buffer.active;
+        const lines = [];
+        for (let i = 0; i < buffer.length; i++) {
+          lines.push(buffer.getLine(i).translateToString(true));
+        }
+        return lines.join("\n").trimEnd();
+      };
+      window.qemuType = (text) => xterm._core.coreService.triggerDataEvent(text, true);
+
+      Module.pty = slave;
+      Module['mainScriptUrlOrBlob'] = new URL("./out.js", location.href).href;
+
+      // Emscripten newer than the 3.1.50 the project pins works on a copy of
+      // this object, so the functions it exports (FS_createPath and friends)
+      // never appear here, where load.js looks for them. A preRun callback is
+      // handed the real module: copy them over before load.js's callback runs.
+      // (The list is run back to front, so the last entry runs first.)
+      Module['preRun'] = Module['preRun'] || [];
+      Module['preRun'].push((real) => {
+        for (const key of Object.keys(real)) {
+          if (!(key in Module)) {
+            Module[key] = real[key];
+          }
+        }
+      });
+
+      (async () => {
+        const real = await initEmscriptenModule(Module);
+        const oldPoll = real['TTY'].stream_ops.poll;
+        const pty = real['pty'];
+        real['TTY'].stream_ops.poll = function (stream, timeout) {
+          if (!pty.readable) {
+            return (pty.readable ? 1 : 0) | (pty.writable ? 4 : 0);
+          }
+          return oldPoll.call(stream, timeout);
+        };
+      })();
+    </script>
+  </body>
+</html>

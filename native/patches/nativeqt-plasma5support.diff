@@ -1,0 +1,54 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -60,7 +60,7 @@
+         KIO
+ )
+ 
+-find_package(KSysGuard CONFIG REQUIRED) #devicenotifications
++find_package(KSysGuard CONFIG) #devicenotifications (nativeqt: optional, its engine left out without it)
+ find_package(KF6NetworkManagerQt) #geolocation
+ find_package(PlasmaActivities) #activites
+ 
+--- a/src/dataengines/CMakeLists.txt
++++ b/src/dataengines/CMakeLists.txt
+@@ -5,7 +5,9 @@
+ remove_definitions(-DQT_NO_CAST_TO_ASCII)
+ remove_definitions(-DQT_NO_CAST_FROM_BYTEARRAY)
+ 
+-add_subdirectory(devicenotifications)
++if (KSysGuard_FOUND)
++    add_subdirectory(devicenotifications)
++endif ()
+ add_subdirectory(favicons)
+ if (KF6NetworkManagerQt_FOUND)
+     add_subdirectory(geolocation)
+--- a/src/plasma5support/private/dataenginemanager.cpp
++++ b/src/plasma5support/private/dataenginemanager.cpp
+@@ -117,7 +117,12 @@
+     }
+ 
+     // Expect the plugin id to be the same as the file name or not explicitly set
+-    const KPluginMetaData data(QLatin1String("plasma5support/dataengine/plasma_engine_") + name);
++    // (nativeqt: by id first, which finds static plugins too; a path names a file only)
++    KPluginMetaData data = KPluginMetaData::findPluginById(QStringLiteral("plasma5support/dataengine"),
++                                                           QLatin1String("plasma_engine_") + name);
++    if (!data.isValid()) {
++        data = KPluginMetaData(QLatin1String("plasma5support/dataengine/plasma_engine_") + name);
++    }
+     DataEngine *engine = KPluginFactory::instantiatePlugin<Plasma5Support::DataEngine>(data).plugin;
+     if (!engine) {
+         qCDebug(LOG_PLASMA5SUPPORT) << "Can't find a dataengine named" << name;
+--- a/src/plasma5support/private/dataenginemanager.cpp
++++ b/src/plasma5support/private/dataenginemanager.cpp
+@@ -120,9 +120,11 @@
+     // (nativeqt: by id first, which finds static plugins too; a path names a file only)
+     KPluginMetaData data = KPluginMetaData::findPluginById(QStringLiteral("plasma5support/dataengine"),
+                                                            QLatin1String("plasma_engine_") + name);
++#ifndef __wasm__ // (a static program has no plugin files)
+     if (!data.isValid()) {
+         data = KPluginMetaData(QLatin1String("plasma5support/dataengine/plasma_engine_") + name);
+     }
++#endif
+     DataEngine *engine = KPluginFactory::instantiatePlugin<Plasma5Support::DataEngine>(data).plugin;
+     if (!engine) {
+         qCDebug(LOG_PLASMA5SUPPORT) << "Can't find a dataengine named" << name;

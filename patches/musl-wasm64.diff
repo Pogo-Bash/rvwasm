@@ -1,0 +1,418 @@
+diff --git a/arch/wasm/atomic_arch.h b/arch/wasm/atomic_arch.h
+index 1f38df0..bfee953 100644
+--- a/arch/wasm/atomic_arch.h
++++ b/arch/wasm/atomic_arch.h
+@@ -5,10 +5,12 @@ static inline int a_cas(volatile int *p, int t, int s)
+ 	return t;
+ }
+ 
++/* All of the pointer: on wasm64 an int is half of one. */
+ #define a_cas_p a_cas_p
+ static inline void *a_cas_p(volatile void *p, void *t, void *s)
+ {
+-	return (void *)a_cas((volatile int *)p, (long)t, (long)s);
++	__atomic_compare_exchange_n((void *volatile *)p, &t, s, (_Bool)0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
++	return t;
+ }
+ 
+ extern void __wasm_abort();
+diff --git a/arch/wasm/bits/signal.h b/arch/wasm/bits/signal.h
+index ab24d3d..ceeaab3 100644
+--- a/arch/wasm/bits/signal.h
++++ b/arch/wasm/bits/signal.h
+@@ -29,11 +29,13 @@ struct sigaltstack {
+ 	size_t ss_size;
+ };
+ 
++/* As the kernel writes it (asm-generic/ucontext.h): the signal mask last. */
+ typedef struct __ucontext {
++	unsigned long uc_flags;
+ 	struct __ucontext *uc_link;
+-	sigset_t uc_sigmask;
+ 	stack_t uc_stack;
+ 	mcontext_t uc_mcontext;
++	sigset_t uc_sigmask;
+ } ucontext_t;
+ 
+ #define SA_NOCLDSTOP  1
+diff --git a/arch/wasm/crt_arch.h b/arch/wasm/crt_arch.h
+index fe3ce01..f02c3c7 100644
+--- a/arch/wasm/crt_arch.h
++++ b/arch/wasm/crt_arch.h
+@@ -1,21 +1,26 @@
+ /*
+- * We provide a prototype for main here (it's declared without prototype in crt1.c etc.). The reason
+- * we have to do this is to avoid an issue with LLVM wrapping and renaming it __original_main, which
+- * will fail when programs later on provide a real main with correct prototype and link it.
++ * main(). On Wasm, clang names a program's main after its parameters: a
++ * main(int, char **) is __main_argc_argv, a main(void) is __main_void (and a
++ * main of its own, which takes argc and argv and calls that). crt1 calls
++ * __main_argc_argv; for a program that has only __main_void, the C library
++ * has a __main_argc_argv that calls it (src/env/wasm/__main_argc_argv.c),
++ * which the linker takes only when the program has none of its own. (Not a
++ * weak definition here: crt1 comes first, and with __main_argc_argv already
++ * defined the linker would not take a program's main out of a library.) A main
++ * of the C library's own would clash with the one clang makes for main(void):
++ * crt1's calls go to __wasm_main instead, by the name main below.
+  *
+- * Oh, and then it comes along and renames it __main_argc_argv because it has parameters, so we have
+- * to alias that as well and main will now be called __main_argc_argv. This cannot be a direct alias
+- * as it is not defined yet, so we just call it...
+- *
+- * To add salt to the injury, musl insists to call the 3-argument version with envp which is non-
+- * standard. What a wonderful mess... We need to clean this up someday, maybe auto-detect somehow.
++ * musl calls main with envp as a third argument, which is not standard and
++ * which neither of clang's has.
+  */
+ int __main_argc_argv(int argc, char *argv[]);
+-int main(int argc, char *argv[], char *envp[])
++
++static int __wasm_main(int argc, char *argv[], char *envp[])
+ {
+ 	(void)envp;
+ 	return __main_argc_argv(argc, argv);
+ }
++#define main __wasm_main
+ 
+ /*
+  * This must really be written in assembly (to capture the stack pointer properly), but we know that
+diff --git a/arch/wasm/syscall_arch.h b/arch/wasm/syscall_arch.h
+index 1e06877..be2e555 100644
+--- a/arch/wasm/syscall_arch.h
++++ b/arch/wasm/syscall_arch.h
+@@ -1,8 +1,35 @@
++#ifdef __wasm64__
++/* long is 64 bits wide: a long long argument is passed as is, in one slot. */
++#define __SYSCALL_LL_E(x) (x)
++#else
+ #define __SYSCALL_LL_E(x) \
+ ((union { long long ll; long l[2]; }){ .ll = x }).l[0], \
+ ((union { long long ll; long l[2]; }){ .ll = x }).l[1]
++#endif
+ #define __SYSCALL_LL_O(x) __SYSCALL_LL_E((x))
+ 
++#ifdef __wasm64__
++/*
++ * At these numbers the 64-bit kernel has statfs(path, buf) and
++ * fstatfs(fd, buf). The statfs64 forms, with the size of the buffer as an
++ * argument in between, are the 32-bit kernel's: called here they made the
++ * kernel take the size for the address of the buffer.
++ */
++#undef SYS_statfs64
++#undef SYS_fstatfs64
++#define SYS_statfs 43
++#define SYS_fstatfs 44
++#endif
++
++#ifdef __wasm64__
++/*
++ * The 64-bit kernel has one form of the System V IPC control calls and does
++ * not take the flag that asks for the newer of two: with it, shmctl(),
++ * semctl() and msgctl() failed with EINVAL whatever they were asked.
++ */
++#define IPC_64 0
++#endif
++
+ extern long __syscall0(long n);
+ extern long __syscall1(long n, long a);
+ extern long __syscall2(long n, long a, long b);
+diff --git a/src/env/__init_tls.c b/src/env/__init_tls.c
+index a93141e..ff40791 100644
+--- a/src/env/__init_tls.c
++++ b/src/env/__init_tls.c
+@@ -36,6 +36,26 @@ static struct builtin_tls {
+ 
+ static struct tls_module main_tls;
+ 
++#ifdef __wasm__
++/*
++ * Wasm: compiled code finds _Thread_local variables relative to the Wasm
++ * global __tls_base, of which every thread has its own (a thread is an
++ * instance of its own), and the linker provides what they start out as and
++ * __wasm_init_tls() to copy that somewhere. A thread's block of them lies in
++ * the memory __copy_tls() is given, in front of its struct pthread; dtv[1]
++ * says where, for pthread_create() to hand to the new thread as __tls_base.
++ */
++extern void __wasm_init_tls(void *);
++uintptr_t __get_tls_base(void);
++void __set_tls_base(uintptr_t);
++
++static size_t wasm_tls_align(void)
++{
++	size_t align = __builtin_wasm_tls_align();
++	return align ? align : 1;
++}
++#endif
++
+ void *__copy_tls(unsigned char *mem)
+ {
+ 	pthread_t td;
+@@ -68,6 +88,19 @@ void *__copy_tls(unsigned char *mem)
+ #endif
+ 	dtv[0] = libc.tls_cnt;
+ 	td->dtv = dtv;
++#ifdef __wasm__
++	{
++		unsigned char *block = (unsigned char *)(dtv + 2);
++		uintptr_t mine = __get_tls_base();
++
++		block += -(uintptr_t)block & (wasm_tls_align() - 1);
++		/* This makes the block ours for a moment: the place to say whose it will be. */
++		__wasm_init_tls(block);
++		__musl_tp = (uintptr_t)TP_ADJ(td);
++		__set_tls_base(mine);
++		dtv[1] = (uintptr_t)block;
++	}
++#endif
+ 	return td;
+ }
+ 
+@@ -130,6 +163,11 @@ static void static_init_tls(size_t *aux)
+ 		+ main_tls.size + main_tls.align
+ 		+ MIN_TLS_ALIGN-1 & -MIN_TLS_ALIGN;
+ 
++#ifdef __wasm__
++	libc.tls_size += 2*sizeof(void *) + __builtin_wasm_tls_size() + 2*wasm_tls_align();
++	libc.tls_size = libc.tls_size + MIN_TLS_ALIGN-1 & -MIN_TLS_ALIGN;
++#endif
++
+ 	if (libc.tls_size > sizeof builtin_tls) {
+ #ifndef SYS_mmap2
+ #define SYS_mmap2 SYS_mmap
+diff --git a/src/env/wasm/__main_argc_argv.c b/src/env/wasm/__main_argc_argv.c
+new file mode 100644
+index 0000000..6eb4946
+--- /dev/null
++++ b/src/env/wasm/__main_argc_argv.c
+@@ -0,0 +1,13 @@
++/*
++ * The main crt1 calls (arch/wasm/crt_arch.h), for a program whose main takes no
++ * arguments: clang names that one __main_void on Wasm. Taken from the library
++ * only when the program has no __main_argc_argv, a main(int, char **), itself.
++ */
++int __main_void(void);
++
++int __main_argc_argv(int argc, char *argv[])
++{
++	(void)argc;
++	(void)argv;
++	return __main_void();
++}
+diff --git a/src/linux/clone.c b/src/linux/clone.c
+index e3e8aa0..1a31cc2 100644
+--- a/src/linux/clone.c
++++ b/src/linux/clone.c
+@@ -71,10 +71,14 @@ int __clone(int (*fn)(void *), void *stack, int flags, void *arg, ...)
+ 	pid_t *ptid = 0, *ctid = 0;
+ 	void  *tls = 0;
+ 
++	/*
++	 * A caller that sets one of these flags passes all three (clone()
++	 * above, pthread_create()); one that sets none may pass nothing.
++	 */
+ 	va_start(ap, arg);
+-	if (flags & (CLONE_PIDFD | CLONE_PARENT_SETTID | CLONE_CHILD_SETTID))
++	if (flags & (CLONE_PIDFD | CLONE_PARENT_SETTID | CLONE_CHILD_SETTID
++	             | CLONE_SETTLS | CLONE_CHILD_CLEARTID)) {
+ 		ptid = va_arg(ap, pid_t *);
+-	if (flags & CLONE_CHILD_SETTID) {
+ 		tls = va_arg(ap, void *);
+ 		ctid = va_arg(ap, pid_t *);
+ 	}
+diff --git a/src/process/wasm/_Fork.c b/src/process/wasm/_Fork.c
+new file mode 100644
+index 0000000..587760f
+--- /dev/null
++++ b/src/process/wasm/_Fork.c
+@@ -0,0 +1,40 @@
++#include <unistd.h>
++#include <errno.h>
++#include "syscall.h"
++#include "libc.h"
++#include "lock.h"
++#include "pthread_impl.h"
++#include "aio_impl.h"
++#include "fork_impl.h"
++
++static void dummy(int x) { }
++weak_alias(dummy, __aio_atfork);
++
++void __post_Fork(int ret)
++{
++	if (!ret) {
++		pthread_t self = __pthread_self();
++		self->tid = __syscall(SYS_set_tid_address, &__thread_list_lock);
++		self->robust_list.off = 0;
++		self->robust_list.pending = 0;
++		self->next = self->prev = self;
++		__thread_list_lock = 0;
++		libc.threads_minus_1 = 0;
++		if (libc.need_locks) libc.need_locks = -1;
++	}
++	UNLOCK(__abort_lock);
++	if (!ret) __aio_atfork(1);
++}
++
++/*
++ * Without an MMU there is no copy of the parent's memory to give a child, and
++ * on Wasm nowhere in it for the child to return to either: a new task runs
++ * the C library's clone callback, with a function and its stack. fork()
++ * fails, as on other systems without an MMU (the kernel refuses such a clone
++ * as well), so that a program can take another way: posix_spawn(), or clone()
++ * with a function.
++ */
++pid_t _Fork(void)
++{
++	return __syscall_ret(-ENOSYS);
++}
+diff --git a/src/signal/wasm/restore.S b/src/signal/wasm/restore.S
+index a3b2abf..a15a8a5 100644
+--- a/src/signal/wasm/restore.S
++++ b/src/signal/wasm/restore.S
+@@ -45,7 +45,6 @@ __libc_handle_signal:
+ 
+ 	/* info_param */
+ 	global.get __stack_pointer
+-	iLONG.const 4
+ 	INSN_32_64(i32.const 4, i64.const 8)
+ 	iLONG.add
+ 	iLONG.load 0
+diff --git a/src/thread/__unmapself.c b/src/thread/__unmapself.c
+index 31d94e6..9c491f7 100644
+--- a/src/thread/__unmapself.c
++++ b/src/thread/__unmapself.c
+@@ -14,6 +14,14 @@ static void do_unmap()
+ 	__syscall(SYS_exit);
+ }
+ 
++#ifdef __wasm__
++/* Wasm code needs no stack in memory to make two system calls. */
++void __unmapself(void *base, size_t size)
++{
++	__syscall(SYS_munmap, base, size);
++	for (;;) __syscall(SYS_exit, 0);
++}
++#else
+ void __unmapself(void *base, size_t size)
+ {
+ 	char *stack = shared_stack + sizeof shared_stack;
+@@ -22,3 +30,4 @@ void __unmapself(void *base, size_t size)
+ 	unmap_size = size;
+ 	CRTJMP(do_unmap, stack);
+ }
++#endif
+diff --git a/src/thread/pthread_cancel.c b/src/thread/pthread_cancel.c
+index 4ba7b8e..320b443 100644
+--- a/src/thread/pthread_cancel.c
++++ b/src/thread/pthread_cancel.c
+@@ -36,8 +36,20 @@ hidden long __syscall_cp_c4(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall
+ hidden long __syscall_cp_c5(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t);
+ hidden long __syscall_cp_c6(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t);
+ 
+-/* It's a TODO to handle this... */
+ /*
++ * A cancellation point on Wasm. Elsewhere __syscall_cp_asm looks at the
++ * cancel flag right before the system call instruction, and cancel_handler()
++ * moves a thread that a cancel interrupts between that look and the call to
++ * __cp_cancel by its program counter, which Wasm has none of. Here both are
++ * plain C: the flag is looked at before the call, and a call the cancel
++ * interrupted fails with EINTR (SIGCANCEL is installed without SA_RESTART
++ * on Wasm, init_cancellation()) and is turned into the cancellation after
++ * it. A signal is only ever acted on at the return of a system call on Wasm,
++ * never between two instructions of the program, so a cancel that comes
++ * after the look is seen by the system call itself: one that blocks returns
++ * EINTR at once; one that does not completes, and the next cancellation
++ * point acts on the flag.
++ */
+ #define SYSCALL_CP_C(num, ...) do {\
+ 		pthread_t self; \
+ 		long r; \
+@@ -47,16 +59,14 @@ hidden long __syscall_cp_c6(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall
+ 			&& (st==PTHREAD_CANCEL_DISABLE || nr==SYS_close)) \
+ 			return __syscall(__VA_ARGS__); \
+ 		\
+-		r = __syscall_cp_asm##num(&self->cancel, __VA_ARGS__); \
++		if (self->cancel) \
++			return __cancel(); \
++		r = __syscall(__VA_ARGS__); \
+ 		if (r==-EINTR && nr!=SYS_close && self->cancel && \
+ 			self->canceldisable != PTHREAD_CANCEL_DISABLE) \
+ 			r = __cancel(); \
+ 		return r; \
+ 	} while(0)
+-*/
+-#define SYSCALL_CP_C(num, ...) do {\
+-		return __syscall(__VA_ARGS__); \
+-	} while(0)
+ 
+ long __syscall_cp_c0(syscall_arg_t nr)
+ {
+@@ -126,12 +136,18 @@ static void cancel_handler(int sig, siginfo_t *si, void *ctx)
+ #endif
+ 		return;
+ 	}
+-#else
+-	/* TODO: handle this. */
+-	abort();
+-#endif
+ 
+ 	__syscall(SYS_tkill, self->tid, SIGCANCEL);
++#else
++	/*
++	 * No program counter to move (Wasm): the flag is set, and the
++	 * cancellation point that this signal interrupted fails with EINTR,
++	 * which SYSCALL_CP_C turns into the cancellation; elsewhere, the next
++	 * cancellation point acts on the flag. SIGCANCEL stays blocked
++	 * (above), as when it is raised again elsewhere.
++	 */
++	(void)pc;
++#endif
+ }
+ 
+ void __testcancel()
+@@ -144,7 +160,12 @@ void __testcancel()
+ static void init_cancellation()
+ {
+ 	struct sigaction sa = {
++#ifdef MC_PC
+ 		.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK,
++#else
++		/* (No SA_RESTART: a cancellation point it interrupts is to fail with EINTR, see SYSCALL_CP_C.) */
++		.sa_flags = SA_SIGINFO | SA_ONSTACK,
++#endif
+ 		.sa_sigaction = cancel_handler
+ 	};
+ 	memset(&sa.sa_mask, -1, _NSIG/8);
+diff --git a/src/thread/pthread_create.c b/src/thread/pthread_create.c
+index 087f620..48c1dcd 100644
+--- a/src/thread/pthread_create.c
++++ b/src/thread/pthread_create.c
+@@ -352,7 +352,12 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
+ 
+ 	__tl_lock();
+ 	if (!libc.threads_minus_1++) libc.need_locks = 1;
++#ifdef __wasm__
++	/* The new thread's Wasm __tls_base: its block of _Thread_local variables (see __copy_tls). */
++	ret = __clone((c11 ? start_c11 : start), stack, flags, args, &new->tid, (void *)new->dtv[1], &__thread_list_lock);
++#else
+ 	ret = __clone((c11 ? start_c11 : start), stack, flags, args, &new->tid, TP_ADJ(new), &__thread_list_lock);
++#endif
+ 
+ 	/* All clone failures translate to EAGAIN. If explicit scheduling
+ 	 * was requested, attempt it before unlocking the thread list so
+diff --git a/src/thread/wasm/clone.S b/src/thread/wasm/clone.S
+index 566f15d..14b2700 100644
+--- a/src/thread/wasm/clone.S
++++ b/src/thread/wasm/clone.S
+@@ -105,7 +105,11 @@ _Clone:
+ 		br_if 0		/* if (stack == NULL): break to block 0; */
+ 				/* else if (stack != NULL): */
+ 
++		/* (Aligned to 16 bytes first: pthread_create() gives an 8-byte aligned top, and the code clang makes
++		 * takes the stack to be 16-byte aligned.) */
+ 		local.get 1
++		iLONG.const -16
++		iLONG.and
+ 		iLONG.const 16
+ 		iLONG.sub
+ 		local.tee 7

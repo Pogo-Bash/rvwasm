@@ -1,0 +1,20 @@
+--- a/src/lib/plugin/kpluginmetadata.cpp
++++ b/src/lib/plugin/kpluginmetadata.cpp
+@@ -207,8 +207,17 @@
+ {
+     QPluginLoader loader;
+     const QString fileName = directory + QLatin1Char('/') + pluginId;
++#ifdef __wasm__
++    // nativeqt: a static program loads no plugin files (QPluginLoader only says so, for every lookup): the
++    // static plugins are looked at first, and a file is not tried at all.
++    if (const auto staticOptional = KStaticPluginHelpers::findById(directory, pluginId)) {
++        return KPluginMetaDataPrivate::ofStaticPlugin(directory, pluginId, options, staticOptional.value());
++    }
++    if (false) {
++#else
+     KPluginMetaDataPrivate::pluginLoaderForPath(loader, fileName);
+     if (loader.load()) {
++#endif
+         if (KPluginMetaData metaData(loader, options); metaData.isValid()) {
+             return metaData;
+         }

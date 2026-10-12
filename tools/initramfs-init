@@ -1,0 +1,151 @@
+#!/bin/sh
+# /init for the Linux/Wasm system: upstream's, plus registering the riscv64
+# emulator so that riscv64 programs run like any other executable.
+
+mount -t proc none /proc
+mount -t sysfs none /sys
+
+# Device nodes programs expect; the base image only has the console.
+[ -e /dev/null ] || mknod -m 666 /dev/null c 1 3
+[ -e /dev/zero ] || mknod -m 666 /dev/zero c 1 5
+[ -e /dev/full ] || mknod -m 666 /dev/full c 1 7
+[ -e /dev/random ] || mknod -m 666 /dev/random c 1 8
+[ -e /dev/urandom ] || mknod -m 666 /dev/urandom c 1 9
+[ -e /dev/tty ] || mknod -m 666 /dev/tty c 5 0
+
+# The display, the kernel's virtual terminals on it, the keyboard and the
+# pointer, and pseudo-terminals.
+[ -e /dev/fb0 ] || mknod -m 666 /dev/fb0 c 29 0
+for n in 0 1 2 3 4 5 6 7 8; do
+	[ -e /dev/tty$n ] || mknod -m 620 /dev/tty$n c 4 $n
+done
+mkdir -p /dev/input /dev/pts
+[ -e /dev/input/event0 ] || mknod -m 660 /dev/input/event0 c 13 64
+[ -e /dev/input/event1 ] || mknod -m 660 /dev/input/event1 c 13 65
+[ -e /dev/input/event2 ] || mknod -m 660 /dev/input/event2 c 13 66
+[ -e /dev/ptmx ] || mknod -m 666 /dev/ptmx c 5 2
+mount -t devpts none /dev/pts 2> /dev/null
+
+# The sound card (sound/drivers/wasm_audio.c), if the kernel has it: /dev/snd/controlC0, pcmC0D0p and timer,
+# by the numbers the kernel gives them.
+for dev in /sys/class/sound/*/dev; do
+	[ -e "$dev" ] || continue
+	name=${dev%/dev}
+	name=${name##*/}
+	IFS=: read -r major minor < "$dev"
+	mkdir -p /dev/snd
+	[ -e /dev/snd/$name ] || mknod -m 666 /dev/snd/$name c "$major" "$minor"
+done
+
+# Somewhere to make a file that is at once unlinked: the base image has no
+# /tmp, and this kernel has no memfd_create(), so programs that want a file
+# in memory (rv itself, for a guest's memfd_create()) would have nowhere.
+# The root file system is in memory anyway.
+mkdir -p /tmp /run /dev/shm
+chmod 1777 /tmp /dev/shm
+
+# Hand every riscv64 ELF executable (and position-independent executable) to
+# /bin/rv. This is the magic/mask pair QEMU's binfmt configuration uses.
+# F: the kernel opens /bin/rv now and keeps it, so that riscv64 programs also
+# start where /bin/rv is not to be found by that name: inside a chroot (see
+# tools/debian-enter).
+mount -t binfmt_misc none /proc/sys/fs/binfmt_misc
+printf '%s' ':rv64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xf3\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/bin/rv:F' \
+	> /proc/sys/fs/binfmt_misc/register
+
+# The disk, if the page gave the machine one (drivers/block/wasm_blk.c,
+# dev.html?disk=NAME): a Debian system, mounted where `debian` looks for it.
+# noatime: reading a file should not make the disk write.
+if [ -e /sys/block/wda/dev ]; then
+	IFS=: read -r major minor < /sys/block/wda/dev
+	mknod /dev/wda b "$major" "$minor"
+	mkdir -p /debian
+	mount -t ext4 -o noatime /dev/wda /debian
+fi
+
+# The second disk, if there is one: a person's own files, as the home
+# directory (root's: there is one user). The browser keeps it apart from the
+# system's image (tools/www/dev.html), and it starts out as an empty file
+# system: the first time, what the system's image has in the home directory
+# is copied over.
+if [ -e /sys/block/wdb/dev ] && [ -d /debian/root ]; then
+	IFS=: read -r major minor < /sys/block/wdb/dev
+	mknod /dev/wdb b "$major" "$minor"
+	mkdir -p /mnt
+	if mount -t ext4 -o noatime /dev/wdb /mnt 2> /dev/null; then
+		if [ ! -e /mnt/.home-of ]; then
+			cp -a /debian/root/. /mnt/
+			echo "root, on a disk of its own (see /init of the machine)" > /mnt/.home-of
+		fi
+		umount /mnt
+		mount -t ext4 -o noatime /dev/wdb /debian/root
+	fi
+fi
+
+# On the terminal, from the kernel, only what is critical: a failed allocation
+# that the program then makes in smaller pieces is a page of numbers there
+# otherwise. (dmesg has everything.)
+echo 3 > /proc/sys/kernel/printk
+
+# The date. There is no clock to read it from: the page puts the time into
+# the kernel command line (epoch=SECONDS). And the size of the page's
+# terminal (term=COLUMNSxROWS), which the console cannot ask for: programs
+# that draw on the whole screen go by it.
+read -r cmdline < /proc/cmdline
+for arg in $cmdline; do
+	case $arg in
+	epoch=*) /bin/date -s "@${arg#epoch=}" > /dev/null ;;
+	term=*x*)
+		size="${arg#term=}"
+		/bin/stty cols "${size%x*}" rows "${size#*x}" < /dev/console 2> /dev/null
+		;;
+	esac
+done
+
+# The network: a fixed address on the little network the relay provides
+# (tools/net-relay.py). Without a relay nothing answers, and nothing is lost.
+# (By their full names: there is no PATH yet that has /sbin.)
+# (ip=ADDRESS on the command line: the relay has a different one for every
+# page that is connected to it.)
+address=10.0.5.2
+for arg in $cmdline; do
+	case $arg in
+	ip=10.0.5.*) address="${arg#ip=}" ;;
+	# dns=ADDRESS: the resolver, in place of the build machine's that /etc/resolv.conf was made with (the page
+	# adds it when the server's rv-site.json names one: a relay that answers DNS for allowlisted domains only,
+	# docker/net-allowlist.sh; `debian` copies this file into the Debian system)
+	dns=10.0.5.*) echo "nameserver ${arg#dns=}" > /etc/resolv.conf ;;
+	esac
+done
+/sbin/ifconfig lo 127.0.0.1 up 2> /dev/null
+if /sbin/ifconfig eth0 "$address" netmask 255.255.255.0 up 2> /dev/null; then
+	/sbin/route add default gw 10.0.5.1
+fi
+
+# What the disk says to start at boot (/etc/rvwasm/autostart in the Debian system: the release image starts its
+# desktop so, tools/build-debian-image.sh release-root), in the background, inside Debian (`debian`), with what it
+# prints in /root/autostart.log there; the shell prompt comes up as always. Not when the page says autostart=0
+# (dev.html?autostart=0).
+autostart=1
+for arg in $cmdline; do
+	case $arg in
+	autostart=0) autostart=0 ;;
+	esac
+done
+if [ -x /debian/etc/rvwasm/autostart ]; then
+	if [ $autostart = 1 ]; then
+		# (No $(...) here: the shell cannot fork without exec on this kernel, and /init would die of it.)
+		echo -n "autostart: "
+		/bin/sed -n 's/^# rvwasm-autostart: //p' /debian/etc/rvwasm/autostart 2> /dev/null
+		echo "  (its log: debian cat /root/autostart.log; ?autostart=0 to boot to the prompt only)"
+		# (Debian's mounts made first, here: `debian` typed at the prompt meanwhile would make them twice.)
+		# (With a PATH: the kernel starts /init without one, and `debian` runs mount, chroot and the like by name.)
+		export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+		/bin/debian true < /dev/null > /dev/console 2>&1
+		/bin/debian /etc/rvwasm/autostart < /dev/null > /dev/console 2>&1 &
+	else
+		echo "autostart: off (?autostart=0); start it with: debian /etc/rvwasm/autostart &"
+	fi
+fi
+
+exec /sbin/init -s

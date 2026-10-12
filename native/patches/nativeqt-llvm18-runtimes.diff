@@ -1,0 +1,101 @@
+diff --git a/libcxx/include/__exception/exception_ptr.h b/libcxx/include/__exception/exception_ptr.h
+index 53e2f71..9c3bd9c 100644
+--- a/libcxx/include/__exception/exception_ptr.h
++++ b/libcxx/include/__exception/exception_ptr.h
+@@ -36,7 +36,11 @@ struct __cxa_exception;
+ _LIBCPP_OVERRIDABLE_FUNC_VIS __cxa_exception* __cxa_init_primary_exception(
+     void*,
+     std::type_info*,
++#  if defined(__USING_WASM_EXCEPTIONS__)
++    void*(
++#  else
+     void(
++#  endif
+ #  if defined(_WIN32)
+         __thiscall
+ #  endif
+@@ -88,8 +92,15 @@ _LIBCPP_HIDE_FROM_ABI exception_ptr make_exception_ptr(_Ep __e) _NOEXCEPT {
+   using _Ep2 = __decay_t<_Ep>;
+ 
+   void* __ex = __cxxabiv1::__cxa_allocate_exception(sizeof(_Ep));
+-  (void)__cxxabiv1::__cxa_init_primary_exception(__ex, const_cast<std::type_info*>(&typeid(_Ep)), [](void* __p) {
++  (void)__cxxabiv1::__cxa_init_primary_exception(__ex, const_cast<std::type_info*>(&typeid(_Ep)), [](void* __p)
++#  if defined(__USING_WASM_EXCEPTIONS__)
++      -> void*
++#  endif
++  {
+     std::__destroy_at(static_cast<_Ep2*>(__p));
++#  if defined(__USING_WASM_EXCEPTIONS__)
++    return __p;
++#  endif
+   });
+ 
+   try {
+diff --git a/libcxxabi/include/cxxabi.h b/libcxxabi/include/cxxabi.h
+index d070118..b14e9d2 100644
+--- a/libcxxabi/include/cxxabi.h
++++ b/libcxxabi/include/cxxabi.h
+@@ -48,7 +48,11 @@ extern _LIBCXXABI_FUNC_VIS void
+ __cxa_free_exception(void *thrown_exception) throw();
+ // This function is an LLVM extension, which mirrors the same extension in libsupc++ and libcxxrt
+ extern _LIBCXXABI_FUNC_VIS __cxa_exception*
++#ifdef __USING_WASM_EXCEPTIONS__
++__cxa_init_primary_exception(void* object, std::type_info* tinfo, void*(_LIBCXXABI_DTOR_FUNC* dest)(void*)) throw();
++#else
+ __cxa_init_primary_exception(void* object, std::type_info* tinfo, void(_LIBCXXABI_DTOR_FUNC* dest)(void*)) throw();
++#endif
+ 
+ // 2.4.3 Throwing the Exception Object
+ extern _LIBCXXABI_FUNC_VIS _LIBCXXABI_NORETURN void
+diff --git a/libcxxabi/src/cxa_exception.cpp b/libcxxabi/src/cxa_exception.cpp
+index 65e9f45..0efce83 100644
+--- a/libcxxabi/src/cxa_exception.cpp
++++ b/libcxxabi/src/cxa_exception.cpp
+@@ -207,7 +207,11 @@ void __cxa_free_exception(void *thrown_object) throw() {
+ }
+ 
+ __cxa_exception* __cxa_init_primary_exception(void* object, std::type_info* tinfo,
++#ifdef __USING_WASM_EXCEPTIONS__
++                                              void*(_LIBCXXABI_DTOR_FUNC* dest)(void*)) throw() {
++#else
+                                               void(_LIBCXXABI_DTOR_FUNC* dest)(void*)) throw() {
++#endif
+   __cxa_exception* exception_header = cxa_exception_from_thrown_object(object);
+   exception_header->referenceCount = 0;
+   exception_header->unexpectedHandler = std::get_unexpected();
+diff --git a/libcxxabi/src/cxa_thread_atexit.cpp b/libcxxabi/src/cxa_thread_atexit.cpp
+--- a/libcxxabi/src/cxa_thread_atexit.cpp
++++ b/libcxxabi/src/cxa_thread_atexit.cpp
+@@ -21,6 +21,7 @@
+ 
+   using Dtor = void(*)(void*);
+ 
++#if !defined(__wasm__) || defined(HAVE___CXA_THREAD_ATEXIT_IMPL)
+   extern "C"
+ #ifndef HAVE___CXA_THREAD_ATEXIT_IMPL
+   // A weak symbol is used to detect this function's presence in the C library
+@@ -28,6 +29,7 @@
+   _LIBCXXABI_WEAK
+ #endif
+   int __cxa_thread_atexit_impl(Dtor, void*, void*);
++#endif
+ 
+ #ifndef HAVE___CXA_THREAD_ATEXIT_IMPL
+ 
+@@ -112,9 +114,16 @@
+ #ifdef HAVE___CXA_THREAD_ATEXIT_IMPL
+     return __cxa_thread_atexit_impl(dtor, obj, dso_symbol);
+ #else
++#if defined(__wasm__)
++    // linux-wasm: musl has no __cxa_thread_atexit_impl, and wasm-ld makes a
++    // weak undefined function an import the runtime does not give. Always
++    // use the fallback below.
++    {
++#else
+     if (__cxa_thread_atexit_impl) {
+       return __cxa_thread_atexit_impl(dtor, obj, dso_symbol);
+     } else {
++#endif
+       // Initialize the dtors std::__libcpp_tls_key (uses __cxa_guard_*() for
+       // one-time initialization and __cxa_atexit() for destruction)
+       static DtorsManager manager;

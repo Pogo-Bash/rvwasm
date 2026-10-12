@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Open in host browser
+GenericName=Web Browser
+Comment=Web addresses open in the browser of the computer this machine runs on
+Exec=/run/hostopen/bin/rv-host-open %u
+Icon=web-browser
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;

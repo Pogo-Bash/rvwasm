@@ -1,0 +1,155 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:41:48 -0500
+Subject: [PATCH 1/8] wasm: run the handler of a trap of the program, with the
+ signal the trap means
+
+Every Wasm trap of a user program (an access out of bounds, a division by
+zero, unreachable, a stack that ran out) went to raise_exception(), which
+made it SIGILL with force_sig_fault() on a pt_regs of its own on the kernel
+stack. Without a handler the task died, which is right. With one (crash
+reporters install them: KCrash, Firefox, the JVM, Python's faulthandler) the
+kernel set up the handler's frame and nothing ever ran it: the host threw
+"raise_exception() returned", the Worker sat idle, the task stayed in user
+mode as far as the kernel knew, SIGKILL did not end it and its parent's
+wait() never returned.
+
+wasm_user_fault(sp, tp, sig) is an entry for the host like a system call:
+it saves the program's stack pointer and TLS into the task's own pt_regs,
+forces the signal the host made of the trap (SIGSEGV, SIGFPE, SIGBUS or
+SIGILL; si_code SEGV_MAPERR, FPE_INTDIV, BUS_ADRERR, ILL_ILLOPC) and runs the
+handler on the way out through _user_mode_tail, as at the return of a
+system call. A trap cannot be resumed: when the handler returns, the host
+calls wasm_user_fault again with -sig and the task dies by the signal
+(force_fatal_sig()), where Linux elsewhere would run the faulting instruction
+again and take the trap again. A blocked or ignored signal is forced to its
+default action by force_sig_fault() as on any architecture, so a trap in the
+handler of the same trap is fatal.
+
+wasm_user_mode_now() tells the host whether the code that threw was the
+program's; raise_exception() stays for the kernel's own errors (and for
+hosts that do not know wasm_user_fault).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/kernel/entry.S | 16 +++++++++
+ arch/wasm/kernel/traps.c | 72 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 88 insertions(+)
+
+diff --git a/arch/wasm/kernel/entry.S b/arch/wasm/kernel/entry.S
+index 341013c..c1ff515 100644
+--- a/arch/wasm/kernel/entry.S
++++ b/arch/wasm/kernel/entry.S
+@@ -197,6 +197,22 @@ ret_from_fork:
+ 	end_function
+ .endm
+ 
++.functype __wasm_user_fault(iLONG) -> (iLONG)
++
++/*
++ * The host, when the program has trapped: sp and tp as for a system call, and
++ * the signal it makes of the trap (traps.c: __wasm_user_fault). A handler for
++ * it runs on the way out, in _user_mode_tail, as for a signal at the return of
++ * a system call.
++ */
++.globl wasm_user_fault
++wasm_user_fault:
++	.functype wasm_user_fault(iLONG, iLONG, iLONG) -> (iLONG)
++	WASM_SYSCALL_ASM_HEAD
++	local.get 2
++	call __wasm_user_fault
++	WASM_SYSCALL_ASM_FOOT
++
+ .functype __wasm_syscall_0(iLONG) -> (iLONG)
+ .functype __wasm_syscall_1(iLONG, iLONG) -> (iLONG)
+ .functype __wasm_syscall_2(iLONG, iLONG, iLONG) -> (iLONG)
+diff --git a/arch/wasm/kernel/traps.c b/arch/wasm/kernel/traps.c
+index 85d7554..6f2a997 100644
+--- a/arch/wasm/kernel/traps.c
++++ b/arch/wasm/kernel/traps.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0-only */
+ 
+ #include <linux/entry-common.h>
++#include <linux/sched/signal.h>
+ #include <linux/syscalls.h>
+ #include <asm/cpuflags.h>
+ #include <asm/entry.h>
+@@ -188,6 +189,77 @@ static void do_exception(struct pt_regs *regs)
+ 	}
+ }
+ 
++/*
++ * For the host, when Wasm code has thrown: is the CPU in user mode (the
++ * program trapped: wasm_user_fault) or not (the kernel did: raise_exception)?
++ */
++__visible int wasm_user_mode_now(void);
++__visible int wasm_user_mode_now(void)
++{
++	return cpuflags_test_any(CPUFLAGS_USER_MODE);
++}
++
++/*
++ * An entry from the program that is not a system call: a trap of its code
++ * (sig: the signal the host made of it, which the program may handle; fatal:
++ * it is to die by it now, its handler, if any, having run and returned: a
++ * trap cannot be resumed). A handler is run by the host after this returns
++ * (_user_mode_tail, the frame set up as for any signal).
++ */
++static void user_exception(struct pt_regs *regs, int sig, int fatal)
++{
++	regs->syscall_nr = -1;
++	_exception_enter(regs);
++	irqentry_enter_from_user_mode(regs);
++	if (sig && fatal) {
++		force_fatal_sig(sig);
++	} else if (sig) {
++		switch (sig) {
++		case SIGSEGV:
++			force_sig_fault(SIGSEGV, SEGV_MAPERR, (void __user *)0UL);
++			break;
++		case SIGBUS:
++			force_sig_fault(SIGBUS, BUS_ADRERR, (void __user *)0UL);
++			break;
++		case SIGFPE:
++			force_sig_fault(SIGFPE, FPE_INTDIV, (void __user *)0UL);
++			break;
++		default:
++			force_sig_fault(SIGILL, ILL_ILLOPC, (void __user *)0UL);
++		}
++	}
++	irqentry_exit_to_user_mode(regs);
++	_exception_exit(regs);
++}
++
++/*
++ * The program trapped (the host passes what the trap was as a signal:
++ * SIGSEGV for an access out of bounds, a bad function pointer or a stack that
++ * ran out, SIGFPE for a division by zero, SIGILL for the rest); called through
++ * wasm_user_fault in entry.S, which saves the program's stack pointer and TLS
++ * as a system call does and runs the handler, if there is one, on the way
++ * out. -sig: the handler has returned, and the program dies by the signal.
++ *
++ * raise_exception() made every trap SIGILL, and a handler for it was set up
++ * but never run: the task hung for good, with no way to end it.
++ */
++__visible long __wasm_user_fault(long sig);
++__visible long __wasm_user_fault(long sig)
++{
++	struct pt_regs *regs = current_pt_regs();
++	int fatal = sig < 0;
++
++	if (fatal)
++		sig = -sig;
++	if (sig != SIGSEGV && sig != SIGFPE && sig != SIGBUS)
++		sig = SIGILL;
++	if (WARN_ON_ONCE(!cpuflags_test_any(CPUFLAGS_USER_MODE)))
++		return -EINVAL;
++
++	user_exception(regs, (int)sig, fatal);
++	return 0;
++}
++
+ /*
+ * This function is called from the host when things break either in kernel code
+ * or user code. That code will never continue to execute - we have to report the

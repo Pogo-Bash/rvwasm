@@ -1,0 +1,26 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -79,8 +79,9 @@
+ if (CMAKE_SYSTEM_NAME MATCHES Linux)
+     # Used by the UDisks backend on Linux
+     find_package(LibMount)
++    # nativeqt: optional (no util-linux here); without it no udisks2 and fstab backends.
+     set_package_properties(LibMount PROPERTIES
+-                           TYPE REQUIRED)
++                           TYPE OPTIONAL)
+ endif()
+ 
+ include(ECMPoQmTools)
+@@ -120,8 +121,10 @@
+         add_device_backend(udev)
+     endif()
+     set(HAVE_LIBMOUNT ${LibMount_FOUND})
+-    add_device_backend(udisks2)
+-    add_device_backend(fstab)
++    if(LibMount_FOUND)
++        add_device_backend(udisks2)
++        add_device_backend(fstab)
++    endif()
+     add_device_backend(upower)
+ elseif (APPLE)
+     find_package(IOKit REQUIRED)

@@ -1,0 +1,13 @@
+--- a/modules/ECMQmlModule6.cmake
++++ b/modules/ECMQmlModule6.cmake
+@@ -61,6 +61,10 @@
+ 
+     if (NOT ARG_GENERATE_PLUGIN_SOURCE)
+         list(APPEND _arguments NO_GENERATE_PLUGIN_SOURCE)
++        # nativeqt: a plugin of the module's own (registerTypes, initializeEngine) must be loaded even when
++        # the module's types are registered already, as they are in a static program (its registration
++        # object is linked in): not optional.
++        list(APPEND _arguments NO_PLUGIN_OPTIONAL)
+     endif()
+ 
+     if (NOT TARGET ${ARG_TARGET})

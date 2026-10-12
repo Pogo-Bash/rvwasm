@@ -1,0 +1,35 @@
+--- a/sqlite3.c
++++ b/sqlite3.c
+@@ -43291,6 +43291,16 @@
+             MAP_SHARED, pShmNode->hShm, szRegion*(i64)pShmNode->nRegion
+         );
+         if( pMem==MAP_FAILED ){
++#ifdef __wasm__
++          /* nativeqt: without an MMU a file on a disk cannot be mapped shared. A read-only connection then
++          ** reads the write-ahead log the way it does when the *-shm file is not writable: an index of its
++          ** own in heap memory, made from the log at each read transaction (SQLITE_READONLY_CANTINIT). The
++          ** writer (another process, which can share the file: rv) keeps the file's index. */
++          if( pDbFd->ctrlFlags & UNIXFILE_RDONLY ){
++            rc = SQLITE_READONLY_CANTINIT;
++            goto shmpage_out;
++          }
++#endif
+           rc = unixLogError(SQLITE_IOERR_SHMMAP, "mmap", pShmNode->zFilename);
+           goto shmpage_out;
+         }
+@@ -64669,6 +64679,15 @@
+   ** implementation. Take the exclusive lock now, before opening the WAL
+   ** file, to make sure this is safe.
+   */
++#ifdef __wasm__
++  /* nativeqt: without an MMU the *-shm file on a disk cannot be mapped shared (the read-only case is in
++  ** unixShmMap). A connection that writes takes the database the way locking_mode=EXCLUSIVE does: an
++  ** EXCLUSIVE lock on the file for as long as it is in WAL mode, and the wal-index in heap memory. Another
++  ** process that opens the database meanwhile gets SQLITE_BUSY instead of a wal-index it cannot see. */
++  if( !pPager->readOnly ){
++    pPager->exclusiveMode = 1;
++  }
++#endif
+   if( pPager->exclusiveMode ){
+     rc = pagerExclusiveLock(pPager);
+   }

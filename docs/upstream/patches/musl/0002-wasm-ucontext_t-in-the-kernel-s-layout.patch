@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: rvwasm <rvwasm@localhost>
+Date: Sat, 10 Oct 2026 23:50:44 -0500
+Subject: [PATCH 2/5] wasm: ucontext_t in the kernel's layout
+
+musl had { uc_link; uc_sigmask; uc_stack; uc_mcontext; }, the kernel writes
+asm-generic's { uc_flags; uc_link; uc_stack; uc_mcontext; uc_sigmask; }. A
+handler that read uc_mcontext or uc_stack got garbage, a signal it added to
+uc_sigmask was not blocked afterwards, and what it wrote into its idea of
+uc_sigmask landed on the kernel's uc_stack, which rt_sigreturn passes to
+restore_altstack() (a bad value there makes the sigreturn fail with SIGSEGV).
+mcontext_t already matches struct sigcontext. (ABI: programs that use
+ucontext_t need compiling again.)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/wasm/bits/signal.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/wasm/bits/signal.h b/arch/wasm/bits/signal.h
+index ab24d3d..ceeaab3 100644
+--- a/arch/wasm/bits/signal.h
++++ b/arch/wasm/bits/signal.h
+@@ -29,11 +29,13 @@ struct sigaltstack {
+ 	size_t ss_size;
+ };
+ 
++/* As the kernel writes it (asm-generic/ucontext.h): the signal mask last. */
+ typedef struct __ucontext {
++	unsigned long uc_flags;
+ 	struct __ucontext *uc_link;
+-	sigset_t uc_sigmask;
+ 	stack_t uc_stack;
+ 	mcontext_t uc_mcontext;
++	sigset_t uc_sigmask;
+ } ucontext_t;
+ 
+ #define SA_NOCLDSTOP  1

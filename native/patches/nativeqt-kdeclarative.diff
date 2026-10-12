@@ -1,0 +1,24 @@
+--- a/src/qmlcontrols/graphicaleffects/BadgeEffect.qml
++++ b/src/qmlcontrols/graphicaleffects/BadgeEffect.qml
+@@ -11,10 +11,21 @@
+  */
+ 
+ ShaderEffect {
++    id: root
+ 
+     required property var source
+     required property var mask
+ 
++    // nativeqt: Qt Quick's software renderer draws no ShaderEffect, and the source (a ShaderEffectSource that
++    // hides the item it copies) would leave nothing at all: the widget explorer's icons, for one. There the item
++    // is shown as it is, without the badge's cut-out.
++    readonly property bool softwareRender: GraphicsInfo.api === GraphicsInfo.Software
++    Component.onCompleted: {
++        if (softwareRender && source && source.hideSource !== undefined) {
++            source.hideSource = false;
++        }
++    }
++
+     supportsAtlasTextures: true
+     fragmentShader: Qt.resolvedUrl("qrc:/shaders/badge.frag.qsb")
+ }

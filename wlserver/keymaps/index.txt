@@ -1,0 +1,30 @@
+us	English (US)
+us-intl	English (US, intl., with dead keys)
+us-dvorak	English (Dvorak)
+us-colemak	English (Colemak)
+gb	English (UK)
+de	German
+de-nodeadkeys	German (no dead keys)
+ch	German (Switzerland)
+ch-fr	French (Switzerland)
+fr	French
+be	Belgian
+ca	French (Canada)
+es	Spanish
+latam	Spanish (Latin American)
+it	Italian
+pt	Portuguese
+br	Portuguese (Brazil)
+nl	Dutch
+se	Swedish
+no	Norwegian
+dk	Danish
+fi	Finnish
+pl	Polish
+cz	Czech
+hu	Hungarian
+tr	Turkish
+gr	Greek
+ru	Russian
+ua	Ukrainian
+jp	Japanese

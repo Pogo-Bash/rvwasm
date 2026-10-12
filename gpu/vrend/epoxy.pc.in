@@ -1,0 +1,12 @@
+prefix=@PREFIX@
+includedir=${prefix}/include
+libdir=${prefix}/lib
+epoxy_has_glx=0
+epoxy_has_egl=0
+epoxy_has_wgl=0
+
+Name: epoxy
+Description: stand-in for libepoxy (WebGL2 via Emscripten)
+Version: 1.5.10
+Cflags: -I${includedir}
+Libs: -L${libdir} -lepoxy

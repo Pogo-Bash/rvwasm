@@ -1,0 +1,13 @@
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -151,6 +151,10 @@
+ )
+ 
+ install(TARGETS KF6NewStuffCore EXPORT KF6NewStuffCoreTargets ${KF_INSTALL_TARGETS_DEFAULT_ARGS})
++# nativeqt: a static KF6NewStuffCore links knscore_jobs_static, which its users then need as well
++if(NOT BUILD_SHARED_LIBS)
++    install(TARGETS knscore_jobs_static EXPORT KF6NewStuffCoreTargets ${KF_INSTALL_TARGETS_DEFAULT_ARGS})
++endif()
+ 
+ install(
+     FILES

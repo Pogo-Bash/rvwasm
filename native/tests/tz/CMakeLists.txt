@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.21)
+project(tz-test CXX)
+find_package(Qt6 REQUIRED COMPONENTS Core Qml)
+qt_add_executable(tz-test main.cpp)
+target_link_libraries(tz-test PRIVATE Qt6::Core Qt6::Qml)

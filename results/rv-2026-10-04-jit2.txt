@@ -1,0 +1,15 @@
+{"system":"rv","run":1,"native_coremark_ticks":83,"boot_ms":667,"hidden":false,"bench":{"coremark_ticks":[376,"0x4983"],"sha256_16M":[330,"080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"],"md5_16M":[100,"2c7ab85a893283e98c931e9511add182"],"gzip":[470,"cf3e61dd28d40567b00cb156bef40950"],"sort":[2180,"e3f5c6d1c219f7b0016239a8cf596c8a"],"awk":[1690,"2147483647"],"spawn200":[1160,"200"],"pipeline":[520,"20"]}}
+{"system":"rv","run":2,"native_coremark_ticks":83,"boot_ms":634,"hidden":false,"bench":{"coremark_ticks":[378,"0x4983"],"sha256_16M":[330,"080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"],"md5_16M":[110,"2c7ab85a893283e98c931e9511add182"],"gzip":[470,"cf3e61dd28d40567b00cb156bef40950"],"sort":[2190,"e3f5c6d1c219f7b0016239a8cf596c8a"],"awk":[1730,"2147483647"],"spawn200":[1160,"200"],"pipeline":[550,"20"]}}
+{"system":"rv","run":3,"native_coremark_ticks":83,"boot_ms":650,"hidden":false,"bench":{"coremark_ticks":[376,"0x4983"],"sha256_16M":[330,"080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"],"md5_16M":[110,"2c7ab85a893283e98c931e9511add182"],"gzip":[460,"cf3e61dd28d40567b00cb156bef40950"],"sort":[2180,"e3f5c6d1c219f7b0016239a8cf596c8a"],"awk":[1670,"2147483647"],"spawn200":[1160,"200"],"pipeline":[550,"20"]}}
+{"system":"rv","run":4,"native_coremark_ticks":83,"boot_ms":657,"hidden":false,"bench":{"coremark_ticks":[377,"0x4983"],"sha256_16M":[340,"080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"],"md5_16M":[110,"2c7ab85a893283e98c931e9511add182"],"gzip":[460,"cf3e61dd28d40567b00cb156bef40950"],"sort":[2190,"e3f5c6d1c219f7b0016239a8cf596c8a"],"awk":[1750,"2147483647"],"spawn200":[1160,"200"],"pipeline":[540,"20"]}}
+{"system":"rv","run":5,"native_coremark_ticks":83,"boot_ms":655,"hidden":false,"bench":{"coremark_ticks":[377,"0x4983"],"sha256_16M":[340,"080acf35a507ac9849cfcba47dc2ad83e01b75663a516279c8b9d243b719643e"],"md5_16M":[110,"2c7ab85a893283e98c931e9511add182"],"gzip":[460,"cf3e61dd28d40567b00cb156bef40950"],"sort":[2190,"e3f5c6d1c219f7b0016239a8cf596c8a"],"awk":[1740,"2147483647"],"spawn200":[1210,"200"],"pipeline":[530,"20"]}}
+
+rv, 5 runs: median (min-max) ms, check
+coremark_ticks        377 (376-378)  0x4983
+sha256_16M            330 (330-340)  080acf35a507ac98
+md5_16M               110 (100-110)  2c7ab85a893283e9
+gzip                  460 (460-470)  cf3e61dd28d40567
+sort                 2190 (2180-2190)  e3f5c6d1c219f7b0
+awk                  1730 (1670-1750)  2147483647
+spawn200             1160 (1160-1210)  200
+pipeline              540 (520-550)  20

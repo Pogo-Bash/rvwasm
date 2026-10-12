@@ -1,0 +1,270 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GPU executor prototype</title>
+<style>
+  body { margin: 8px; background: #111; color: #ccc; font: 13px monospace; }
+  #screen { display: block; width: 1024px; height: 768px; background: #000; }
+  #info { white-space: pre; margin-top: 4px; }
+</style>
+<script>
+// The page side of the window server (display.js) and the GPU executor (gpu-exec.js), with no machine: this
+// page plays the window server. It makes a shared memory, writes a surface table into it the way wlserver does
+// (wlserver/README.md: the surface table) and announces it, keeps the heartbeat going, and has two windows:
+//   - a GPU window (format 2): its frames come from a stub of a guest GL program (gpu-stub.js, a Worker) through
+//     the executor's ring; on each present the slot is pointed at the presented resource;
+//   - optionally a wl_shm-like window (?cpu=WxH) whose pixels are written by the CPU and uploaded whole on every
+//     frame, the way a software-rendered program's are now: the comparison.
+// ?gpu=main|worker (where the executor runs), ?exec=proto|vrend (gpu-exec.js's small decoder, or
+// virglrenderer built to wasm: needs vrend/vrend.js and vrend.wasm next to this page; always a Worker), ?gw=W&gh=H (the GPU window's size; 0 for none), ?draws=N
+// (triangles a frame, one draw each), ?readback=1 (stage A: the GPU window's frames are read back and uploaded
+// like a software-drawn window's, as stock Mesa's vtest winsys does; the image comes out upside down and with
+// red and blue swapped, which does not matter for the numbers), ?cpu=WxH.
+// The ring is gpu/PROTOCOL.md's (branch gpu-guest); the page announces it on "rv-gpu" the way gpuserver does,
+// and gpu-exec.js starts on that.
+// Results: window.demo.result() (JSON). Times are the page's own (performance.now), on this computer's GPU.
+(() => {
+  // Times of each requestAnimationFrame callback (display.js draws in one): the main thread's cost per frame.
+  const raf = window.requestAnimationFrame.bind(window);
+  const rafTimes = [];
+  window.requestAnimationFrame = (f) => raf((t) => {
+    const t0 = performance.now();
+    f(t);
+    rafTimes.push(performance.now() - t0);
+    if (rafTimes.length > 600) {
+      rafTimes.shift();
+    }
+  });
+  window.demoRafTimes = rafTimes;
+  // The machine's memory, as display.js finds it.
+  window.linuxOs = { memory: new WebAssembly.Memory({ initial: 1024, maximum: 1024, shared: true }) };
+})();
+</script>
+<script src="display.js"></script>
+<script src="gpu-exec.js"></script>
+</head>
+<body>
+<canvas id="screen" width="1024" height="768"></canvas>
+<div id="info"></div>
+<script>
+(() => {
+  "use strict";
+  const params = new URLSearchParams(location.search);
+  const GW = Number(params.get("gw") ?? 640), GH = Number(params.get("gh") ?? 480);
+  const DRAWS = Number(params.get("draws") || 1);
+  const cpu = /^(\d+)x(\d+)$/.exec(params.get("cpu") || "");
+  const CW = cpu ? Number(cpu[1]) : 0, CH = cpu ? Number(cpu[2]) : 0;
+
+  const memory = window.linuxOs.memory;
+  const buffer = memory.buffer;
+  const v = new DataView(buffer), w32 = new Int32Array(buffer), f64 = new Float64Array(buffer);
+  const TABLE = 1 << 20, TIMES = 2 << 20, FRAME = TIMES + 1024, RING = 4 << 20, CPUBUF = 12 << 20, WLSHM = 22 << 20,
+        BACKING = 32 << 20;
+  const READBACK = params.get("readback") === "1";
+  const CAPS = TIMES + 4096;	// (where the executor writes its caps)
+  const HEADER = 2048, SLOTS = 64, SLOT = 384, PID = 4242;
+  const S_SEQ = 0, S_ID = 4, S_KIND = 12, S_X = 16, S_Y = 20, S_W = 24, S_H = 28, S_Z = 32, S_FLAGS = 36, S_GEOM = 40,
+        S_PRESENT = 56, S_BUFFER_LO = 60, S_BUFFER_HI = 64, S_STRIDE = 68, S_FORMAT = 72, S_BUF_W = 76, S_BUF_H = 80,
+        S_SCALE = 84, S_DAMAGE_COUNT = 88, S_UPLOADED = 224, S_SHOWN = 228, S_TITLE = 256, S_APP_ID = 320;
+  const slot = (i) => TABLE + HEADER + i * SLOT;
+
+  // The table's header.
+  const u = (at, x) => v.setUint32(at, x >>> 0, true);
+  u(TABLE + 0, 0x4c445652);
+  u(TABLE + 4, 3);
+  u(TABLE + 8, PID);
+  u(TABLE + 16, SLOTS);
+  u(TABLE + 20, SLOT);
+  u(TABLE + 24, 1024);
+  u(TABLE + 28, 768);
+  u(TABLE + 136, 28);
+  u(TABLE + 140, 4);
+  u(TABLE + 208, 1);
+
+  const text = (at, s) => {
+    const b = new TextEncoder().encode(s);
+    new Uint8Array(buffer, at, 64).fill(0);
+    new Uint8Array(buffer, at, Math.min(63, b.length)).set(b.subarray(0, 63));
+  };
+  const window_ = (i, id, x, y, w, h, z, title, format) => {
+    const at = slot(i);
+    Atomics.add(w32, at >> 2, 1);
+    u(at + S_ID, id); u(at + S_KIND, 1); u(at + S_X, x); u(at + S_Y, y); u(at + S_W, w); u(at + S_H, h);
+    u(at + S_Z, z); u(at + S_FLAGS, 1 | 32 | (z ? 2 : 0));
+    u(at + S_GEOM, 0); u(at + S_GEOM + 4, 0); u(at + S_GEOM + 8, w); u(at + S_GEOM + 12, h);
+    u(at + S_FORMAT, format); u(at + S_BUF_W, w); u(at + S_BUF_H, h); u(at + S_SCALE, 1);
+    u(at + S_DAMAGE_COUNT, 0xffffffff);
+    text(at + S_TITLE, title);
+    text(at + S_APP_ID, "demo");
+    Atomics.add(w32, at >> 2, 1);
+  };
+
+  // The CPU window: an ARGB8888 buffer, all of it new on every frame.
+  if (CW) {
+    window_(0, 1, 24, 40, CW, CH, 0, "cpu (wl_shm) " + CW + "x" + CH, 0);
+    u(slot(0) + S_BUFFER_LO, CPUBUF);
+    u(slot(0) + S_STRIDE, CW * 4);
+  }
+  let cpuPresent = 0;
+  const cpuFrame = () => {
+    if (!CW) {
+      return;
+    }
+    const at = slot(0);
+    if (v.getUint32(at + S_UPLOADED, true) !== cpuPresent) {
+      return;	// (the page has not taken the last one yet)
+    }
+    const px = new Uint32Array(buffer, CPUBUF, CW * CH);
+    const k = cpuPresent * 4;
+    for (let y = 0; y < CH; y++) {
+      px.fill(0xff000000 | (((y + k) & 0xff) << 8) | ((k * 3) & 0xff), y * CW, (y + 1) * CW);
+    }
+    cpuPresent++;
+    Atomics.add(w32, at >> 2, 1);
+    u(at + S_PRESENT, cpuPresent);
+    Atomics.add(w32, at >> 2, 1);
+  };
+
+  // The GPU window: slot 1, pointed at whatever resource was presented last.
+  if (GW) {
+    window_(1, 2, CW ? 120 : 60, CW ? 140 : 60, GW, GH, 1, "gpu (" + (params.get("exec") || "vrend") + ", " + (params.get("gpu") || "main") + ") " + GW + "x" + GH + ", " + DRAWS + " draws", 2);
+  }
+  const latency = [];
+  let gpuShown = 0;
+  // A frame from the stub (FRAME words: frame, resource, gpu_serial, shown): put into the window's slot the
+  // way wlserver does. Stage B: format 2, the resource and the GPU server's pid, gpu_serial (display.js draws the
+  // executor's texture once the ring's done has passed it). Stage A: the frame is in the wl_shm-like buffer,
+  // an ordinary window uploaded whole.
+  let frameNow = 0;
+  const S_GPU_SERIAL = 232;
+  const takeFrame = () => {
+    const f = Atomics.load(w32, FRAME >> 2);
+    if (f === frameNow) {
+      return;
+    }
+    frameNow = f;
+    const at = slot(1);
+    Atomics.add(w32, at >> 2, 1);
+    if (READBACK) {
+      u(at + S_FORMAT, 0);
+      u(at + S_BUFFER_LO, WLSHM);
+      u(at + S_BUFFER_HI, 0);
+      u(at + S_STRIDE, GW * 4);
+      u(at + S_DAMAGE_COUNT, 0xffffffff);
+    } else {
+      u(at + S_FORMAT, 2);
+      u(at + S_BUFFER_LO, w32[(FRAME >> 2) + 1]);
+      u(at + S_BUFFER_HI, PID);
+      u(at + S_GPU_SERIAL, w32[(FRAME >> 2) + 2]);
+    }
+    u(at + S_PRESENT, f);
+    Atomics.add(w32, at >> 2, 1);
+  };
+
+  let announced = 0;
+  const announce = () => {
+    window.rvChannel("rv-display").postMessage({ type: "table", address: TABLE, pid: PID, slots: SLOTS, slotSize: SLOT,
+      header: HEADER, width: 1024, height: 768, scale: 1, version: 3, layouts: [] });
+    announced++;
+  };
+
+  // The server's turn, every 4 ms: heartbeat, the page's requests answered, presents shown passed on.
+  const turn = () => {
+    Atomics.add(w32, (TABLE + 12) >> 2, 1);
+    const out = v.getUint32(TABLE + 188, true);
+    if (out !== v.getUint32(TABLE + 204, true)) {
+      u(TABLE + 24, v.getUint32(TABLE + 192, true));
+      u(TABLE + 28, v.getUint32(TABLE + 196, true));
+      u(TABLE + 208, v.getUint32(TABLE + 200, true) || 1);
+      u(TABLE + 204, out);
+    }
+    u(TABLE + 260, v.getUint32(TABLE + 256, true));	// (orders: taken, not carried out)
+    if (GW) {
+      const shown = v.getUint32(slot(1) + S_SHOWN, true);
+      if (shown !== gpuShown) {
+        gpuShown = shown;
+        const sent = f64[(TIMES >> 3) + (shown % 64)];
+        latency.push(performance.timeOrigin + performance.now() - sent);
+        if (latency.length > 600) {
+          latency.shift();
+        }
+        Atomics.store(w32, (FRAME >> 2) + 3, shown);
+        Atomics.notify(w32, (FRAME >> 2) + 3);
+      }
+      takeFrame();
+    }
+    cpuFrame();
+  };
+
+  window.addEventListener("load", () => {
+    announce();
+    setInterval(announce, 1000);
+    setInterval(turn, 4);
+    const start = () => {
+      const gl = window.rvDisplay.gl;
+      if (!gl || !window.rvDisplay.active()) {
+        setTimeout(start, 50);
+        return;
+      }
+      if (GW) {
+        // As gpuserver announces its ring; gpu-exec.js starts on it, in display.js's context or a Worker.
+        window.rvChannel("rv-gpu").postMessage({ type: "gpu", version: 2, pid: PID, ring: RING, ringSize: 2048 + (4 << 20),
+                                                     caps: CAPS, capsSize: 4096 });
+        const stub = new Worker("gpu-stub.js");
+        stub.postMessage({ memory, ring: RING, pid: PID, times: TIMES, frameWords: FRAME, backing: BACKING, wlshm: WLSHM,
+                           width: GW, height: GH, draws: DRAWS, readback: READBACK });
+      }
+      t0 = performance.now();
+      base = snapshot();
+    };
+    start();
+  });
+
+  // ---- results
+  let t0 = 0, base = null;
+  const snapshot = () => {
+    const g = window.rvGpu.stats, e = g.exec || {};
+    return { t: performance.now(), presents: g.presents, shown: gpuShown, execMs: e.execMs || 0, records: e.records || 0,
+             gets: e.gets || 0, getMs: e.getMs || 0, frame: frameNow,
+             draws: e.draws || 0, importMs: g.importMs, imports: g.imports, blitMs: g.blitMs,
+             frames: window.rvDisplay.stats.frames, uploadBytes: window.rvDisplay.stats.uploadBytes, cpuPresent };
+  };
+  const pct = (a, p) => {
+    const s = a.slice().sort((x, y) => x - y);
+    return s.length ? Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))] * 100) / 100 : null;
+  };
+  const r2 = (x) => Math.round(x * 100) / 100;
+  window.demo = {
+    // Rates and costs since `reset()` (or since the start).
+    reset() {
+      base = snapshot();
+      latency.length = 0;
+      window.demoRafTimes.length = 0;
+    },
+    result() {
+      const s = snapshot(), b = base || s, dt = (s.t - b.t) / 1000;
+      const presents = s.presents - b.presents, frames = s.frames - b.frames;
+      const g = window.rvGpu.stats;
+      return {
+        url: location.search, exec: g.exec_kind, capsLen: g.capsLen, startErrors: g.startErrors, renderer: g.renderer, workerRenderer: g.workerRenderer || null, seconds: r2(dt),
+        pageFps: r2(frames / dt), gpuFramesPerS: r2((s.frame - b.frame) / dt),
+        readbackMsPerGet: s.gets - b.gets ? r2((s.getMs - b.getMs) / (s.gets - b.gets)) : null, cpuPresentsPerS: r2((s.cpuPresent - b.cpuPresent) / dt),
+        execMsPerFrame: s.frame - b.frame ? r2((s.execMs - b.execMs) / (s.frame - b.frame)) : null,
+        execThread: g.mode === "worker" ? "worker" : "main",
+        importMsPerPresent: s.imports - b.imports ? r2((s.importMs - b.importMs) / (s.imports - b.imports)) : null,
+        importMsMax: r2(g.maxImportMs), blitMsPerPresent: s.imports - b.imports ? r2((s.blitMs - b.blitMs) / (s.imports - b.imports)) : null,
+        rafMsP50: pct(window.demoRafTimes, 0.5), rafMsP95: pct(window.demoRafTimes, 0.95),
+        latencyMsP50: pct(latency, 0.5), latencyMsP95: pct(latency, 0.95),
+        uploadMBPerS: r2((s.uploadBytes - b.uploadBytes) / dt / 1048576),
+        errors: (g.exec && g.exec.errors) || [], vrendLog: (g.vrendLog || []).slice(-25), displayLog: window.rvDisplay.stats.log.slice(-5),
+      };
+    },
+  };
+  setInterval(() => {
+    document.getElementById("info").textContent = JSON.stringify(window.demo.result(), null, 1);
+  }, 1000);
+})();
+</script>
+</body>
+</html>

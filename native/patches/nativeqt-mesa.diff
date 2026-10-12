@@ -1,0 +1,81 @@
+diff --git a/src/egl/meson.build b/src/egl/meson.build
+index b6c803a..0e1c07f 100644
+--- a/src/egl/meson.build
++++ b/src/egl/meson.build
+@@ -7,7 +7,9 @@ c_args_for_egl = [asan_c_args]
+ cpp_args_for_egl = []
+ link_args_for_egl = []
+ link_deps_for_egl = []
+-link_for_egl = [libpipe_loader_dynamic]
++# linux-wasm (static): the pipe loader comes from libgallium, the static one; the dynamic one's
++# copy in libEGL.a would be found first and look for pipe_swrast.so.
++link_for_egl = get_option('default_library') == 'static' ? [] : [libpipe_loader_dynamic]
+ if with_dri
+   link_for_egl += libgallium_dri
+ endif
+@@ -195,7 +197,7 @@ egl_def = custom_target(
+   command : gen_vs_module_defs_normal_command,
+ )
+ 
+-libegl = shared_library(
++libegl = library(
+   egl_lib_name,
+   files_egl,
+   c_args : [
+diff --git a/src/gallium/targets/dri/meson.build b/src/gallium/targets/dri/meson.build
+index 5ecdc7b..0d5b22e 100644
+--- a/src/gallium/targets/dri/meson.build
++++ b/src/gallium/targets/dri/meson.build
+@@ -40,7 +40,7 @@ else
+   libgallium_name = 'gallium-@0@'.format(meson.project_version())
+ endif
+ 
+-libgallium_dri = shared_library(
++libgallium_dri = library(
+   libgallium_name,
+   files('dri_target.c'),
+   include_directories : [
+diff --git a/src/mapi/es2api/meson.build b/src/mapi/es2api/meson.build
+index afc5b95..7599324 100644
+--- a/src/mapi/es2api/meson.build
++++ b/src/mapi/es2api/meson.build
+@@ -22,7 +22,7 @@ gles2_def = custom_target(
+   command : gen_vs_module_defs_normal_command,
+ )
+ 
+-libgles2 = shared_library(
++libgles2 = library(
+   'GLESv2' + get_option('gles-lib-suffix'),
+   ['../entry.c', es2_glapi_mapi_tmp_h],
+   vs_module_defs : gles2_def,
+diff --git a/src/util/anon_file.h b/src/util/anon_file.h
+index db9598a..0c41cb1 100644
+--- a/src/util/anon_file.h
++++ b/src/util/anon_file.h
+@@ -33,6 +33,9 @@ extern "C"{
+ #endif
+ 
+ /* On win32, off_t is only 32 bit, so always using 64 bit size */
++/* linux-wasm (static): libwayland-cursor has a function of the same name, which a program
++ * linking both would get twice. */
++#define os_create_anonymous_file mesa_os_create_anonymous_file
+ int os_create_anonymous_file(int64_t size, const char *debug_name);
+ 
+ #ifdef __cplusplus
+diff --git a/src/util/u_thread.h b/src/util/u_thread.h
+index b5c7667..f1f0fb8 100644
+--- a/src/util/u_thread.h
++++ b/src/util/u_thread.h
+@@ -45,9 +45,10 @@
+  * still want to use normal TLS (which involves a function call, but not the
+  * expensive pthread_getspecific() or its equivalent).
+  */
+-#if DETECT_OS_APPLE
++#if DETECT_OS_APPLE || defined(__wasm__)
+ /* Apple Clang emits wrappers when using thread_local that break module linkage,
+- * but not with __thread
++ * but not with __thread. (linux-wasm: C++ code would call the variable's
++ * wrapper, _ZTH..., through a weak reference, which a static PIE imports.)
+  */
+ #define __THREAD_INITIAL_EXEC __thread
+ #elif defined(__GLIBC__)

@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>jsbench</title>
+<pre id="out">running</pre>
+<script>
+// The same benchmark as jsbench.js, in a page; the result goes to the console (and to standard output, with the
+// preferences devtools.console.stdout.content and browser.dom.window.dump.enabled) and into the page.
+const scale = Number(new URLSearchParams(location.search).get("scale") || 1);
+function loop() { let s = 0; for (let i = 0; i < 3e7 / scale; i++) { s = (s + i * i) % 1000003; } return s; }
+function objects() { let a = []; for (let i = 0; i < 4e5 / scale; i++) { a.push({ k: i, v: "x" + i }); } let m = new Map(); for (const o of a) { m.set(o.v, o.k); } return m.size; }
+function strings() { let s = ""; for (let i = 0; i < 2e5 / scale; i++) { s += String.fromCharCode(65 + i % 26); } return s.split("A").join("b").length; }
+function floats() { let x = 0; for (let i = 1; i < 1e7 / scale; i++) { x += Math.sqrt(i) * Math.sin(i) / i; } return x.toFixed(3); }
+const now = () => performance.now();
+// (Not from a timer: a browser told to take a picture of the page and leave waits for the page's own script.)
+const out = [];
+for (const f of [loop, objects, strings, floats, loop]) { const t = now(); const r = f(); out.push(f.name + " " + Math.round(now() - t) + " ms"); }
+const line = "JSBENCH " + out.join(", ") + (typeof WebAssembly == "undefined" ? " (no WebAssembly here)" : "");
+document.getElementById("out").textContent = line;
+console.log(line);
+if (typeof dump == "function") dump(line + "\n");
+</script>

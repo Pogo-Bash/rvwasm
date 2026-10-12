@@ -1,0 +1,5 @@
+# Buttons on the taskbar: name, icon, command.
+prog "Terminal" utilities-terminal xterm -fa Monospace -fs 11
+prog "Files" system-file-manager pcmanfm
+prog "Web" web-browser netsurf-gtk
+prog "Editor" accessories-text-editor l3afpad

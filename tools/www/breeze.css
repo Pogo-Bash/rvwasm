@@ -1,0 +1,1451 @@
+/* KDE Plasma's look for the page's chrome (plasma.js): the window frames
+   (KWin's Breeze decoration, or an Aurorae theme), the panel, Kickoff, the
+   window switcher. Everything here is coloured and sized by variables that
+   plasma.js sets on the stage from the guest's Plasma configuration
+   (--k-*: the colour scheme and the fonts; --cur-*: the cursor theme), and
+   by the Plasma theme's and the Aurorae theme's SVGs (border-image, set by
+   plasma.js). Not loaded with ?chrome=plain. */
+
+#rv-stage.rv-plasma {
+  --k-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* ---- window frames */
+
+.rv-plasma #rv-chrome {
+  font: var(--k-font);
+}
+
+.rv-plasma-frame .rv-deco {
+  position: absolute;
+  box-sizing: border-box;
+  border-style: solid;
+  border-width: 0;
+  border-color: var(--k-title-bg);
+  pointer-events: none;
+}
+
+.rv-plasma-frame.rv-inactive .rv-deco {
+  border-color: var(--k-title-bg-i);
+}
+
+.rv-plasma-frame .rv-edge,
+.rv-plasma-frame.rv-active .rv-edge {
+  background: transparent !important;
+  cursor: var(--cur-default, default);
+}
+
+.rv-plasma .rv-n { cursor: var(--cur-n-resize, n-resize); }
+.rv-plasma .rv-s { cursor: var(--cur-s-resize, s-resize); }
+.rv-plasma .rv-e { cursor: var(--cur-e-resize, e-resize); }
+.rv-plasma .rv-w { cursor: var(--cur-w-resize, w-resize); }
+.rv-plasma .rv-ne { cursor: var(--cur-ne-resize, ne-resize); }
+.rv-plasma .rv-nw { cursor: var(--cur-nw-resize, nw-resize); }
+.rv-plasma .rv-se { cursor: var(--cur-se-resize, se-resize); }
+.rv-plasma .rv-sw { cursor: var(--cur-sw-resize, sw-resize); }
+
+.rv-plasma-frame .rv-title,
+.rv-plasma-frame.rv-active .rv-title {
+  gap: 0;
+  padding: 0;
+  background: var(--k-title-bg);
+  color: var(--k-title-fg);
+  font: var(--k-title-font);
+  cursor: var(--cur-default, default);
+}
+
+.rv-plasma-frame.rv-inactive .rv-title {
+  background: var(--k-title-bg-i);
+  color: var(--k-title-fg-i);
+}
+
+.rv-plasma-frame .rv-btns {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--k-btn-gap, 4px);
+  height: 100%;
+}
+
+.rv-plasma-frame .rv-title.rv-full-center .rv-btns {
+  min-width: var(--k-side-w, 0);
+}
+
+.rv-plasma-frame .rv-btns-right {
+  justify-content: flex-end;
+}
+
+.rv-plasma-frame .rv-caption {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Breeze's buttons: a glyph in the title's colour; on hover a disc in the title's colour with the glyph cut
+   out of it (red for close); pressed, a little lighter. */
+.rv-plasma-frame .rv-pbtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--k-btn, 20px);
+  height: var(--k-btn, 20px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: var(--cur-default, default);
+  transition: background-color calc(120ms * var(--k-anim, 1)) var(--k-ease), color calc(120ms * var(--k-anim, 1)) var(--k-ease);
+}
+
+.rv-plasma-frame .rv-pbtn svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.rv-plasma-frame .rv-pbtn:hover {
+  background: var(--k-title-fg);
+  color: var(--k-title-bg);
+}
+
+.rv-plasma-frame.rv-inactive .rv-pbtn:hover {
+  background: var(--k-title-fg-i);
+  color: var(--k-title-bg-i);
+}
+
+.rv-plasma-frame .rv-pbtn-close:hover,
+.rv-plasma-frame.rv-inactive .rv-pbtn-close:hover {
+  background: var(--k-negative);
+  color: var(--k-title-bg);
+}
+
+.rv-plasma-frame .rv-pbtn:active {
+  opacity: 0.75;
+}
+
+/* A button that is on (keep above, keep below, shade, on all desktops): the disc stays. */
+.rv-plasma-frame .rv-pbtn.rv-checked {
+  background: var(--k-title-fg);
+  color: var(--k-title-bg);
+}
+
+.rv-plasma-frame.rv-inactive .rv-pbtn.rv-checked {
+  background: var(--k-title-fg-i);
+  color: var(--k-title-bg-i);
+}
+
+.rv-plasma-frame .rv-pbtn-menu:hover,
+.rv-plasma-frame.rv-inactive .rv-pbtn-menu:hover {
+  background: transparent;
+}
+
+.rv-plasma-frame .rv-pbtn-spacer {
+  width: calc(var(--k-btn, 20px) / 2);
+  visibility: hidden;
+}
+
+.rv-plasma-frame .rv-pbtn .rv-g-r { display: none; }
+.rv-plasma-frame .rv-pbtn[data-glyph="R"] .rv-g-a { display: none; }
+.rv-plasma-frame .rv-pbtn[data-glyph="R"] .rv-g-r { display: block; }
+.rv-plasma-frame .rv-pbtn span { width: 100%; height: 100%; }
+
+.rv-plasma-frame .rv-pbtn img {
+  display: block;
+}
+
+/* Aurorae: the decoration is the theme's SVG frame (.rv-deco); the title bar is transparent over it, the
+   caption and the buttons where the theme's layout puts them, the buttons the theme's pictures. */
+.rv-aurorae .rv-deco {
+  border-color: transparent;
+}
+
+.rv-aurorae .rv-title,
+.rv-aurorae.rv-active .rv-title,
+.rv-aurorae.rv-inactive .rv-title {
+  align-items: flex-start;
+  overflow: hidden;
+  background: transparent;
+}
+
+.rv-aurorae .rv-btns {
+  height: auto;
+  margin-top: var(--k-btn-top, 0);
+}
+
+.rv-aurorae .rv-caption {
+  margin-top: var(--k-caption-top, 0);
+  line-height: var(--k-caption-h, 20px);
+  height: var(--k-caption-h, 20px);
+}
+
+.rv-aurorae .rv-pbtn {
+  height: var(--k-btn-h, var(--k-btn, 20px));
+  border-radius: 0;
+}
+
+.rv-aurorae .rv-pbtn.rv-pbtn-aurorae {
+  background: var(--aur-normal) center / 100% 100% no-repeat;
+}
+
+.rv-aurorae .rv-pbtn.rv-pbtn-aurorae:hover {
+  background: var(--aur-hover) center / 100% 100% no-repeat;
+}
+
+.rv-aurorae .rv-pbtn.rv-pbtn-aurorae:active {
+  background: var(--aur-pressed) center / 100% 100% no-repeat;
+  opacity: 1;
+}
+
+.rv-aurorae .rv-pbtn.rv-pbtn-aurorae svg {
+  display: none;
+}
+
+/* The window menu (the window's icon in its title bar): KWin's QMenu in the Breeze style (plasma.js, windowMenu, has
+   the source of the numbers). The menu: PM_MenuHMargin/VMargin 4, Frame_FrameRadius 5. An item: MenuItem_MarginWidth
+   and MarginHeight 4 around, as high as the larger of the text, the check box (20) and the arrow (20), plus 1. The
+   current item: Breeze's focus rect, the focus colour at Blend_Value 0.3 with an outline of it mixed 15% towards the
+   text; the text keeps its colour. A line: 1 px, MenuItem_MarginHeight 4 shared above and below; its colour and the
+   check box frame's are the window colour mixed 20% (frameContrast) towards the text. */
+.rv-pmenu {
+  position: absolute;
+  z-index: 20000;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--k-line);
+  border-radius: 5px;
+  background: var(--k-win-bg);
+  color: var(--k-win-fg);
+  font: var(--k-font);
+  line-height: normal;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.rv-pmenu-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px 16px minmax(0, 1fr) 20px;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: calc(max(20px, 1lh) + 9px);
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 4.5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: var(--cur-default, default);
+}
+
+.rv-pmenu-item > :nth-child(2) {
+  width: 16px;
+  height: 16px;
+  margin-left: 8px;
+}
+
+.rv-pmenu-text {
+  margin-left: 11px;	/* (8 + 16 + 3 from the check box column: the icon column and MenuItem_ItemSpacing + 1) */
+  padding-right: 4px;
+}
+
+.rv-pmenu-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border: 1px solid color-mix(in srgb, var(--k-win-fg) 20%, var(--k-win-bg));
+  border-radius: 4px;
+  background: var(--k-button-bg, var(--k-win-bg));
+  color: var(--k-view-fg, var(--k-win-fg));
+}
+
+.rv-pmenu-check svg {
+  display: block;
+  margin: -1px;
+}
+
+.rv-pmenu-check.rv-pmenu-nocheck {
+  visibility: hidden;
+}
+
+.rv-pmenu-item.rv-checked .rv-pmenu-check {
+  border-color: var(--k-sel-bg);
+  background: linear-gradient(color-mix(in srgb, var(--k-sel-bg) 30%, transparent), color-mix(in srgb, var(--k-sel-bg) 30%, transparent)), var(--k-button-bg, var(--k-win-bg));
+}
+
+.rv-pmenu hr {
+  width: auto;
+  height: 0;
+  margin: 2px 4px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--k-win-fg) 20%, var(--k-win-bg));
+}
+
+.rv-pmenu-has-sub {
+  position: relative;
+}
+
+/* (the arrow column: Breeze draws a small arrow there) */
+.rv-pmenu-has-sub::after {
+  content: "";
+  grid-column: 4;
+  justify-self: center;
+  width: 5px;
+  height: 5px;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-1px, 1px);
+}
+
+.rv-pmenu-sub {
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  display: none;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--k-line);
+  border-radius: 5px;
+  background: var(--k-win-bg);
+  color: var(--k-win-fg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  cursor: var(--cur-default, default);
+}
+
+.rv-pmenu-has-sub:hover > .rv-pmenu-sub {
+  display: flex;
+}
+
+.rv-pmenu-item:hover:not(:has(.rv-pmenu-sub:hover)) {
+  background: color-mix(in srgb, var(--k-focus) 30%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-focus) 85%, var(--k-win-fg));
+}
+
+.rv-pmenu-has-sub:has(.rv-pmenu-sub:hover) {
+  background: color-mix(in srgb, var(--k-focus) 30%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-focus) 85%, var(--k-win-fg));
+}
+
+/* ---- the panel */
+
+#rv-panel.rv-plasma-panel {
+  display: block;
+  pointer-events: none;
+  padding: 0;
+  background: transparent;
+  color: var(--k-win-fg);
+  font: var(--k-font);
+  cursor: var(--cur-default, default);
+}
+
+/* (the plain panel's own buttons, which display.js keeps for ?chrome=plain) */
+#rv-panel.rv-plasma-panel > :not(.rv-pp-layer):not(#rv-launcher):not(.rv-calendar):not(.rv-notes) {
+  display: none !important;
+}
+
+.rv-pp-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rv-pp {
+  position: absolute;
+  pointer-events: auto;
+  transition: transform calc(200ms * var(--k-anim, 1)) var(--k-ease);
+}
+
+/* A panel that hides: off its edge but for 3 pixels, back while the pointer is over it. */
+.rv-pp-autohide.rv-pp-loc4 { transform: translateY(calc(100% - 3px)); }
+.rv-pp-autohide.rv-pp-loc3 { transform: translateY(calc(-100% + 3px)); }
+.rv-pp-autohide.rv-pp-loc5 { transform: translateX(calc(-100% + 3px)); }
+.rv-pp-autohide.rv-pp-loc6 { transform: translateX(calc(100% - 3px)); }
+.rv-pp-autohide:hover, .rv-pp-autohide:focus-within { transform: none; }
+
+/* Panels on the sides: the applets in a column. */
+.rv-pp-vertical .rv-pp-row {
+  flex-direction: column;
+}
+
+.rv-pp-vertical .rv-pp-tasks, .rv-pp-vertical .rv-pp-tray {
+  flex-direction: column;
+  width: 100%;
+  height: auto;
+}
+
+.rv-pp-vertical .rv-pp-tasks {
+  flex: 1;
+  min-height: 0;
+}
+
+#rv-panel.rv-plasma-panel .rv-pp-vertical button.rv-pp-item,
+#rv-panel.rv-plasma-panel .rv-pp-vertical .rv-pp-item {
+  width: var(--pp-h, 36px);
+  height: auto;
+  min-height: var(--pp-h, 36px);
+  padding: 4px 0;
+}
+
+#rv-panel.rv-plasma-panel .rv-pp-vertical .rv-pp-task {
+  width: var(--pp-h, 36px);
+  height: calc(var(--pp-h, 36px) + 4px);
+}
+
+.rv-pp-vertical .rv-pp-clock {
+  font: var(--k-small-font);
+}
+
+.rv-pp-vertical .rv-pp-pager {
+  width: calc(var(--pp-h, 36px) * 0.8);
+  height: calc(var(--pp-h, 36px) * 0.6);
+}
+
+.rv-pp-bg, .rv-pp-shadow, .rv-k-bg, .rv-k-shadow, .rv-pp-task-bg, .rv-pp-task-hover, .rv-sw-sel {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* (Plasma blurs what is behind its dialogs; so does this, while one is open) */
+.rv-kickoff .rv-k-bg, .rv-plasma-switcher .rv-k-bg, .rv-calendar .rv-k-bg, .rv-note .rv-k-bg {
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.rv-pp-bg:not([style]), .rv-k-bg:not([style]) {
+  background: var(--k-win-bg);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--k-line);
+}
+
+.rv-pp-flat .rv-pp-bg:not([style]) {
+  border-radius: 0;
+}
+
+.rv-pp-row {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+}
+
+#rv-panel.rv-plasma-panel button.rv-pp-item,
+#rv-panel.rv-plasma-panel .rv-pp-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: var(--pp-h, 36px);
+  padding: 0 4px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: var(--cur-default, default);
+}
+
+#rv-panel.rv-plasma-panel button.rv-pp-item:hover {
+  background: var(--k-hover-soft);
+}
+
+#rv-panel.rv-plasma-panel button.rv-pp-task:hover {
+  background: transparent;
+}
+
+.rv-pp-item img {
+  position: relative;
+  display: block;
+}
+
+.rv-pp-tasks {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#rv-panel.rv-plasma-panel .rv-pp-task {
+  width: calc(var(--pp-h, 36px) + 6px);
+}
+
+.rv-pp-task-hover {
+  opacity: 0;
+  transition: opacity calc(120ms * var(--k-anim, 1)) var(--k-ease);
+}
+
+.rv-pp-task:hover .rv-pp-task-hover {
+  opacity: 1;
+}
+
+.rv-pp-task:hover .rv-pp-task-bg.rv-hidden-on-hover {
+  opacity: 0;
+}
+
+.rv-pp-count {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--k-win-bg);
+  color: var(--k-win-fg);
+  font: var(--k-small-font);
+  line-height: 12px;
+  box-shadow: 0 0 0 1px var(--k-line);
+}
+
+.rv-pp-sep {
+  width: 4px;
+  height: 4px;
+  flex: none;
+}
+
+.rv-pp-spacer {
+  flex: 1;
+}
+
+#rv-panel.rv-plasma-panel .rv-pp-labelled .rv-pp-task {
+  justify-content: flex-start;
+  gap: 6px;
+  width: auto;
+  max-width: 220px;
+  min-width: 48px;
+  flex: 0 1 220px;
+  padding: 0 8px;
+}
+
+.rv-pp-task-label {
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The clock's calendar. */
+/* (the popups take the keyboard while open: plasma.js, takeKeys; no focus ring on them) */
+.rv-calendar:focus, .rv-pmenu:focus {
+  outline: none;
+}
+
+.rv-calendar {
+  position: absolute;
+  z-index: 3;
+  pointer-events: auto;
+  color: var(--k-win-fg);
+  font: var(--k-font);
+}
+
+.rv-cal-body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.rv-cal-day {
+  font-size: 1.4em;
+  font-weight: 300;
+}
+
+/* PlasmaComponents ToolButton and TabButton (plasma.js: plasmaToolButton, plasmaTab). */
+.rv-ptool, .rv-ptab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: normal;
+  cursor: var(--cur-default, default);
+}
+
+.rv-ptool > img, .rv-ptab > span {
+  position: relative;
+}
+
+/* (at least a gridUnit, 18, inside the padding) */
+.rv-ptool > img {
+  margin: 1px;
+}
+
+.rv-ptool-hover, .rv-ptab-bg {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.rv-ptool-hover {
+  opacity: 0;
+}
+
+.rv-ptool:hover > .rv-ptool-hover {
+  opacity: 1;
+}
+
+.rv-ptool-hover:not([style]) {
+  border-radius: 3px;
+  background: var(--k-hover-soft);
+}
+
+.rv-ptab-bg:not([style]) {
+  border-bottom: 2px solid var(--k-sel-bg);
+}
+
+/* The digital clock's month view (plasma.js, toggleCalendar, has the source of the numbers). */
+.rv-clock-cal .rv-cal-body {
+  line-height: normal;
+}
+
+/* (the header: a PlasmoidHeading, its line under it; MonthViewHeader: smallSpacing between the heading's row and the
+   tabs' row, the heading largeSpacing in) */
+.rv-cal-headbox {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--k-line);
+}
+
+.rv-cal-title {
+  margin-left: 8px;
+  overflow: hidden;
+  font-size: 1.35em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+}
+
+.rv-cal-tabrow {
+  display: flex;
+  align-items: center;
+}
+
+.rv-cal-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.rv-cal-tab {
+  flex: 1;
+}
+
+.rv-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  text-align: center;
+}
+
+.rv-cal-grid.rv-cal-view1, .rv-cal-grid.rv-cal-view2 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rv-cal-wd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: var(--cal-wd, 1em);
+  opacity: 0.4;
+}
+
+.rv-cal-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  font-size: var(--cal-num, 1.35em);
+}
+
+.rv-cal-num {
+  position: relative;
+}
+
+.rv-cal-other .rv-cal-num {
+  opacity: 0.5;
+}
+
+.rv-cal-cell > .rv-k-hl {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rv-cal-cell:hover > .rv-k-hl {
+  opacity: 0.3;
+}
+
+.rv-cal-today > .rv-k-hl, .rv-cal-today:hover > .rv-k-hl {
+  opacity: 1;
+}
+
+.rv-pp-tray {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+}
+
+#rv-panel.rv-plasma-panel .rv-pp-kbd {
+  padding: 0 6px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+#rv-panel.rv-plasma-panel .rv-pp-clock {
+  flex-direction: column;
+  padding: 0 6px;
+  line-height: 1.2;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-pp-date {
+  opacity: 0.9;
+}
+
+.rv-pp-pager {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  width: calc(var(--pp-h, 36px) * 1.2);
+  height: calc(var(--pp-h, 36px) * 0.66);
+  margin: 0 2px;
+  padding: 1px;
+  box-sizing: border-box;
+}
+
+.rv-pp-pager {
+  display: grid;
+  gap: 2px;
+  width: calc(var(--pp-h, 36px) * 0.9 * var(--pager-cols, 1) / var(--pager-rows, 1) * 1.4);
+  height: calc(var(--pp-h, 36px) * 0.8);
+}
+
+.rv-pp-desk {
+  position: relative;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--k-win-fg) 30%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--k-win-fg) 6%, transparent);
+  cursor: var(--cur-default, default);
+}
+
+.rv-pp-desk:hover {
+  border-color: var(--k-hover);
+  background: color-mix(in srgb, var(--k-hover) 18%, transparent);
+}
+
+.rv-pp-desk-win {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--k-win-fg) 60%, transparent);
+  border-radius: 1px;
+  background: var(--k-win-bg);
+}
+
+/* (Plasma's pager: the current desktop filled with the selection colour, its windows' outlines in it) */
+.rv-pp-desk.rv-active {
+  border-color: var(--k-sel-bg);
+  background: color-mix(in srgb, var(--k-sel-bg) 32%, transparent);
+}
+
+.rv-pp-desk.rv-active .rv-pp-desk-win {
+  border-color: var(--k-sel-bg);
+}
+
+/* ---- Kickoff */
+
+#rv-launcher.rv-kickoff {
+  position: absolute;
+  transform: none;
+  pointer-events: auto;
+  z-index: 2;
+  max-height: none;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--k-win-fg);
+  font: var(--k-font);
+  cursor: var(--cur-default, default);
+}
+
+/* The metrics are Kickoff's own (plasma.js, "Kickoff's metrics"), handed over as variables on the popup:
+   --k-li-*: the Plasma theme's widgets/listitem margins; --k-descent: the font's descent; --k-text-h, --k-small-h:
+   a line of the normal and the small font; --k-row, --k-cat-row, --k-cell: a list row, a category row, a grid cell;
+   --k-pad-*: the dialog background's margins. */
+.rv-k-body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  line-height: normal;
+}
+
+/* Header.qml: a PlasmoidHeading; the avatar and the name as wide as the categories below them, the search field
+   over the list (its left edge one dialog margin in), the background margins around. */
+.rv-k-head {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  gap: 1px;
+  padding-bottom: var(--k-pad-b, 4px);
+  border-bottom: 1px solid var(--k-line);
+}
+
+.rv-k-who {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--k-pad-l, 4px);
+  width: var(--k-cats-w, 34%);
+  min-width: 0;
+}
+
+.rv-k-avatar {
+  flex: none;
+  border-radius: 50%;
+}
+
+/* (Kirigami.Heading level 4: the font at 1.1 times, regular weight) */
+.rv-k-user {
+  overflow: hidden;
+  font-size: 1.1em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-k-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--k-pad-l, 4px);
+}
+
+/* (PlasmaExtras.SearchField: the search icon at the label size, 2 x smallSpacing from the left; the widgets/lineedit
+   margins, 6 in Breeze, around the text) */
+.rv-k-field-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.rv-k-search {
+  width: 100%;
+  height: calc(var(--k-text-h, 18px) + 12px);
+  box-sizing: border-box;
+  padding: 0 6px 0 30px;
+  border: 1px solid var(--k-line);
+  border-radius: 3px;
+  outline: none;
+  background: var(--k-view-bg);
+  color: var(--k-view-fg);
+  font: inherit;
+}
+
+.rv-k-search:focus {
+  border-color: var(--k-focus);
+}
+
+.rv-k-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The categories (their ListView: the listitem's top and bottom margins as header and footer, the background's
+   margins at the sides), a line, the programs. */
+.rv-k-side {
+  flex: none;
+  box-sizing: border-box;
+  padding: var(--k-li-t, 6px) var(--k-pad-r, 4px) var(--k-li-b, 6px) 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--k-line);
+}
+
+/* (the lists' scroll bars thin and in the text's colour, as Plasma's are, not the browser's grey ones) */
+.rv-k-side, .rv-k-list, .rv-history-list {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--k-win-fg) 35%, transparent) transparent;
+}
+
+.rv-k-list {
+  flex: 1;
+  min-width: 0;
+  padding: var(--k-li-t, 6px) var(--k-pad-r, 4px) var(--k-li-b, 6px) var(--k-pad-l, 4px);
+  overflow-y: auto;
+}
+
+/* A delegate (AbstractKickoffItemDelegate): no background of its own; the highlight is drawn under the current one. */
+.rv-k-cat, .rv-k-app {
+  position: relative;
+  display: grid;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: normal;
+  text-align: left;
+  cursor: var(--cur-default, default);
+}
+
+.rv-k-cat > *, .rv-k-app > * {
+  position: relative;
+}
+
+.rv-k-cat > .rv-k-hl, .rv-k-app > .rv-k-hl {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rv-k-hl:not([style]) {
+  border-radius: 3px;
+  background: var(--k-sel-bg-soft);
+  box-shadow: inset 0 0 0 1px var(--k-hover);
+}
+
+/* (the current entry; for the categories the current category: Kickoff does not follow the pointer there unless
+   switchCategoryOnHover is set) */
+.rv-k-app.rv-selected > .rv-k-hl, .rv-k-cat.rv-active > .rv-k-hl {
+  opacity: 1;
+}
+
+/* KickoffListDelegate: smallSpacing above and below, the listitem margin at the left, it and the descent at the
+   right; the icon, then twice the margin, then the name over the description, no space between. */
+.rv-k-app, .rv-k-cat {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: calc(var(--k-li-l, 6px) * 2);
+  row-gap: 0;
+  box-sizing: border-box;
+  min-height: var(--k-row, 42px);
+  padding: 4px calc(var(--k-li-r, 6px) + var(--k-descent, 4px)) 4px var(--k-li-l, 6px);
+}
+
+.rv-k-app > img, .rv-k-cat > img {
+  grid-row: 1 / 3;
+  grid-column: 1;
+  align-self: center;
+}
+
+.rv-k-name, .rv-k-comment {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-k-name {
+  align-self: end;
+}
+
+.rv-k-comment {
+  align-self: start;
+  font: var(--k-small-font);
+  line-height: normal;
+  opacity: 0.7;
+}
+
+/* (no description: the name alone, centred, the row as high as the others) */
+.rv-k-solo .rv-k-name, .rv-k-cat .rv-k-name {
+  grid-row: 1 / 3;
+  align-self: center;
+}
+
+.rv-k-cat {
+  min-height: var(--k-cat-row, 35px);
+}
+
+.rv-k-cat.rv-active {
+  font-weight: inherit;
+}
+
+/* KickoffGridView: square cells, as many whole ones as fit, centred; KickoffGridDelegate: 2 x smallSpacing above and
+   below, the large icon, the descent, the name in two lines. */
+.rv-k-list.rv-k-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--k-cell, 106px));
+  grid-auto-rows: var(--k-cell, 106px);
+  justify-content: center;
+  align-content: start;
+  gap: 0;
+}
+
+.rv-k-grid .rv-k-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--k-descent, 4px);
+  width: var(--k-cell, 106px);
+  height: var(--k-cell, 106px);
+  min-height: 0;
+  padding: 8px var(--k-li-r, 6px) 8px var(--k-li-l, 6px);
+  text-align: center;
+}
+
+.rv-k-grid .rv-k-app > img {
+  flex: none;
+}
+
+.rv-k-grid .rv-k-name {
+  max-width: 100%;
+  height: calc(var(--k-text-h, 18px) * 2);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.rv-k-none {
+  padding: 12px;
+  opacity: 0.7;
+}
+
+/* Footer.qml: a PlasmoidHeading at the bottom, 2 x smallSpacing above and below, the tabs' icons smallMedium. */
+.rv-k-foot {
+  display: flex;
+  flex: none;
+  gap: var(--k-pad-l, 4px);
+  padding-top: 8px;
+  padding-bottom: calc(8px - var(--k-pad-b, 4px));
+  border-top: 1px solid var(--k-line);
+}
+
+.rv-k-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+
+.rv-k-tab.rv-active {
+  background: var(--k-sel-bg-soft);
+}
+
+/* ---- the window switcher (Thumbnail Grid) */
+
+#rv-switcher.rv-plasma-switcher {
+  min-width: 0;
+  max-width: 92%;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--k-win-fg);
+  font: var(--k-font);
+}
+
+/* (plasma.js, renderSwitcher, has the numbers: the cells, the columns and the inset come from there) */
+.rv-sw-grid {
+  position: relative;
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  line-height: normal;
+}
+
+.rv-sw-item {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.rv-sw-item.rv-selected:not(:has(.rv-sw-sel[style])) .rv-sw-sel {
+  border-radius: 4px;
+  background: var(--k-sel-bg-soft);
+  box-shadow: inset 0 0 0 1px var(--k-sel-bg);
+}
+
+.rv-sw-inner {
+  position: absolute;
+  inset: var(--sw-in, 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.rv-sw-thumb {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.rv-sw-thumb canvas {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* (the icon's middle a quarter of its size above the thumbnail's bottom) */
+.rv-sw-icon {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 16px);
+  transform: translate(-50%, 50%) translateY(-16px);
+}
+
+.rv-sw-min .rv-sw-thumb canvas {
+  opacity: 0.6;
+}
+
+.rv-sw-caption {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-sw-item.rv-selected .rv-sw-caption {
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rv-plasma *, .rv-plasma *::before, .rv-plasma *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Quick tiling's preview: where the window will go (KWin draws the same kind of outline). */
+.rv-tile-preview {
+  position: absolute;
+  z-index: 15000;
+  box-sizing: border-box;
+  border: 2px solid var(--k-sel-bg, #3daee9);
+  border-radius: 6px;
+  background: var(--k-sel-bg-soft, rgba(61, 174, 233, 0.25));
+  pointer-events: none;
+}
+
+/* Notifications. */
+/* Notification popups (plasma-workspace applets/notifications: Globals.qml popupSpacing a gridUnit, 18;
+   NotificationHeader.qml: a small icon, smallSpacing, the application's name as a level 5 heading at 0.9;
+   Summary.qml: a level 4 heading (1.1), Primary (demibold), at most three lines; Icon.qml: a large icon). */
+.rv-notes {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  gap: 18px;
+  width: 332px;
+  pointer-events: none;
+}
+
+.rv-note {
+  position: relative;
+  min-height: 72px;
+  color: var(--k-win-fg);
+  font: var(--k-font);
+  pointer-events: auto;
+  animation: rv-note-in calc(180ms * var(--k-anim, 1)) var(--k-ease);
+  transition: opacity calc(150ms * var(--k-anim, 1)) var(--k-ease);
+}
+
+.rv-note.rv-note-gone {
+  opacity: 0;
+}
+
+@keyframes rv-note-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
+
+.rv-note-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.rv-note-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.9;
+}
+
+.rv-note-app {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-note-close {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+
+.rv-note-close:hover {
+  background: var(--k-hover-soft);
+}
+
+.rv-note-main {
+  display: flex;
+  gap: 8px;
+}
+
+.rv-note-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.rv-note-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 1.1em;
+  font-weight: 600;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.rv-note-body {
+  line-height: normal;
+}
+
+.rv-note-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 6.5em;
+  overflow: hidden;
+  opacity: 0.9;
+}
+
+.rv-note-critical .rv-note-summary {
+  color: var(--k-negative);
+}
+
+.rv-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.rv-note-action {
+  padding: 3px 10px;
+  border: 1px solid var(--k-line);
+  border-radius: 3px;
+  background: var(--k-button-bg);
+  color: var(--k-button-fg);
+  font: inherit;
+}
+
+.rv-note-action:hover {
+  border-color: var(--k-hover);
+}
+
+.rv-pp-bell.rv-unread img {
+  filter: drop-shadow(0 0 2px var(--k-sel-bg));
+}
+
+.rv-history-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.rv-history-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 2px;
+  border-top: 1px solid var(--k-line);
+}
+
+/* Overview (Meta+W). */
+.rv-overview {
+  position: absolute;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font: var(--k-font);
+  animation: rv-ov-in calc(200ms * var(--k-anim, 1)) var(--k-ease);
+}
+
+@keyframes rv-ov-in {
+  from { opacity: 0; }
+}
+
+.rv-ov-search {
+  width: min(420px, 60%);
+  margin-bottom: 20px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  outline: none;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font: inherit;
+}
+
+.rv-ov-grid {
+  display: grid;
+  flex: 1;
+  width: 100%;
+  gap: 24px;
+  min-height: 0;
+  align-content: center;
+  justify-content: center;
+}
+
+.rv-ov-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+/* (KWin marks the window under the pointer, not a cell around it) */
+.rv-ov-item:hover .rv-ov-win, .rv-ov-item.rv-selected .rv-ov-win,
+.rv-ov-item:hover > .rv-ov-thumb > .rv-icon, .rv-ov-item.rv-selected > .rv-ov-thumb > .rv-icon {
+  outline: 2px solid var(--k-sel-bg);
+  outline-offset: 3px;
+}
+
+.rv-ov-win {
+  display: flex;
+  flex-direction: column;
+  border-radius: 5px 5px 0 0;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+.rv-ov-bar {
+  height: 24px;
+  padding: 0 8px;
+  overflow: hidden;
+  background: var(--k-title-bg);
+  color: var(--k-title-fg);
+  font: var(--k-small-font, inherit);
+  line-height: 24px;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-ov-thumb {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.rv-ov-thumb canvas {
+  display: block;
+}
+
+.rv-ov-caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 8px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.rv-ov-caption span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rv-ov-none {
+  grid-column: 1 / -1;
+  align-self: center;
+  justify-self: center;
+  opacity: 0.8;
+}
+
+#rv-panel.rv-plasma-panel button.rv-pp-peek.rv-checked {
+  background: var(--k-sel-bg-soft);
+  box-shadow: inset 0 0 0 1px var(--k-sel-bg);
+}
+
+/* A task that wants attention (KWin's demands-attention): it pulses, as Plasma's does. */
+.rv-pp-task.rv-attention .rv-pp-task-bg {
+  animation: rv-attention calc(1000ms * var(--k-anim, 1)) ease-in-out infinite alternate;
+}
+
+@keyframes rv-attention {
+  from { opacity: 0.35; }
+}
