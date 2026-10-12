@@ -89,7 +89,28 @@ services:
       RV_ORIGINS: "${RV_ORIGINS:-} https://${RV_DOMAIN:-localhost}"
       RV_NET_MODE: ${RV_NET_MODE:-allowlist}
       RV_MAX_CLIENTS: ${RV_MAX_CLIENTS:-40}
-      RV_MAX_PER_IP: ${RV_MAX_PER_IP:-2}
+      # the relay's limits (docs/deploy.md "The restricted relay"); empty means docker/relay.sh's default
+      RV_MAX_PER_IP: ${RV_MAX_PER_IP:-}
+      RV_MAX_WAITING_PER_IP: ${RV_MAX_WAITING_PER_IP:-}
+      RV_IDLE_SECS: ${RV_IDLE_SECS:-}
+      RV_HOLD_SECS: ${RV_HOLD_SECS:-}
+      RV_RATE_FRAMES: ${RV_RATE_FRAMES:-}
+      RV_RATE_BYTES: ${RV_RATE_BYTES:-}
+      RV_RELAY_DNS_RATE: ${RV_RELAY_DNS_RATE:-}
+      RV_RELAY_SYN_RATE: ${RV_RELAY_SYN_RATE:-}
+      RV_RELAY_DOWN_BYTES: ${RV_RELAY_DOWN_BYTES:-}
+      RV_IP_BYTES: ${RV_IP_BYTES:-}
+      RV_ADDRESS_PER_MIN: ${RV_ADDRESS_PER_MIN:-}
+      RV_MACHINES_PER_MIN: ${RV_MACHINES_PER_MIN:-}
+      RV_WS_PER_MIN: ${RV_WS_PER_MIN:-}
+      RV_REQ_BURST: ${RV_REQ_BURST:-}
+      RV_GLOBAL_PER_SEC: ${RV_GLOBAL_PER_SEC:-}
+      RV_HANDSHAKE_SECS: ${RV_HANDSHAKE_SECS:-}
+      RV_MAX_HANDSHAKES: ${RV_MAX_HANDSHAKES:-}
+      RV_ADDRESS_HOLD_SECS: ${RV_ADDRESS_HOLD_SECS:-}
+      RV_HOLDS_MAX: ${RV_HOLDS_MAX:-}
+      RV_HOLDS_PER_NET: ${RV_HOLDS_PER_NET:-}
+      RV_MSG_RATE: ${RV_MSG_RATE:-}
       RV_DNS_LOG: ${RV_DNS_LOG:-0}
     volumes:
       # the allowlist of the public relay: edit it, then `docker compose exec relay /opt/rvwasm/allowlist-reload.sh`
@@ -105,7 +126,11 @@ services:
   # The public site (docs/deploy.md): HTTPS with Let's Encrypt in front of the dist and the relay. Only this publishes
   # ports on the host's addresses (80 and 443); `docker compose --profile public up -d`, with RV_DOMAIN in .env.
   caddy:
-    image: caddy:2.10-alpine
+    # Caddy with the rate limiter module built in (docker/Dockerfile.caddy builds it; docs/deploy.md "Abuse
+    # protection": build it elsewhere and `docker load` it on the server). Not built by `up --build` on purpose: the
+    # server has two cores. The stock caddy:2.10-alpine does not know the rate_limit directive and would not start.
+    image: ${RV_CADDY_IMAGE:-rvwasm-caddy:2.10}
+    pull_policy: never
     profiles: [public]
     restart: unless-stopped
     depends_on:
@@ -124,6 +149,7 @@ services:
       - ./site:/site:ro
       - caddy-data:/data
       - caddy-config:/config
+      - caddy-logs:/var/log/caddy
     ports:
       - "${RV_PUBLIC_HTTP_PORT:-80}:80"
       - "${RV_PUBLIC_HTTPS_PORT:-443}:443"
@@ -154,3 +180,4 @@ volumes:
   blender:
   caddy-data:
   caddy-config:
+  caddy-logs:

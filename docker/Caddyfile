@@ -1,99 +1,457 @@
 # Caddy in front of the machine for a public server (docker-compose.yml, service caddy; docs/deploy.md):
 # HTTPS with an automatic Let's Encrypt certificate for $RV_DOMAIN, the page and the disk pieces served straight from
 # the dist (no application server in between), the relay's WebSocket and /address under /relay on the same name.
+# Abuse protection (docs/deploy.md "Abuse protection"): per-visitor rate limits per kind of request (the one
+# rate_limit block at the top of (rvsite): the table of numbers to tune), timeouts, size limits.
 #
 # The landing page at / and the boot page at /desktop: see the two handle blocks at the end of (rvsite).
 #
 # $RV_DOMAIN is the one setting that names the site (docker-compose.yml passes it from .env). localhost works too
 # (Caddy then makes its own certificate).
+#
+# This Caddy is built with the rate limiter module (docker/Dockerfile.caddy); the stock caddy image has no rate_limit.
 {
-	# (HTTP/3 would need UDP 443 open as well; HTTP/1.1 and HTTP/2 over TCP 80/443 are all that is opened)
+	# Caddy's own redirect from port 80 would answer before the http:// block below and carry the Server header and
+	# no rate limit; the block below does the same redirect (Let's Encrypt's certificates are not affected)
+	auto_https disable_redirects
+
 	servers {
+		# (HTTP/3 would need UDP 443 open as well; HTTP/1.1 and HTTP/2 over TCP 80/443 are all that is opened)
 		protocols h1 h2
+
+		timeouts {
+			# slowloris: a client has 10 s to send its request headers, an idle connection is closed after 2 minutes
+			# (Caddy's own default is 5). No read_body: it would also cut a slow reader's long download and nothing
+			# here takes a request body. No short write timeout either: the 14 MB boot image must get through on
+			# a slow line; 10 minutes is the longest any single answer may take (a WebSocket is not affected).
+			read_header 10s
+			write 10m
+			idle 2m
+		}
+		# (the default is 1 MB of request headers)
+		max_header_size 16KB
+
+		# Caddy is the first thing the visitor's connection meets today (nothing in front): the address of the TCP
+		# connection is the visitor's, and the rate limits and the relay's X-Forwarded-For use it.
+		#
+		# Behind Cloudflare (not the case now): uncomment the three lines below. Caddy then takes the visitor from
+		# Cloudflare's CF-Connecting-IP header, but only on connections that come from one of these ranges (anyone else
+		# who sends that header is ignored); the rate limits (key {client_ip}) and the relay (header_up X-Forwarded-For
+		# {client_ip}) follow by themselves. Also: the cloud firewall should then accept 80/443 from these ranges only,
+		# or the site stays reachable around Cloudflare, and the host rules for 80/443 (docs/deploy.md) would see
+		# Cloudflare's addresses, not the visitors', and need loosening. Keep the list current:
+		# https://www.cloudflare.com/ips-v4 and https://www.cloudflare.com/ips-v6 (this one is of 2026-10-12).
+		#
+		# trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		# trusted_proxies_strict
+		# client_ip_headers CF-Connecting-IP
 	}
 }
 
+# One visitor = one address; an IPv6 visitor = a /64 (one customer's whole delegation, so a visitor cannot get
+# a fresh bucket by rotating addresses). Used inside every zone below.
+(perip) {
+	key {client_ip}
+	ipv6_prefix 64
+}
+
 (rvsite) {
-	encode zstd gzip
+	# every rule below runs in the order written (route), the first handle that matches answers
+	route {
+		encode zstd gzip
 
-	header {
-		# shared memory (SharedArrayBuffer) needs the page cross-origin isolated
-		Cross-Origin-Opener-Policy same-origin
-		Cross-Origin-Embedder-Policy require-corp
-		# (? = unless a more specific block below sets it: the landing page's og image is for other sites to embed)
-		?Cross-Origin-Resource-Policy same-origin
-		X-Content-Type-Options nosniff
-		Strict-Transport-Security "max-age=86400"
-		# the page's files change with every build: check with the server each time (ETag, so unchanged files
-		# answer 304); the disk keeps its own copy of what it fetched in the browser's private file system
-		?Cache-Control "no-cache"
-		-Server
+		header {
+			# shared memory (SharedArrayBuffer) needs the page cross-origin isolated
+			Cross-Origin-Opener-Policy same-origin
+			Cross-Origin-Embedder-Policy require-corp
+			# (? = unless a more specific block below sets it: the landing page's og image is for other sites to embed)
+			?Cross-Origin-Resource-Policy same-origin
+			X-Content-Type-Options nosniff
+			Strict-Transport-Security "max-age=86400"
+			# the page's files change with every build: check with the server each time (ETag, so unchanged files
+			# answer 304); the disk keeps its own copy of what it fetched in the browser's private file system
+			?Cache-Control "no-cache"
+			-Server
+			-Via
+		}
+
+		# Nothing on this site takes a body (the page, the disk and the relay's /address are GETs, the relay's
+		# WebSocket starts with a GET): 64 KB is far more than any request needs.
+		request_body {
+			max_size 64KB
+		}
+
+		# Only GET and HEAD.
+		@badmethod not method GET HEAD
+		handle @badmethod {
+			header Allow "GET, HEAD"
+			respond "Method Not Allowed" 405
+		}
+
+		# The access log: everything except the disk pieces (thousands per boot) with the visitor's address, kept in a
+		# volume with its own rotation (14 days, 5 files of 20 MiB). docker compose logs caddy shows the rate limiter's
+		# "rate limit exceeded" lines (zone, remote_ip) instead.
+		@piecelog path_regexp ^/disk/[^/]+/[0-9]+$
+		log_skip @piecelog
+
+		# ---- Rate limits: per visitor (address; an IPv6 /64), per kind of request, a sliding window each. ----
+		# Past the limit the answer is 429 with Retry-After (seconds); nothing is counted for a refused request, so
+		# waiting the Retry-After out always works. A kind has a short window (the burst a page load or a boot
+		# makes) and a longer one (what a visitor can keep up); the numbers are far above what the real page does
+		# (docs/deploy.md has the measured pattern) and well below what a script can do. Every zone that matches a
+		# request counts it. Edit the number after "events", then `docker compose restart caddy`
+		# (or `docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`).
+		rate_limit {
+			# the whole site, a visitor's total: nothing real comes near this, it bounds a scanner that stays
+			# under every kind's own limit by spreading over all of them
+			zone all_10s {
+				import perip
+				window 10s
+				events 1500
+			}
+			zone all_1m {
+				import perip
+				window 1m
+				events 6000
+			}
+
+			# the landing page, the boot page, what the boot page takes from the server, robots.txt and the sitemap:
+			# 1-3 requests per page load
+			zone pages_10s {
+				import perip
+				window 10s
+				events 40
+				match {
+					path / /index.html /desktop /desktop/ /dev.html /rv-site.json /robots.txt /sitemap.xml /site.webmanifest
+				}
+			}
+			zone pages_1m {
+				import perip
+				window 1m
+				events 150
+				match {
+					path / /index.html /desktop /desktop/ /dev.html /rv-site.json /robots.txt /sitemap.xml /site.webmanifest
+				}
+			}
+
+			# the landing page's icons and pictures (site/): about 10 per landing page load
+			zone site_10s {
+				import perip
+				window 10s
+				events 120
+				match {
+					file {
+						root /site
+						try_files {path}
+					}
+					not path / /index.html /robots.txt /sitemap.xml /site.webmanifest
+				}
+			}
+			zone site_1m {
+				import perip
+				window 1m
+				events 400
+				match {
+					file {
+						root /site
+						try_files {path}
+					}
+					not path / /index.html /robots.txt /sitemap.xml /site.webmanifest
+				}
+			}
+
+			# the boot page's scripts, styles, workers, the shader files: about 40 per boot, 40 more (answered 304)
+			# per reload
+			zone www_10s {
+				import perip
+				window 10s
+				events 400
+				match {
+					file {
+						root /dist/www
+						try_files {path}
+					}
+					not path /dev.html *.wasm *.cpio.gz
+				}
+			}
+			zone www_1m {
+				import perip
+				window 1m
+				events 1000
+				match {
+					file {
+						root /dist/www
+						try_files {path}
+					}
+					not path /dev.html *.wasm *.cpio.gz
+				}
+			}
+
+			# the two big files of a boot, the kernel (7 MB .wasm) and the boot image (14 MB .cpio.gz): each costs the
+			# server a download unless the browser's copy is current (then 304). One boot = 2 requests.
+			zone big_1m {
+				import perip
+				window 1m
+				events 60
+				match {
+					path *.wasm *.cpio.gz
+					file {
+						root /dist/www
+						try_files {path}
+					}
+				}
+			}
+			zone big_1h {
+				import perip
+				window 1h
+				events 400
+				match {
+					path *.wasm *.cpio.gz
+					file {
+						root /dist/www
+						try_files {path}
+					}
+				}
+			}
+
+			# the disk's manifest.json: fetched once per disk per boot (two disks), never polled
+			zone manifest_10s {
+				import perip
+				window 10s
+				events 20
+				match {
+					path_regexp ^/disk/[^/]+/manifest\.json$
+				}
+			}
+			zone manifest_1m {
+				import perip
+				window 1m
+				events 80
+				match {
+					path_regexp ^/disk/[^/]+/manifest\.json$
+				}
+			}
+
+			# the disk's 1 MiB pieces. The machine's disk worker fetches them one at a time (synchronous requests,
+			# one disk after the other), as the guest reads, and keeps them in the browser: a boot is hundreds, in
+			# bursts of tens per second on a fast line, and the whole 3.9 GB disk is 3948 pieces, ever. These
+			# allow 80 per second for 10 s, 50 per second for a minute, and two disks per hour: room for a handful of
+			# visitors behind one address.
+			# (All three count every piece request that is answered; a 429 here fails a read in the machine, so
+			# these are the numbers to raise first if a real visitor ever reports disk errors.)
+			zone piece_10s {
+				import perip
+				window 10s
+				events 800
+				match {
+					path_regexp ^/disk/[^/]+/[0-9]+$
+				}
+			}
+			zone piece_1m {
+				import perip
+				window 1m
+				events 3000
+				match {
+					path_regexp ^/disk/[^/]+/[0-9]+$
+				}
+			}
+			zone piece_1h {
+				import perip
+				window 1h
+				events 10000
+				match {
+					path_regexp ^/disk/[^/]+/[0-9]+$
+				}
+			}
+
+			# the relay over HTTP: /relay/address once per page load. Only a coarse outer flood guard: the relay has its
+			# own per-address limits (RV_ADDRESS_PER_MIN, RV_WS_PER_MIN, burst, global rate), and many visitors can share
+			# one address (campus or public WiFi), so these are several times the relay's.
+			zone relay_10s {
+				import perip
+				window 10s
+				events 100
+				match {
+					path /relay /relay/*
+				}
+			}
+			zone relay_1m {
+				import perip
+				window 1m
+				events 600
+				match {
+					path /relay /relay/*
+				}
+			}
+			# the relay's WebSocket handshake (a request with Upgrade: websocket; the connection then lasts as long as
+			# the machine does and is not counted again). One per page load; same reasoning as above.
+			zone relay_ws_10s {
+				import perip
+				window 10s
+				events 60
+				match {
+					path /relay /relay/*
+					header_regexp Upgrade (?i)websocket
+				}
+			}
+			zone relay_ws_1m {
+				import perip
+				window 1m
+				events 300
+				match {
+					path /relay /relay/*
+					header_regexp Upgrade (?i)websocket
+				}
+			}
+
+			# requests for something that is not there (scanners looking for .env, wp-login.php, /admin, piece
+			# numbers): nothing real asks for these more than a couple of times
+			zone miss_10s {
+				import perip
+				window 10s
+				events 10
+				match {
+					not path /relay /relay/* /rv-site.json /desktop /desktop/
+					not file {
+						root /dist/www
+						try_files {path}
+					}
+					not file {
+						root /site
+						try_files {path} {path}/index.html
+					}
+					not {
+						path /disk/*
+						file {
+							root /dist
+							try_files {path}
+						}
+					}
+				}
+			}
+			zone miss_1m {
+				import perip
+				window 1m
+				events 30
+				match {
+					not path /relay /relay/* /rv-site.json /desktop /desktop/
+					not file {
+						root /dist/www
+						try_files {path}
+					}
+					not file {
+						root /site
+						try_files {path} {path}/index.html
+					}
+					not {
+						path /disk/*
+						file {
+							root /dist
+							try_files {path}
+						}
+					}
+				}
+			}
+
+			sweep_interval 1m
+		}
+
+		# the machine's network: the relay's WebSocket (wss://DOMAIN/relay/?ip=N) and its /address. It checks the
+		# Origin itself (RV_ORIGINS = https://DOMAIN) and takes the visitor's address from X-Forwarded-For, which is
+		# set here to the visitor's own address (what the client sent is not trusted; see trusted_proxies above).
+		handle_path /relay/* {
+			reverse_proxy relay:8001 {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+
+		# what dev.html takes from the server (docker/serve.py does the same for the local setup): the relay is on this
+		# address under /relay, the machine's resolver is the relay's own DNS server, and the disk.
+		handle /rv-site.json {
+			header Content-Type application/json
+			respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}"}` 200
+		}
+
+		# the disk: 1 MiB pieces (named by number, no extension) and a manifest, ranges and ETags from the file server.
+		# Not compressed: ext4's pieces are mostly already-compressed files, and the CPU is better kept for the relay.
+		# No directory listing (file_server's browse is off: a directory answers 404).
+		handle_path /disk/* {
+			root * /dist/disk
+			@piece path_regexp ^/[^/]+/[0-9]+$
+			header @piece Content-Type application/octet-stream
+			file_server
+		}
+
+		# The boot page: the machine itself (dev.html). The landing page's Start button goes here; search engines are
+		# told not to index it (the landing page at / is the page that ranks).
+		@desktopslash path /desktop/
+		redir @desktopslash /desktop 302
+		@desktop path /desktop /dev.html
+		handle @desktop {
+			header X-Robots-Tag "noindex, nofollow"
+			rewrite * /dev.html
+			root * /dist/www
+			file_server
+		}
+
+		# The landing page and its files (site/ in the tree, mounted at /site): /, robots.txt, sitemap.xml, the icons,
+		# assets/. A Search Console verification file (googleXXXX.html) dropped into site/ is served here too.
+		@site file {
+			root /site
+			try_files {path} {path}/index.html
+		}
+		handle @site {
+			root * /site
+			@static path /assets/*
+			header @static >Cache-Control "public, max-age=86400"
+			@og path /assets/og-image.png
+			header @og >Cross-Origin-Resource-Policy cross-origin
+			@manifest path /site.webmanifest
+			header @manifest Content-Type application/manifest+json
+			@ico path /favicon.ico
+			header @ico Content-Type image/x-icon
+			@robots path /robots.txt
+			header @robots Content-Type "text/plain; charset=utf-8"
+			@sitemap path /sitemap.xml
+			header @sitemap Content-Type "application/xml; charset=utf-8"
+			file_server
+		}
+
+		# everything else: the kernel, scripts and so on (without a /site mount, / is the machine, as before)
+		handle {
+			root * /dist/www
+			header X-Robots-Tag "noindex"
+			rewrite / /dev.html
+			file_server
+		}
 	}
 
-	# the machine's network: the relay's WebSocket (wss://DOMAIN/relay/?ip=N) and its /address. It checks the
-	# Origin itself (RV_ORIGINS = https://DOMAIN) and takes the visitor's address from X-Forwarded-For, which Caddy
-	# sets to the connection's own address (what the client sent is not trusted).
-	handle_path /relay/* {
-		reverse_proxy relay:8001
+	# Errors (404, 405, 429 from the rate limiter, 502 if the relay is down): a short plain answer, no Server header,
+	# and never cached (a CDN must not keep a 429). Retry-After from the rate limiter is kept.
+	handle_errors {
+		header Cache-Control "no-store"
+		header Content-Type "text/plain; charset=utf-8"
+		header -Server
+		respond "{err.status_code} {err.status_text}" {err.status_code}
 	}
 
-	# what dev.html takes from the server (docker/serve.py does the same for the local setup): the relay is on this
-	# address under /relay, the machine's resolver is the relay's own DNS server, and the disk.
-	handle /rv-site.json {
-		header Content-Type application/json
-		respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}"}` 200
-	}
-
-	# the disk: 1 MiB pieces (named by number, no extension) and a manifest, ranges and ETags from the file server.
-	# Not compressed: ext4's pieces are mostly already-compressed files, and the CPU is better kept for the relay.
-	handle_path /disk/* {
-		root * /dist/disk
-		@piece path_regexp ^/[^/]+/[0-9]+$
-		header @piece Content-Type application/octet-stream
-		file_server
-	}
-
-	# The boot page: the machine itself (dev.html). The landing page's Start button goes here; search engines are
-	# told not to index it (the landing page at / is the page that ranks).
-	@desktopslash path /desktop/
-	redir @desktopslash /desktop 302
-	@desktop path /desktop /dev.html
-	handle @desktop {
-		header X-Robots-Tag "noindex, nofollow"
-		rewrite * /dev.html
-		root * /dist/www
-		file_server
-	}
-
-	# The landing page and its files (site/ in the tree, mounted at /site): /, robots.txt, sitemap.xml, the icons,
-	# assets/. A Search Console verification file (googleXXXX.html) dropped into site/ is served here too.
-	@site file {
-		root /site
-		try_files {path} {path}/index.html
-	}
-	handle @site {
-		root * /site
-		@static path /assets/*
-		header @static >Cache-Control "public, max-age=86400"
-		@og path /assets/og-image.png
-		header @og >Cross-Origin-Resource-Policy cross-origin
-		@manifest path /site.webmanifest
-		header @manifest Content-Type application/manifest+json
-		@ico path /favicon.ico
-		header @ico Content-Type image/x-icon
-		@robots path /robots.txt
-		header @robots Content-Type "text/plain; charset=utf-8"
-		@sitemap path /sitemap.xml
-		header @sitemap Content-Type "application/xml; charset=utf-8"
-		file_server
-	}
-
-	# everything else: the kernel, scripts and so on (without a /site mount, / is the machine, as before)
-	handle {
-		root * /dist/www
-		header X-Robots-Tag "noindex"
-		rewrite / /dev.html
-		file_server
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 336h
+		}
+		# (one line per request: who, what, status; not the TLS details or every header)
+		format filter {
+			wrap json
+			request>tls delete
+			request>headers>Accept delete
+			request>headers>Accept-Encoding delete
+			request>headers>Accept-Language delete
+			request>headers>Cookie delete
+			request>headers>Authorization delete
+			resp_headers delete
+		}
 	}
 }
 
@@ -103,8 +461,33 @@
 	import rvsite
 }
 
+# Port 80, every name: to HTTPS (what Caddy's automatic redirect does, written out so that the answer carries no
+# Server header and the visitor is rate limited like on 443). Let's Encrypt's HTTP challenge is answered by Caddy before
+# this block.
+http:// {
+	header -Server
+	rate_limit {
+		zone http_10s {
+			import perip
+			window 10s
+			events 60
+		}
+		zone http_1m {
+			import perip
+			window 1m
+			events 300
+		}
+	}
+	redir https://{host}{uri} 308
+	handle_errors {
+		header -Server
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}
+
 # www.$RV_DOMAIN goes to the apex (RV_WWW_DOMAIN; the default, www.localhost, makes Caddy use its own CA, not Let's
 # Encrypt, so nothing is asked for until the www record exists and RV_WWW_DOMAIN names it).
 {$RV_WWW_DOMAIN:www.localhost} {
+	header -Server
 	redir https://{$RV_DOMAIN:localhost}{uri} permanent
 }

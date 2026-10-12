@@ -15,10 +15,17 @@
 #             is mounted for hostnode's Node library and the video driver's headers
 #   dist      the disks into ./dist (hard links), the WebGPU executor (?exec=webgpu) when one is built
 #             (RVGPU_DIR, default ~/rvwasm/www/rvgpu), dist/RELEASE.txt
+#   publish   the disks' pieces to object storage (Cloudflare R2), named by their sha256, and the dist's manifests
+#             rewritten to say where (tools/r2-publish.py; docs/deploy.md "Pieces from object storage"). Only the
+#             pieces that are not in the bucket yet are uploaded; the manifests are written last. Needs R2_ENDPOINT,
+#             R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY in the environment (never in files here:
+#             tools/release-setup.sh passes them from the Mac on stdin) and RV_PIECE_BASE (where the page will fetch
+#             pieces: https://disk.example.com/disk/); without them this step does nothing and the pieces are served
+#             by the site itself.
 #   up        docker compose up -d --build: fetch, www and relay (http://localhost:${RV_HTTP_PORT:-8080}/)
 #   down      docker compose down
 #   tarball   ./rvwasm-release.tar.gz of ./dist, for RV_RELEASE_URL (docker/fetch.sh)
-#   all       bundle root disk code dist up
+#   all       bundle root disk code dist publish up
 #
 # Docker needs sudo in the build VM: the docker commands are run with it when plain `docker` is refused.
 # Environment: RV_HTTP_PORT, RV_NET_PORT (docker-compose.yml), RV_BUILD_JOBS (6), RV_BUILD_MEM (8g),
@@ -94,6 +101,8 @@ dist() {
 		cp "$(dirname "$rg")/rvgpu-worker.js" "$S/dist/www/"
 		echo "release: the WebGPU executor from $rg"
 	fi
+	# This tree's page files and /init (the build's own copy of them can be a release behind): docker/patch-dist.sh.
+	"$S/docker/patch-dist.sh" "$S/dist"
 	{
 		echo "rvwasm release ${RV_RELEASE_ID:-(unnamed)}, built $(date '+%F %R %Z')"
 		echo "native plasmashell: $(cat "$R/opt/nq/info.txt" 2> /dev/null)"
@@ -103,6 +112,12 @@ dist() {
 	} > "$S/dist/RELEASE.txt"
 	cat "$S/dist/RELEASE.txt"
 	du -shL "$S/dist/www" "$S/dist/disk/"* 2> /dev/null
+}
+
+publish() {
+	say "publish"
+	[ -e "$S/dist/disk" ] || { echo "release: no dist/disk (step dist)" >&2; exit 1; }
+	python3 "$S/tools/r2-publish.py" "$S/dist" ${RV_PIECE_BASE:+--base "$RV_PIECE_BASE"}
 }
 
 up() {
@@ -126,8 +141,8 @@ tarball() {
 [ $# -gt 0 ] || set -- all
 for step in "$@"; do
 	case "$step" in
-	all) bundle; root; disk; code; dist; up ;;
-	bundle | root | disk | code | dist | up | down | tarball) "$step" ;;
+	all) bundle; root; disk; code; dist; publish; up ;;
+	bundle | root | disk | code | dist | publish | up | down | tarball) "$step" ;;
 	*) echo "docker/release.sh: no step $step" >&2; exit 2 ;;
 	esac
 done

@@ -34,7 +34,17 @@ for o in "http://localhost:${RV_HTTP_PORT:-8080}" "http://127.0.0.1:${RV_HTTP_PO
 done
 limits=()
 if [ "$mode" = allowlist ]; then
-	limits=(--strict --trust-forwarded --max-clients "${RV_MAX_CLIENTS:-40}" --max-per-ip "${RV_MAX_PER_IP:-2}"
-		--rate-frames "${RV_RATE_FRAMES:-4000}" --rate-bytes "${RV_RATE_BYTES:-6000000}")
+	# (every number is an RV_* variable, docker-compose.yml passes them; docs/deploy.md says what each limit is)
+	limits=(--strict --trust-forwarded --max-clients "${RV_MAX_CLIENTS:-40}"
+		--max-per-ip "${RV_MAX_PER_IP:-6}" --max-waiting-per-ip "${RV_MAX_WAITING_PER_IP:-10}"
+		--idle-secs "${RV_IDLE_SECS:-60}" --hold-secs "${RV_HOLD_SECS:-20}"
+		--rate-frames "${RV_RATE_FRAMES:-4000}" --rate-bytes "${RV_RATE_BYTES:-6000000}"
+		--dns-rate "${RV_RELAY_DNS_RATE:-60}" --syn-rate "${RV_RELAY_SYN_RATE:-40}"
+		--down-bytes "${RV_RELAY_DOWN_BYTES:-16000000}" --ip-bytes "${RV_IP_BYTES:-32000000}"
+		--address-per-min "${RV_ADDRESS_PER_MIN:-120}" --machines-per-min "${RV_MACHINES_PER_MIN:-30}"
+		--ws-per-min "${RV_WS_PER_MIN:-120}" --burst "${RV_REQ_BURST:-40}" --global-per-sec "${RV_GLOBAL_PER_SEC:-100}"
+		--handshake-secs "${RV_HANDSHAKE_SECS:-5}" --max-handshakes "${RV_MAX_HANDSHAKES:-100}"
+		--address-hold-secs "${RV_ADDRESS_HOLD_SECS:-60}" --holds-max "${RV_HOLDS_MAX:-100}"
+		--holds-per-net "${RV_HOLDS_PER_NET:-24}" --msg-rate "${RV_MSG_RATE:-20}")
 fi
 exec setpriv --reuid=rv --regid=rv --init-groups python3 -u /opt/rvwasm/net-relay.py --bind 0.0.0.0 --port 8001 "${limits[@]}" "${origins[@]}"

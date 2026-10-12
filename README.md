@@ -92,7 +92,9 @@ a public demo cannot be used for spam, scanning or anything else under the opera
   else; other DNS servers are blocked.
 - **Connections only go to addresses those names resolved to, on ports 80 and 443.** Hard-coded IP addresses,
   other ports (mail, SSH, games) and private networks are dropped.
-- **Per-visitor limits** on connections and rate.
+- **Per-visitor limits** on connections and rate, and **a shared address shares the network**: up to 6 machines per
+  public address (campus or public wifi) have it at once; the others wait, are told by a small banner at the bottom of
+  the page, and get it as soon as someone goes idle or leaves (docs/deploy.md).
 - **The default allowlist** covers installing software: Debian's archive (`deb.debian.org`,
   `security.debian.org`), Python (`pypi.org`, `files.pythonhosted.org`), npm (`registry.npmjs.org`), GitHub
   (`github.com` and its download hosts) and Rust (`crates.io`). It is one text file the operator can edit.

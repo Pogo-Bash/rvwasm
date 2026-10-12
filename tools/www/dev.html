@@ -18,6 +18,73 @@
   <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="xterm.css">
+  <style>
+    /* The relay's note that this machine waits for the network (netBanner below): outside the machine's canvas, over the
+       bottom edge of the page, small, and out of the way of the mouse. Catppuccin Mocha. */
+    #netbanner {
+      position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 40000;
+      max-width: min(92vw, 90ch); box-sizing: border-box; padding: 5px 12px; border-radius: 6px;
+      background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-left: 3px solid #f9e2af;
+      font: 12px/1.45 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      pointer-events: none; opacity: .94;
+    }
+    #netbanner[hidden] { display: none; }
+  </style>
+  <script>
+    // The relay shares the network of one public address between the machines behind it (campus and public wifi have
+    // many people on one): a machine beyond the limit waits until someone goes idle. The relay says so in a TEXT
+    // message on the WebSocket (the Ethernet frames are binary ones): {"type":"net-state","state":"active"|"waiting",
+    // "others":N,"queue":Q,"waiting":W,"cap":C}. This page shows it in #netbanner, outside the machine's display, and
+    // keeps those messages from the machine (linux.js hands every message to the kernel as a frame). Nothing is
+    // added inside the machine. Only the socket that asked for them (&ctl=1 in its URL) is looked at.
+    (() => {
+      const RealWebSocket = window.WebSocket;
+      const show = (text) => {
+        const el = document.getElementById("netbanner");
+        if (el) {
+          el.textContent = text || "";
+          el.hidden = !text;
+        }
+      };
+      const count = (value) => Math.max(0, Math.min(1e6, Math.floor(Number(value)) || 0));
+      window.netBanner = (message) => {
+        if (!message || message.type != "net-state") {
+          return;
+        }
+        const others = count(message.others), queue = count(message.queue), waiting = count(message.waiting);
+        if (message.state == "waiting") {
+          const text = "network relay in use by " + others + " other" + (others == 1 ? "" : "s")
+            + " on your network (shared IP). waiting for a free slot, "
+            + (queue <= 1 ? "you're next" : "place " + queue + " of " + waiting + " in line")
+            + "; it switches automatically when someone goes idle.";
+          console.log("[net] " + text);
+          show(text);
+        } else {
+          console.log("[net] network relay: this machine has the network (" + others + " other"
+                      + (others == 1 ? "" : "s") + " on your network)");
+          show("");
+        }
+      };
+      window.WebSocket = class extends RealWebSocket {
+        constructor(url, ...rest) {
+          super(url, ...rest);
+          if (/[?&]ctl=1(&|$)/.test(String(url))) {
+            // (Added before linux.js sets onmessage, so it runs first and keeps text from the kernel's frame ring.)
+            this.addEventListener("message", (event) => {
+              if (typeof event.data == "string") {
+                event.stopImmediatePropagation();
+                try {
+                  window.netBanner(JSON.parse(event.data));
+                } catch (error) {
+                }
+              }
+            });
+            this.addEventListener("close", () => show(""));
+          }
+        }
+      };
+    })();
+  </script>
   <script src="linux.js"></script>
   <script src="xterm.js"></script>
   <!-- The windows of the machine's Wayland clients, over the screen, when its window server runs (wlserver/). -->
@@ -245,14 +312,27 @@
         // visitor: a relay refuses a second machine with an address that is taken.)
         let net_address = 2 + Math.floor(Math.random() * 249);
         if (net_url) {
-          try {
-            const answer = await fetch(net_url.replace(/^ws/, "http") + "/address", { cache: "no-store" });
-            if (answer.ok) {
-              net_address = Number(await answer.text()) || net_address;
+          // (A relay that is busy says 429 or 503 with Retry-After: wait that long, a few times, before taking a
+          // number of our own.)
+          for (let attempt = 0; attempt < 4; attempt++) {
+            try {
+              const answer = await fetch(net_url.replace(/^ws/, "http") + "/address", { cache: "no-store" });
+              if (answer.ok) {
+                net_address = Number(await answer.text()) || net_address;
+                break;
+              }
+              if (answer.status != 429 && answer.status != 503) {
+                break;
+              }
+              const wait = Math.min(Math.max(Number(answer.headers.get("Retry-After")) || 2, 1), 10);
+              console.log("[net] the relay is busy (" + answer.status + "), asking again in " + wait + " s");
+              await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+            } catch (error) {
+              break;
             }
-          } catch (error) {
           }
-          net_url += "/?ip=" + net_address;
+          // ctl=1: this page understands the relay's messages about who has the network (netBanner, in the head)
+          net_url += "/?ip=" + net_address + "&ctl=1";
         }
         // /init gives the interface that address, and the system the time zone of the person in front of it.
         boot_cmdline += " ip=10.0.5." + net_address;
@@ -312,6 +392,8 @@
   </script>
 </head>
 <body>
+  <!-- Says that the relay has this machine wait for the network, see netBanner in the head; hidden otherwise. -->
+  <div id="netbanner" role="status" aria-live="polite" hidden></div>
   <!-- The machine's display (click it to give it the keyboard), and below it the serial console. -->
   <canvas id="screen" tabindex="0" width="1024" height="768"
           style="display: block; max-width: 100%; background: #000; outline: none; margin-bottom: 8px;"></canvas>

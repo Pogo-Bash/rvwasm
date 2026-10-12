@@ -55,7 +55,11 @@ const EIO = 5;
 
 let memory = null;      // the machine's memory
 let control = null;     // Int32Array: the shared words above
-let base = "";          // where the pieces are fetched from
+let base = "";          // where the site keeps the pieces (and the manifest)
+let remote = "";        // where the manifest says the same pieces are, by hash (object storage), or ""
+let hashes = null;      // per piece, its sha256 as the manifest says, "" for none
+let remote_failures = 0;
+let remote_off_until = 0;
 let size = 0;           // bytes in the disk
 let piece_size = 0;
 let present = null;     // Uint8Array, per piece: 1 if the server has a file for it, 0 if it is all zeros
@@ -70,31 +74,120 @@ let complained = false;
 
 const log = (text) => postMessage({ method: "log", text: text });
 
-/// A piece from the server, as piece_size bytes.
-const fetch_piece = (piece) => {
-  const url = base + String(piece).padStart(6, "0");
-  let problem = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      // Synchronous: the task that asked is waiting, and so is everything behind it.
-      const request = new XMLHttpRequest();
-      request.open("GET", url, false);
-      request.responseType = "arraybuffer";
-      request.send();
-      if (request.status == 200 && request.response.byteLength <= piece_size) {
-        if (request.response.byteLength == piece_size) {
-          return new Uint8Array(request.response);
-        }
-        const bytes = new Uint8Array(piece_size);  // the last piece of a disk may be short
-        bytes.set(new Uint8Array(request.response));
-        return bytes;
+// How hard a piece is asked for. A refusal is not an I/O error until this has run out: the guest simply waits (the
+// request is synchronous), so a busy server (a 429 or 503 from the site's rate limit) costs a slow read, not a broken
+// file system. Waits are never shorter than the server asks and never hammer: they double from RETRY_FIRST to
+// RETRY_MAX with jitter, and a Retry-After is honoured up to RETRY_MAX.
+const RETRY_FIRST = 500;       // ms, the first wait after an error that comes without a Retry-After
+const RETRY_MAX = 30000;       // ms, the longest single wait (also the longest Retry-After that is believed)
+const RETRY_TOTAL = 120000;    // ms, how long one piece is tried before the read fails
+const FATAL_TRIES = 2;         // a 404 and the like are not going to get better: this many tries, then the error
+
+/// Wait `ms` without leaving the worker (the request in progress is synchronous, so nothing else is waiting on this
+/// thread). A private word that nobody wakes: the wait just times out.
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/// A Retry-After header (seconds, or a date) as milliseconds, or -1 if there is none that makes sense.
+const retry_after = (value) => {
+  if (!value) {
+    return -1;
+  }
+  value = String(value).trim();
+  const ms = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(ms) ? Math.max(0, Math.min(RETRY_MAX, ms)) : -1;
+};
+
+/// One synchronous request for a piece's file. The bytes (whole, or null), what went wrong if they are not, and for
+/// the retry rules `info`: .wait (ms the server asked for, or -1) and .fatal (not worth another try soon).
+const get = (url, exact) => {
+  const info = { wait: -1, fatal: false };
+  try {
+    // Synchronous: the task that asked is waiting, and so is everything behind it.
+    const request = new XMLHttpRequest();
+    request.open("GET", url, false);
+    request.responseType = "arraybuffer";
+    if (url.startsWith("http") && !url.startsWith(self.location.origin + "/")) {
+      request.timeout = 30000;  // (not the site itself: a synchronous request to another server must not hang for ever)
+    }
+    request.send();
+    // (The site's own file may be shorter than a piece in a disk that was cut some other way: padded below. An object
+    // of the storage is named by what is in it, and is exactly the piece.)
+    if (request.status == 200 && (exact ? request.response.byteLength == exact : request.response.byteLength <= piece_size)) {
+      return [new Uint8Array(request.response), "", info];
+    }
+    if (request.status == 429 || request.status == 503) {
+      try {
+        info.wait = retry_after(request.getResponseHeader("Retry-After"));
+      } catch (error) {
+        // (no header: a cross-origin answer that does not expose it)
       }
-      problem = "status " + request.status;
-    } catch (error) {
-      problem = error.message;
+    }
+    // Other answers of the 4xx kind (not "too many", "timed out", "too early") will say the same again.
+    // (A 200 of the wrong size is the same: the file on the server is not the piece.)
+    info.fatal = request.status == 200 || (request.status >= 400 && request.status < 500 && ![408, 425, 429].includes(request.status));
+    return [null, request.status == 200 ? request.response.byteLength + " bytes" : "status " + request.status, info];
+  } catch (error) {
+    return [null, error.message || error.name, info];  // (the network: transient)
+  }
+};
+
+/// A piece, as piece_size bytes: from the object storage the manifest names (`remote`, content addressed:
+/// REMOTE + sha256 + ".bin"), and when that fails (the network, a non-200 answer, a piece of the wrong size, a
+/// browser that is not let in by its CORS rules) from the site itself, which keeps the pieces by number. A storage
+/// that failed in a row is left alone for a while so that a broken one costs nothing more than a request or two (and
+/// for as long as it asked, if it said "try again in n seconds"). The site's own copy is tried again with growing
+/// waits, as above, until RETRY_TOTAL has passed.
+const fetch_piece = (piece) => {
+  const expected = Math.min(piece_size, size - piece * piece_size);  // the last piece of a disk may be short
+  const started = Date.now();
+  let bytes = null;
+  let problem = "";
+  let info;
+  if (remote && hashes[piece] && Date.now() >= remote_off_until) {
+    [bytes, problem, info] = get(remote + hashes[piece] + ".bin", expected);
+    if (bytes) {
+      remote_failures = 0;
+    } else {
+      if (info.wait >= 0) {
+        remote_off_until = Math.max(remote_off_until, Date.now() + Math.max(info.wait, 1000));  // (the site serves meanwhile)
+      }
+      if (++remote_failures >= 3) {
+        remote_off_until = Math.max(remote_off_until, Date.now() + 300000);
+        remote_failures = 0;
+        log("the object storage failed three times in a row (" + problem + "): the site itself serves the pieces for five minutes");
+      }
     }
   }
-  throw new Error("cannot fetch " + url + ": " + problem);
+  const url = base + String(piece).padStart(6, "0");
+  let delay = RETRY_FIRST;
+  let fatal = 0;
+  for (let attempt = 0; !bytes; attempt++) {
+    [bytes, problem, info] = get(url, 0);
+    if (bytes) {
+      break;
+    }
+    if (info.fatal && ++fatal >= FATAL_TRIES) {
+      throw new Error("cannot fetch " + url + ": " + problem);
+    }
+    // What the server asked for (plus a little jitter, so that many machines released at once do not come back at once),
+    // or the doubling wait with full jitter in its upper half.
+    const wait = info.wait >= 0 ? Math.min(RETRY_MAX, Math.max(250, info.wait) * (1 + 0.2 * Math.random()))
+                                : delay * (0.5 + 0.5 * Math.random());
+    delay = Math.min(RETRY_MAX, delay * 2);
+    if (Date.now() + wait - started > RETRY_TOTAL) {
+      throw new Error("cannot fetch " + url + ": " + problem + " (tried for " + Math.round((Date.now() - started) / 1000) + " s)");
+    }
+    if (attempt == 0) {
+      log("piece " + piece + ": " + problem + ", trying again (waits of " + (Math.round(wait / 100) / 10) + " s and more)");
+    }
+    sleep(wait);
+  }
+  if (bytes.byteLength == piece_size) {
+    return bytes;
+  }
+  const padded = new Uint8Array(piece_size);
+  padded.set(bytes);
+  return padded;
 };
 
 /// Have the piece here: fetch it, or make it out of zeros, and give it a place.
@@ -309,6 +402,13 @@ onmessage = async (event) => {
     size = manifest.size;
     piece_size = manifest.piece;
     const pieces = Math.ceil(size / piece_size);
+    // Pieces from object storage need both an address and the hashes to name them by; a manifest without either is
+    // served by the site itself, as it always was.
+    remote = "";
+    if (manifest.base && Array.isArray(manifest.hashes) && manifest.hashes.length == pieces) {
+      remote = new URL(manifest.base.endsWith("/") ? manifest.base : manifest.base + "/", self.location.href).href;
+      hashes = manifest.hashes;
+    }
     present = new Uint8Array(pieces);
     for (let piece = 0; piece < pieces; piece++) {
       present[piece] = (parseInt(manifest.present[piece >> 2], 16) >> (3 - (piece & 3))) & 1;

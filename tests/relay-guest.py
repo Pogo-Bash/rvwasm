@@ -11,6 +11,7 @@ still names it). Several can run at once: give each its own --ns.
 --url also takes a public relay, https://HOST[/relay] (TLS; the Origin must then be the site's own, https://HOST).
 
 Example:  ... -- sh -c 'getent hosts deb.debian.org; curl -sI https://deb.debian.org/ | head -1'
+--ctl-log FILE appends the relay's text messages (who has the network, tools/net-relay.py), one per line with the time.
 The namespace's /etc/resolv.conf is the given --dns (what dev.html's dns= does for /init). Needs root, `ip` and Linux.
 """
 import argparse
@@ -23,6 +24,7 @@ import ssl
 import struct
 import subprocess
 import sys
+import time
 
 TUNSETIFF, IFF_TAP, IFF_NO_PI = 0x400454CA, 0x0002, 0x1000
 
@@ -41,6 +43,7 @@ def main():
     p.add_argument("--ip", type=int, default=0, help="last number of 10.0.5.N (default: ask the relay)")
     p.add_argument("--dns", default="10.0.5.1")
     p.add_argument("--ns", default="rvguest")
+    p.add_argument("--ctl-log", help="append the relay's control messages (text frames) to this file")
     p.add_argument("--same-origin", action="store_true", help="/address without an Origin header")
     p.add_argument("cmd", nargs="+")
     a = p.parse_args()
@@ -73,7 +76,7 @@ def main():
     n = a.ip or int(http("/address"))
     sock = connect()
     key = base64.b64encode(os.urandom(16)).decode()
-    sock.sendall(("GET %s/?ip=%d HTTP/1.1\r\nHost: %s\r\nOrigin: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+    sock.sendall(("GET %s/?ip=%d&ctl=1 HTTP/1.1\r\nHost: %s\r\nOrigin: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                   "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (prefix, n, host, a.origin, key)).encode())
     reply = b""
     while b"\r\n\r\n" not in reply:
@@ -124,6 +127,9 @@ def main():
                         break
                     if buf[0] & 0x0F == 2:
                         os.write(tap, buf[off:off + ln])
+                    elif buf[0] & 0x0F == 1 and a.ctl_log:          # a control message: never a frame
+                        with open(a.ctl_log, "a") as log:
+                            log.write("%.3f %s\n" % (time.time(), buf[off:off + ln].decode("utf-8", "replace")))
                     elif buf[0] & 0x0F == 9:                  # a ping from the relay: answer it, or it hangs up
                         sock.sendall(ws_frame(buf[off:off + ln], 0x8A))
                     buf = buf[off + ln:]

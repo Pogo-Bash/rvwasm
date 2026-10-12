@@ -1,0 +1,21 @@
+# Caddy with the rate limiter (github.com/mholt/caddy-ratelimit) built in: the public site's Caddy (docker-compose.yml,
+# service caddy; docs/deploy.md "Abuse protection").
+#
+# Caddy modules are compiled in, so this is Caddy built by xcaddy. The build stage always runs on the build machine's
+# own architecture and cross-compiles (Go needs no emulation for that), so it is quick on a Mac or an arm VM:
+#
+#   docker buildx build --platform linux/amd64 --load -t rvwasm-caddy:2.10 -f docker/Dockerfile.caddy docker/
+#   docker save rvwasm-caddy:2.10 | gzip | ssh SERVER docker load        # the server has two cores: do not build there
+#
+# (docker compose up -d --build on the server builds it too, from the same file, if it must; that takes a few
+# minutes of both cores. RV_CADDY_IMAGE in .env names another image.)
+FROM --platform=$BUILDPLATFORM caddy:2.10-builder AS build
+ARG TARGETOS
+ARG TARGETARCH
+# CGO off and the target named: a static binary for the server's architecture, built here
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    xcaddy build --with github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db
+
+FROM caddy:2.10-alpine
+COPY --from=build /usr/bin/caddy /usr/bin/caddy
+# which modules are in: `docker run --rm rvwasm-caddy:2.10 caddy list-modules | grep rate_limit`
