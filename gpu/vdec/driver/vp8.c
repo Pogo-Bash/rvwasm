@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * VP8 (RFC 6386): a chunk is the whole frame. FFmpeg gives VA the frame without its first 3 bytes (the frame
  * tag) and on key frames the 7 after them (start code, sizes) (vaapi_vp8.c: header_size = 3 + 7 * keyframe);

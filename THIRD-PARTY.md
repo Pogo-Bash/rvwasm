@@ -2,7 +2,7 @@
 
 > **Not legal advice; may be revised.**
 
-rvwasm's own code is under the rvwasm Noncommercial Share-Alike License 1.0 (`LICENSE.md`). The built release
+rvwasm's own code is under GPL-2.0-or-later (`LICENSE.md`, `COPYING`). The built release
 (`dist/`: the page, the kernel, the boot image and the system disk) also contains other people's software, which
 keeps its own licences. This file lists it, with the licence and where to get the **corresponding source**, as
 the GPL and LGPL require for binaries that are distributed. Nothing in `LICENSE.md` limits your rights under any

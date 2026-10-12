@@ -3,7 +3,7 @@
 > **Not legal advice; may be revised.**
 
 - **rvwasm** and **plasmaontheweb.com** (the name, and the domain and its subdomains) belong to
-  Swap. The licence in `LICENSE.md` covers the code. It gives no right to use these names.
+  Swap. The GPL (`LICENSE.md`) covers the code. It gives no right to use these names.
 - If you publish a modified copy or a fork, give it a name of its own, do not use "rvwasm" or
   "plasmaontheweb" in its name, address or accounts, and say that it is unofficial. Do not suggest that the
   project made, runs or endorses it. Plain, truthful statements such as "runs on rvwasm" or "based on rvwasm"

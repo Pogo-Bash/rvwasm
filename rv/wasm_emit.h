@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * A minimal WebAssembly binary writer: a byte buffer, LEB128 and the opcodes
  * the JIT uses. Overflow is sticky and checked once at the end.

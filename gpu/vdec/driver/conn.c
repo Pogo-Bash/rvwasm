@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * The driver's side of gpuserver's socket (gpu/server/vdec.js): vtest's framing ({length in dwords,
  * command} and the dwords), commands of our own (VDEC_*). A connection whose first command is VDEC_HELLO is

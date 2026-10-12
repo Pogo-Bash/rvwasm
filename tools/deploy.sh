@@ -7,7 +7,7 @@
 # Nothing is deleted on the server and nothing is built there; only files whose content differs are copied. In this
 # order, so that the site is never half switched:
 #   0. this tree's page files and /init into the build VM's dist (docker/patch-dist.sh, run in the VM): dev.html,
-#      disk-worker.js and the boot image's /init are this tree's, whatever tree the VM built the dist from;
+#      disk-worker.js, blenderweb.js and the boot image's /init are this tree's, whatever tree the VM built the dist from;
 #   1. the dist from the VM (~/wt/release/dist) into ./dist on the Mac, everything but the disks' pieces;
 #   2. for each disk whose `id` is not the one the server has: its pieces, VM -> Mac -> server. (The same id is the
 #      same disk: its pieces are not copied again. The server keeps its own pieces even when the bucket
@@ -38,7 +38,7 @@ limactl list rvwasm 2> /dev/null | grep -q Running || { echo "deploy: the build 
 mkdir -p "$LOCAL"
 
 say "0. this tree's page files and /init into the build VM's dist"
-(cd "$WT" && rsync -aR -e "$VMSSH" docker/patch-dist.sh tools/initramfs-init tools/www/dev.html tools/www/disk-worker.js lima-rvwasm:wt/release/)
+(cd "$WT" && rsync -aR -e "$VMSSH" docker/patch-dist.sh tools/initramfs-init tools/x/desktop tools/www/dev.html tools/www/disk-worker.js tools/www/blenderweb.js tools/www/gpu-exec.js lima-rvwasm:wt/release/)
 $VMSSH lima-rvwasm "cd wt/release && docker/patch-dist.sh dist"
 
 say "1. the dist from the VM (not the pieces)"
@@ -51,8 +51,8 @@ for d in "$LOCAL"/disk/*/; do
 		say "2. disk $name: the server has this disk ($have), pieces not copied"
 	else
 		say "2. disk $name: new on the server (it has '${have:-nothing}'): the pieces"
-		rsync -a --partial $DRY --exclude manifest.json -e "$VMSSH" "$VM/disk/$name/" "$LOCAL/disk/$name/"
-		rsync -a --partial $DRY --exclude manifest.json "$LOCAL/disk/$name/" "$SERVER:$DEST/disk/$name/"
+		rsync -aW --partial $DRY --exclude manifest.json -e "$VMSSH" "$VM/disk/$name/" "$LOCAL/disk/$name/"   # (whole files: the delta check on 1 MiB pieces crawled)
+		rsync -a -c --partial $DRY --exclude manifest.json "$LOCAL/disk/$name/" "$SERVER:$DEST/disk/$name/"   # (-c: only changed pieces travel)
 	fi
 done
 

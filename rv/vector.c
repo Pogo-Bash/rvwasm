@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * The least of the V extension: setting vl and vtype, and unit-stride loads
  * and stores of vector registers, with vectors of 128 bits.

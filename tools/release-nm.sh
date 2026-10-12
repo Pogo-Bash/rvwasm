@@ -17,7 +17,7 @@
 set -e
 cd "$(dirname "$0")/.."
 URL=${RELEASE_URL:-http://localhost:8080}
-N=build/nm-release
+N=${NM_DIR:-build/nm-release}
 mkdir -p $N/rt $N/shots
 for f in linux.js linux-worker.js vmlinux-wasm64_nommu.wasm initramfs-wasm64_nommu.cpio.gz; do
 	case $f in linux*.js) to=$N/rt/$f ;; *) to=$N/$f ;; esac

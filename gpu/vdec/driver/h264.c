@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * H.264: VA's picture, IQ matrix and slice buffers into an Annex B access unit (ITU-T H.264 (08/2021)).
  *

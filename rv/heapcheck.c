@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * A heap checker, for hunting memory corruption where no sanitizer runs
  * (Linux/Wasm). Only in a build made with -DRV_HEAPCHECK: then rv.h sends

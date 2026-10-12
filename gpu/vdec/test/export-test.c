@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * Zero copy's plumbing without a player: libva on one open of the render node, our driver exports a surface
  * (vaExportSurfaceHandle: two GPU resources, R8 and GR88, as PRIME descriptors), and a second open of the device

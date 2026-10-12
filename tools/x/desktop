@@ -432,6 +432,25 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 		exit $?
 	fi
 	rvgpu_use
+	# RV_PANEL_REPLACE=1: replace the session's plasmashell once the session has settled. Off: it was meant for
+	# the panel menus opening at the screen's top left, but that is the native plasmashell's own (Debian's riscv64
+	# one, started by hand, places them right; the native one does not, however late it starts: 2026-10-12).
+	if [ "$shell" = plasma ] && [ "${RV_PANEL_REPLACE:-0}" = 1 ]; then
+		(
+			[ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -S "$XDG_RUNTIME_DIR/bus" ] &&
+				export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+			i=0
+			while [ $i -lt 600 ]; do
+				dbus-send --session --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.NameHasOwner \
+					string:org.kde.StatusNotifierWatcher 2> /dev/null | grep -q 'boolean true' && break
+				sleep 0.1
+				i=$((i + 1))
+			done
+			sleep 3
+			echo "desktop: replacing the session's plasmashell once (RV_PANEL_REPLACE=0 to keep it)" >&2
+			client "$@" --replace > /root/plasmashell-replace.log 2>&1
+		) &
+	fi
 	run "$@"
 	status=$?
 	# The program may have left windows behind it (Kate goes into the background, so does a second instance that

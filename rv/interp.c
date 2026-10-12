@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * RV64IMAFDC (and Zba, Zbb, Zbs) interpreter: the slow tier and the correctness oracle.
  */

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /* Bit writing and reading for parameter sets and headers (MSB first, as H.264, HEVC, VP9 and AV1 have them). */
 #ifndef RVVDEC_BITS_H
 #define RVVDEC_BITS_H

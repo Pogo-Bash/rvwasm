@@ -1,0 +1,26 @@
+--- a/src/qwaylandlayersurface.cpp	2026-10-12 16:26:23
++++ b/src/qwaylandlayersurface.cpp	2026-10-12 16:26:23
+@@ -16,6 +16,9 @@
+ 
+ #include <QGuiApplication>
+ 
++#include <cstring>
++#include <typeinfo>
++
+ namespace LayerShellQt
+ {
+ QWaylandLayerSurface::QWaylandLayerSurface(QWaylandLayerShellIntegration *shell, QtWaylandClient::QWaylandWindow *window)
+@@ -103,6 +106,13 @@
+ 
+     if (auto role = std::any_cast<::xdg_popup *>(&anyRole)) {
+         get_popup(*role);
++    } else if (anyRole.has_value() && std::strcmp(anyRole.type().name(), typeid(::xdg_popup *).name()) == 0) {
++        // nativeqt (static WebAssembly build): the role comes from Qt's xdg-shell code, whose type_info for
++        // xdg_popup * is not this one by address, so any_cast refuses the same type. Same type by name: the
++        // pointer is where libc++ keeps a small value, right after the any's handler pointer.
++        ::xdg_popup *role;
++        std::memcpy(&role, reinterpret_cast<const char *>(&anyRole) + sizeof(void *), sizeof role);
++        get_popup(role);
+     } else {
+         qCWarning(LAYERSHELLQT) << "Cannot attach popup of unknown type";
+     }

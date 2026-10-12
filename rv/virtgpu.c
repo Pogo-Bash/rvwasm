@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * rv-virtgpu: a virtio-gpu render node, /dev/dri/renderD128, made by rv.
  *

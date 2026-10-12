@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * The VA-API side: libva 2.x's driver interface (va_backend.h), for decoding (VAEntrypointVLD) only.
  *

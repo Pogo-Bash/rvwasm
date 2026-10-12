@@ -361,8 +361,22 @@ const showProgress = () => {
   setStatus("Loading Blender: " + (loaded / 1048576).toFixed(0) + " of " + (total ? (total / 1048576).toFixed(0) : "?") + " MB",
             total ? loaded / total * 0.9 : 0);
 };
-const counted = (response, key) => {
-  progress[key][1] = Number(response.headers.get("Content-Length")) || 0;
+// (The files may come compressed (Content-Encoding): Content-Length is then the packed size while the bytes read
+// are the unpacked ones. release/manifest.json, fetch-release.sh's, has the unpacked sizes: "blender.wasm.zst": N.)
+let decodedSizes = null;
+const decodedSize = async (name) => {
+  if (!decodedSizes) {
+    try {
+      const r = await fetch("release/manifest.json");
+      decodedSizes = r.ok ? await r.json() : {};
+    } catch (e) {
+      decodedSizes = {};
+    }
+  }
+  return Number(decodedSizes[name + ".zst"]) || 0;
+};
+const counted = (response, key, decoded) => {
+  progress[key][1] = (response.headers.get("Content-Encoding") && decoded) || Number(response.headers.get("Content-Length")) || decoded || 0;
   const reader = response.body.getReader();
   const stream = new ReadableStream({
     async pull(controller) {
@@ -379,14 +393,16 @@ const counted = (response, key) => {
   return new Response(stream, { headers: response.headers });
 };
 async function fetchEngine() {
+  const decoded = await decodedSize("blender.wasm");
   const r = await fetch("release/blender.wasm");
   if (!r.ok) throw new Error("release/blender.wasm: HTTP " + r.status);
-  return WebAssembly.compileStreaming(counted(r, "wasm"));
+  return WebAssembly.compileStreaming(counted(r, "wasm", decoded));
 }
 async function fetchAssets() {
+  const decoded = await decodedSize("assets.tar");
   const r = await fetch("release/assets.tar");
   if (!r.ok) throw new Error("release/assets.tar: HTTP " + r.status);
-  return new Uint8Array(await counted(r, "assets").arrayBuffer());
+  return new Uint8Array(await counted(r, "assets", decoded).arrayBuffer());
 }
 
 /* ---- the shader translation cache (IndexedDB of this origin, seeded with the release's) ---- */

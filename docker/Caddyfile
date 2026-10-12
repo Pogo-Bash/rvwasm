@@ -304,6 +304,34 @@
 				}
 			}
 
+			# Blender's page and files (/blender/, blenderweb/; docs/deploy.md "Blender"): a Blender window costs about 8
+			# requests, two of them big (the engine, 145 MB, and Blender's files, 67 MB; sent compressed, and the
+			# browser keeps them for a day). The big two get an hourly limit of their own.
+			zone blender_10s {
+				import perip
+				window 10s
+				events 60
+				match {
+					path /blender /blender/*
+				}
+			}
+			zone blender_1m {
+				import perip
+				window 1m
+				events 150
+				match {
+					path /blender /blender/*
+				}
+			}
+			zone blender_big_1h {
+				import perip
+				window 1h
+				events 40
+				match {
+					path /blender/release/blender.wasm /blender/release/assets.tar
+				}
+			}
+
 			# requests for something that is not there (scanners looking for .env, wp-login.php, /admin, piece
 			# numbers): nothing real asks for these more than a couple of times
 			zone miss_10s {
@@ -311,7 +339,7 @@
 				window 10s
 				events 10
 				match {
-					not path /relay /relay/* /rv-site.json /desktop /desktop/
+					not path /relay /relay/* /rv-site.json /desktop /desktop/ /blender /blender/*
 					not file {
 						root /dist/www
 						try_files {path}
@@ -334,7 +362,7 @@
 				window 1m
 				events 30
 				match {
-					not path /relay /relay/* /rv-site.json /desktop /desktop/
+					not path /relay /relay/* /rv-site.json /desktop /desktop/ /blender /blender/*
 					not file {
 						root /dist/www
 						try_files {path}
@@ -369,7 +397,54 @@
 		# address under /relay, the machine's resolver is the relay's own DNS server, and the disk.
 		handle /rv-site.json {
 			header Content-Type application/json
-			respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}"}` 200
+			respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}", "blender": "{$RV_BLENDER_URL:}"}` 200
+		}
+
+		# Blender (Puter's WebGPU build, blenderweb/): its page and files, from /blender (the tree's blenderweb/www/
+		# and the unpacked release in release/; tools/deploy-blender.sh). The machine's page frames it, and it has to be
+		# a SITE of its own (another registrable domain than the page's: Chrome then gives it a process of its own, a
+		# subdomain would share the page's): RV_BLENDER_URL, the address the page is told in rv-site.json, is
+		# https://OTHER-DOMAIN/blender/ and OTHER-DOMAIN is one of this server's names (RV_ALT_DOMAINS). The frame
+		# needs what a frame of a cross-origin-isolated page needs (COEP require-corp, CORP cross-origin) and only the
+		# machine's page may embed it. The two big files are served compressed (blender.wasm.zst/.gz next to them,
+		# tools/deploy-blender.sh makes them): this Caddy would otherwise compress 212 MB per visitor on two cores.
+		@blenderslash path /blender
+		redir @blenderslash /blender/ 308
+		handle_path /blender/* {
+			root * /blender
+			header {
+				>Cross-Origin-Resource-Policy cross-origin
+				>Cross-Origin-Embedder-Policy require-corp
+				>Content-Security-Policy "frame-ancestors {$RV_BLENDER_ANCESTORS:https://localhost}"
+				>X-Robots-Tag "noindex"
+			}
+			@blenderrelease path /release/*
+			header @blenderrelease >Cache-Control "public, max-age=86400"
+			# The big two from their compressed copies, by hand: file_server's own `precompressed` answers 206 (a
+			# partial answer holding the whole file) to a request without a Range, which no cache should have to
+			# understand. zstd where the browser accepts it, else gzip, else the file as it is.
+			@bigzst {
+				path /release/blender.wasm /release/assets.tar
+				header Accept-Encoding *zstd*
+			}
+			@biggz {
+				path /release/blender.wasm /release/assets.tar
+				header Accept-Encoding *gzip*
+				not header Accept-Encoding *zstd*
+			}
+			@bigwasm path /release/blender.wasm
+			@bigtar path /release/assets.tar
+			route {
+				header @bigzst >Content-Encoding zstd
+				header @biggz >Content-Encoding gzip
+				header @bigzst >Vary Accept-Encoding
+				header @biggz >Vary Accept-Encoding
+				header @bigwasm >Content-Type application/wasm
+				header @bigtar >Content-Type application/x-tar
+				rewrite @bigzst {path}.zst
+				rewrite @biggz {path}.gz
+				file_server
+			}
 		}
 
 		# the disk: 1 MiB pieces (named by number, no extension) and a manifest, ranges and ETags from the file server.

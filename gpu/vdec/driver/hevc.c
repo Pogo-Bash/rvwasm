@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * HEVC: VA's buffers into an Annex B access unit (ITU-T H.265 (V8, 08/2021)), Main profile.
  *

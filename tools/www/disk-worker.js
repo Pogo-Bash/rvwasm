@@ -71,8 +71,15 @@ let unsaved = 0;        // pieces placed since `map` was last written
 const in_memory = new Map();  // piece -> Uint8Array, for the pieces that are not in `data`
 let direct = true;      // whether read() and write() take views of the machine's (shared) memory
 let complained = false;
+let disk_name = "";
 
 const log = (text) => postMessage({ method: "log", text: text });
+
+// Opt-in trace of the disk's demand (`disk-worker.js?...&trace`, or DISK_TRACE set by tools/node-machine.js): one log
+// line "trace <ms since start> <disk> <piece> <fetch ms or -1 for kept> <demand|ahead|boot>" for every piece a read or
+// write touches the first time. tools/boot-trace.py turns a cold boot's lines into the boot prefetch list.
+const trace_on = !!globalThis.DISK_TRACE || /[?&]trace\b/.test((self.location && self.location.search) || "");
+const started_at = Date.now();
 
 // How hard a piece is asked for. A refusal is not an I/O error until this has run out: the guest simply waits (the
 // request is synchronous), so a busy server (a 429 or 503 from the site's rate limit) costs a slow read, not a broken
@@ -195,7 +202,12 @@ const bring = (piece) => {
   if (place[piece] || in_memory.has(piece)) {
     return;
   }
+  const fetch_began = Date.now();
   const bytes = present[piece] ? fetch_piece(piece) : new Uint8Array(piece_size);
+  if (trace_on) {
+    log("trace " + (fetch_began - started_at) + " " + disk_name + " " + piece + " " + (present[piece] ? Date.now() - fetch_began : 0)
+        + " demand");
+  }
   if (data) {
     try {
       if (data.write(bytes, { at: places * piece_size }) == piece_size) {
@@ -397,6 +409,7 @@ onmessage = async (event) => {
   try {
     memory = message.memory;
     control = message.control;
+    disk_name = message.name;
     base = message.url;
     const manifest = await (await fetch(base + "manifest.json", { cache: "no-store" })).json();
     size = manifest.size;

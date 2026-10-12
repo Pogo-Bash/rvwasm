@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Guest system calls. riscv64 uses the generic Linux syscall numbers:
  * number in a7, arguments in a0..a5, result (or -errno) in a0.

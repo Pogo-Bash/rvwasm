@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * AV1: VA's buffers into a temporal unit (AV1 Bitstream & Decoding Process Specification, 1.0.0 with Errata 1).
  *

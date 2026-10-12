@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * A stand-in for the page's WebCodecs VideoDecoder in native tests: a stateful decoder (FFmpeg's libavcodec)
  * fed one chunk at a time, each chunk's timestamp passed through to its frame, as VideoDecoder does. Built

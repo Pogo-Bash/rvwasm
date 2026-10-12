@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * VP9 (VP9 Bitstream & Decoding Process Specification v0.6): a chunk is the frame as VA has it (FFmpeg
  * vaapi_vp9.c and GStreamer gstvavp9dec.c pass the whole frame: uncompressed header, compressed header,

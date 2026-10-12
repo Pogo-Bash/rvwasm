@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * The bit-manipulation extensions Zba, Zbb and Zbs (the B extension, version
  * 1.0.0, without Zbc's carry-less multiplication): address arithmetic

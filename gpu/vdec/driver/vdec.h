@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: MIT */
 /*
  * rvwasm_drv_video.so: a VA-API driver whose decoder is the page's WebCodecs (docs/video-decode.md).
  *

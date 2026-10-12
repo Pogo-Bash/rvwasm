@@ -99,6 +99,9 @@ const { parentPort, workerData } = require("worker_threads");
 const { execFileSync } = require("child_process");
 globalThis.postMessage = (m) => parentPort.postMessage(m);
 globalThis.onmessage = null;
+globalThis.self = globalThis;
+globalThis.location = new URL(workerData.server + "/disk-worker.js");   // (the worker asks its origin and search string)
+globalThis.DISK_TRACE = !!process.env.DISK_TRACE;   // (disk-worker.js: a log line for every piece the machine touches)
 parentPort.on("message", (d) => globalThis.onmessage({ data: d }));
 // A piece of the disk, fetched while the task that needs it waits.
 globalThis.XMLHttpRequest = class {
@@ -124,7 +127,7 @@ class WebWorker {
     const disk = String(url).includes("disk-worker");
     this.w = new NodeWorker(disk ? diskShim : taskShim, {
       eval: true,
-      workerData: { source: disk ? diskSource : workerSource },
+      workerData: { source: disk ? diskSource : workerSource, server: options.server },
       name: workerOptions && workerOptions.name,
       // NM_WORKER_HEAP_MB: another limit for every task's JavaScript heap (maxOldGenerationSizeMb). Tried against
       // the ERR_WORKER_OUT_OF_MEMORY seen in runs with plasmashell's panel (2026-10-10); 4096 and 8192 did not

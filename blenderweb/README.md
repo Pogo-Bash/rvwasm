@@ -63,6 +63,24 @@ names another port.
 Blender's page needs WebGPU. Chrome on a Mac has it; headless Chrome for
 Testing too (Metal).
 
+## Why another site, and the public setup
+
+The frame must be another *site* (scheme plus registrable domain), not just another origin: the reason is
+process isolation. Blender's engine is 145 MB of Wasm and V8 limits the compiled code a process may hold, so the
+machine's tab and Blender must not share a renderer process. Chrome separates processes by site; a subdomain
+(blender.plasmaontheweb.com) is another origin but the same site and shares the page's process (the
+Origin-Agent-Cluster header is only a hint, "may not always be honored"). It is not COOP/COEP (the frame only has
+to be compatible: COEP require-corp + CORP cross-origin) and not storage (OPFS/IndexedDB are per origin anyway).
+
+Public: the page reads `"blender"` (an https address) from `/rv-site.json` (Caddy: `RV_BLENDER_URL` in the server's
+`.env`). Empty or absent: no Blender; a program asking for it is refused and the page shows a note, nothing is
+fetched from 127.0.0.1 (that default is for pages on localhost only). Caddy serves `/blender/` from
+`~/rvwasm/blender-web` (`tools/deploy-blender.sh`; `RV_BLENDER_ANCESTORS` = the pages allowed to frame it). Now:
+`https://SERVER-IP.sslip.io/blender/` (sslip.io is another registrable domain than plasmaontheweb.com, with
+a certificate already). To use a domain of your own instead: buy or use a second registrable domain, add an A
+record to the server's address, add it to `RV_ALT_DOMAINS`, and set `RV_BLENDER_URL=https://THAT-DOMAIN/blender/`
+and `RV_BLENDER_ANCESTORS` (then `docker compose up -d --no-deps caddy`).
+
 ## Files
 
 The home directory is `/root` in Blender as in Debian. File > Open shows

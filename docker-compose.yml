@@ -143,8 +143,13 @@ services:
       RV_ALT_DOMAINS: ${RV_ALT_DOMAINS:-}
       RV_WWW_DOMAIN: ${RV_WWW_DOMAIN:-www.localhost}
       RV_DISK: ${RV_DISK-release}
+      # Blender's address as the page is told it (rv-site.json "blender"; empty: the page has no Blender) and the
+      # pages that may frame it; docs/deploy.md "Blender"
+      RV_BLENDER_URL: ${RV_BLENDER_URL:-}
+      RV_BLENDER_ANCESTORS: ${RV_BLENDER_ANCESTORS:-https://${RV_DOMAIN:-localhost}}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./blender-web:/blender:ro
       - ${RV_DIST:-./dist}:/dist:ro
       - ./site:/site:ro
       - caddy-data:/data

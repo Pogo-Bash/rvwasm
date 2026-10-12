@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LicenseRef-rvwasm-NC-SA-1.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * The C extension (RV64): every 16-bit instruction is shorthand for one
  * 32-bit instruction. Expanding instead of executing them directly keeps a

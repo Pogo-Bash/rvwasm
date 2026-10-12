@@ -173,17 +173,16 @@ by any of them.
 
 ## Licence
 
-rvwasm's own code is under the **rvwasm Noncommercial Share-Alike License 1.0** (`LICENSE.md`): free to use,
-change and share for any noncommercial purpose, and anything you build on it and share with others (including
-over a network) must be published as complete source, for free, under the same licence. It is not for ads,
-resale or running as a business. It is based on the PolyForm Noncommercial License 1.0.0, modified, and is not
-endorsed by the PolyForm Project.
+rvwasm's own code is under the **GNU General Public License, version 2 or later** (`GPL-2.0-or-later`; the text
+is in `COPYING`, the details in `LICENSE.md`). You may use, change and share it; if you distribute it, changed or
+not (serving the page to visitors counts: their browsers receive the code), you must offer its complete source
+under the same licence.
 
 The project also ships and builds on other people's software (Linux through linux-wasm, musl, BusyBox, Debian,
 Qt, KDE, Mesa, virglrenderer, PulseAudio, mpv and more), which keeps its own licences, mostly GPL, LGPL and MIT.
 `LICENSE.md` says which paths of this repository are under which licence; `THIRD-PARTY.md` lists the components
 of the built release, their licences and where their source is (the native desktop shell's build scripts and
-patches are in `native/`). `TRADEMARKS.md` covers the names rvwasm and plasmaontheweb.com, and says that this is
+patches are in `native/`). `TRADEMARKS.md` covers the names rvwasm and plasmaontheweb.com (a fork needs a name of its own), and says that this is
 an unofficial project, not affiliated with KDE.
 
 Questions and source requests: open an issue at <https://github.com/Pogo-Bash/rvwasm>.
