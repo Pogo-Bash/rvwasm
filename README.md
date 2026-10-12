@@ -9,6 +9,14 @@ Konsole, Dolphin, Kate, System Settings, Firefox, Chromium, `apt-get install`, s
 video decoding. Nothing is streamed from a server: the machine runs on the visitor's own computer, inside the
 page. The server only hands out the files and, optionally, a restricted network relay.
 
+## How it was made
+
+rvwasm was designed and directed by Swap and built with [Claude](https://www.anthropic.com/claude), Anthropic's AI
+model, through [Claude Code](https://claude.com/claude-code). Most of the code, the build tooling and the
+documentation were written by Claude agents (Opus, Sonnet and Fable models); Swap chose the direction, tested every
+build in the browser and decided what shipped. Claude is a tool used to build rvwasm, not part of it: nothing from
+Claude ships in the release, and it is not free software (unlike everything listed under Credits).
+
 ## Screenshots
 
 ![Dolphin with a file's context menu open, in front of Kate and Konsole](docs/usability-audit-2026-10-10/f06-menu.jpg)
@@ -129,13 +137,6 @@ to a few GB). Serve the disk pieces directly, not through a CDN that limits larg
 rvwasm is built on a lot of other people's work. Each project below keeps its own licence (see
 [THIRD-PARTY.md](THIRD-PARTY.md)); the names belong to their owners, and rvwasm is not affiliated with or endorsed
 by any of them.
-
-**How it was made**
-
-rvwasm was designed and directed by Swap and written with [Claude](https://www.anthropic.com/claude), Anthropic's
-AI model, through [Claude Code](https://claude.com/claude-code): most of the code, the build tooling and the
-documentation were written by Claude agents (Opus, Sonnet and Fable models), with Swap choosing the direction,
-testing every build in the browser and deciding what shipped.
 
 **The foundation**
 

@@ -348,6 +348,11 @@ footer .legal{color:var(--sub0)}
     <details><summary>How fast is a Linux desktop in a browser tab?</summary><div><p>The Plasma shell, the GPU, sound and video paths run at close to native speed in WebAssembly. Debian's riscv64 programs run through the JIT, which is several times faster than other WebAssembly emulators but slower than native, so heavy programs such as Firefox, Chromium and compilers feel slow on a low-power laptop.</p></div></details>
   </section>
 
+  <section id="made">
+    <h2>how it was made</h2>
+    <p>rvwasm was designed, directed and tested by Swap and largely written by <a href="https://www.anthropic.com/claude" rel="noopener">Claude</a>, Anthropic's AI model, through <a href="https://claude.com/claude-code" rel="noopener">Claude Code</a>. Claude was the tool used to build it; it is not part of what runs here and is not free software.</p>
+  </section>
+
   <section id="credits">
     <h2>credits</h2>
     <p>rvwasm stands on a lot of free software.</p>
@@ -356,7 +361,6 @@ footer .legal{color:var(--sub0)}
       <li><a href="https://www.debian.org/" rel="noopener">Debian</a>: the riscv64 system, its packages and its archive.</li>
       <li><a href="https://kde.org/" rel="noopener">KDE</a>: Plasma, KDE Frameworks, Konsole, Dolphin, Kate and System Settings.</li>
       <li>Qt, Mesa and virglrenderer, PulseAudio, mpv and libva, BusyBox, musl and LLVM.</li>
-      <li><a href="https://www.anthropic.com/claude" rel="noopener">Claude</a> by Anthropic, through <a href="https://claude.com/claude-code" rel="noopener">Claude Code</a>: rvwasm was designed, directed and tested by Swap and largely written by Claude agents.</li>
       <li><a href="https://github.com/HeyPuter/blender-wasm" rel="noopener">Puter's blender-wasm</a>: "Blender (GPU)" is Puter's build of <a href="https://www.blender.org/" rel="noopener">Blender</a> 5 for WebAssembly and WebGPU, shown as a window of the desktop. it runs next to the machine, not inside it.</li>
     </ul>
     <div class="button88">
