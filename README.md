@@ -1,9 +1,27 @@
 # rvwasm
 
+![KDE Plasma in a browser tab: Konsole, Kate, Dolphin and System Settings on one desktop](site/assets/hero-1920.webp)
+
+*Konsole, Kate, Dolphin and System Settings, running in a Chrome tab. Nothing here is a video stream: every program runs on the visitor's own computer.*
+
 **A Linux desktop that runs inside a browser tab.** rvwasm boots Debian (riscv64) with KDE Plasma in Chrome:
 Konsole, Dolphin, Kate, System Settings, Firefox, Chromium, `apt-get install`, sound, GPU drawing and hardware
 video decoding. Nothing is streamed from a server: the machine runs on the visitor's own computer, inside the
 page. The server only hands out the files and, optionally, a restricted network relay.
+
+## Screenshots
+
+![Dolphin with a file's context menu open, in front of Kate and Konsole](docs/usability-audit-2026-10-10/f06-menu.jpg)
+
+*Dolphin and its context menu (open with, copy, trash, "Save to This Computer" to download a file to the visitor's own disk).*
+
+![Konsole showing Japanese text that was typed with an input method](docs/usability-audit-2026-10-10/k04-ime-konsole.jpg)
+
+*Typing Japanese, Chinese or Korean works: input methods and fonts are in the system.*
+
+![Firefox's welcome page in a window of the lighter IceWM desktop](docs/img/firefox.jpg)
+
+*Firefox ESR, an unmodified Debian riscv64 program, translated to WebAssembly as it runs (here on the lighter IceWM desktop).*
 
 ## Architecture
 
@@ -106,8 +124,50 @@ to a few GB). Serve the disk pieces directly, not through a CDN that limits larg
 
 ## Credits
 
-linux-wasm (Joel Severin), Debian, KDE and Qt, Mesa and virglrenderer, PulseAudio, mpv and libva, BusyBox,
-musl, LLVM.
+rvwasm is built on a lot of other people's work. Each project below keeps its own licence (see
+[THIRD-PARTY.md](THIRD-PARTY.md)); the names belong to their owners, and rvwasm is not affiliated with or endorsed
+by any of them.
+
+**The foundation**
+
+- [linux-wasm](https://github.com/joelseverin/linux-wasm) by Joel Severin: the Linux kernel's WebAssembly port, its JavaScript runtime and build script. Everything runs on it.
+- [Linux](https://kernel.org/): the kernel itself.
+- [musl](https://musl.libc.org/): the C library of the machine's own (WebAssembly) programs.
+- [BusyBox](https://busybox.net/): the boot image's shell and tools.
+- [LLVM and clang](https://llvm.org/): the compiler and linker for everything built to WebAssembly.
+- [Emscripten](https://emscripten.org/): builds the GPU executor that runs in the page.
+- [Berkeley SoftFloat](https://github.com/ucb-bar/berkeley-softfloat-3): exact RISC-V floating point in the emulator.
+- [Node.js](https://nodejs.org/): its JavaScript library runs unchanged in `hostnode`, which hosts the window server and GPU server in the machine.
+- [xterm.js](https://xtermjs.org/): the terminal of the development page.
+
+**The system and the desktop**
+
+- [Debian](https://www.debian.org/): the riscv64 system and every package on the disk.
+- [KDE](https://kde.org/): [Plasma](https://kde.org/plasma-desktop/) (the shell, KWin, System Settings), [KDE Frameworks](https://develop.kde.org/products/frameworks/) and the apps ([Konsole](https://konsole.kde.org/), [Dolphin](https://apps.kde.org/dolphin/), [Kate](https://kate-editor.org/)). KDE and Plasma are trademarks of KDE e.V.
+- [Qt](https://www.qt.io/): the toolkit under KDE, also compiled to WebAssembly for the native desktop shell.
+- [Wayland](https://wayland.freedesktop.org/): libwayland and the protocol descriptions the window server speaks.
+- [libxkbcommon](https://xkbcommon.org/) and [xkeyboard-config](https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config): keyboard layouts and key handling.
+- [X.Org](https://www.x.org/), [IceWM](https://ice-wm.org/) and twm: the lighter X desktop images.
+- [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/) and [ALSA](https://www.alsa-project.org/): the sound server and tools in front of the machine's sound card.
+- [Catppuccin](https://catppuccin.com/): the colours of the landing page.
+
+**Graphics, video and browsers**
+
+- [Mesa](https://www.mesa3d.org/): OpenGL (virgl, Zink) and Vulkan (venus) for programs in the machine.
+- [virglrenderer](https://gitlab.freedesktop.org/virgl/virglrenderer): turns the machine's OpenGL commands into WebGL2 and WebGPU calls in the page.
+- [libva](https://github.com/intel/libva): the VA-API that our video driver plugs into.
+- [mpv](https://mpv.io/): the video player, decoding through the browser's hardware decoder.
+- [FFmpeg](https://ffmpeg.org/): the reference decoder and test-clip maker for the video driver's tests (not in the release).
+- [Firefox](https://www.mozilla.org/firefox/): the web browser that runs in the machine.
+- [Chromium](https://www.chromium.org/) and [RevyOS](https://github.com/revyos): Chromium for riscv64 is RevyOS's rebuild of Debian's package.
+- [Blender](https://www.blender.org/) and [Puter's blender-wasm](https://github.com/HeyPuter/blender-wasm): Blender in a window; `blenderweb/www/main.js` is derived from Puter's demo.
+
+**The server**
+
+- [Caddy](https://caddyserver.com/): HTTPS and static files.
+- [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html) and [nftables](https://netfilter.org/projects/nftables/): the relay's allowlisted DNS and firewall.
+- [Docker](https://www.docker.com/) and [Let's Encrypt](https://letsencrypt.org/): packaging and certificates.
+- [QEMU](https://www.qemu.org/): the baseline the emulator is benchmarked against.
 
 ## Licence
 

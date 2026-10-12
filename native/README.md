@@ -1,6 +1,6 @@
 # native/: Qt, KDE Frameworks and Plasma as native WebAssembly programs
 
-> **Draft: not legal advice; to be reviewed by a lawyer before publication.**
+> **Not legal advice; may be revised.**
 
 The desktop shell in the release (`plasmashell`) is KDE Plasma 6.3.6 built with Qt 6.8.2 and KDE Frameworks 6.13.0
 **statically**, for the linux-wasm kernel, as one WebAssembly program. This directory is everything that is ours

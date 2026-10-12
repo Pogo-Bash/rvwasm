@@ -1,4 +1,4 @@
-> **Draft: not legal advice; to be reviewed by a lawyer before publication.**
+> **Not legal advice; may be revised.**
 > This top note is not part of the licence text below. The licence text starts at the line
 > "# rvwasm Noncommercial Share-Alike License 1.0".
 

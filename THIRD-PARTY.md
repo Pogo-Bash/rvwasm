@@ -1,6 +1,6 @@
 # Third-party components
 
-> **Draft: not legal advice; to be reviewed by a lawyer before publication.**
+> **Not legal advice; may be revised.**
 
 rvwasm's own code is under the rvwasm Noncommercial Share-Alike License 1.0 (`LICENSE.md`). The built release
 (`dist/`: the page, the kernel, the boot image and the system disk) also contains other people's software, which
@@ -45,8 +45,22 @@ How to get source in general:
 | **Firefox ESR** | the system disk | MPL-2.0 (with others, per file) | Debian's `firefox-esr` source package |
 | **Chromium** | the system disk, from the RevyOS repository (ISCAS), which rebuilds Debian trixie's package for riscv64 | BSD-3-Clause and many others | RevyOS's source packages at <https://mirror.iscas.ac.cn/revyos/> and <https://github.com/revyos>; Debian's `chromium` |
 | **Node.js**, **Python**, **git**, **GCC** and the other packages in `DEV_PACKAGES` (`tools/build-debian-image.sh`) | the system disk | MIT, PSF-2.0, GPL-2.0, GPL-3.0-or-later (per package) | Debian source packages |
+| **Node.js's JavaScript library** | run unchanged by `hostnode` (the window server and GPU server run on it in the machine); taken at build time from the Debian `nodejs` package by `hostnode/extract.js`, not stored here | MIT (Node.js; its bundled third-party parts have their own licences) | Debian's `nodejs` source package; <https://github.com/nodejs/node> |
 | **xterm.js** | the development page's terminal | MIT | <https://github.com/xtermjs/xterm.js>, as linux-wasm ships it |
 | **Puter's blender-wasm** and **Blender** (optional) | fetched at build time by `blenderweb/fetch-release.sh`, run in a frame; not bundled in this repository | GPL-2.0-or-later | `SOURCE.txt` next to the fetched release; <https://github.com/HeyPuter/blender-wasm> |
+
+## Used by the server, the X desktop images and the tests
+
+Not part of the built `dist/` that visitors download, but part of the project's deployment and checks:
+
+| Component | Used for | Licence | Source |
+|---|---|---|---|
+| **Caddy** | HTTPS and static files (`docker-compose.yml`, its official image) | Apache-2.0 | <https://github.com/caddyserver/caddy> |
+| **dnsmasq**, **nftables** | the relay's allowlisted DNS and firewall (`docker/Dockerfile.run`, Debian packages) | GPL-2.0-or-later / GPL-3.0 (dnsmasq), GPL-2.0-only (nftables) | Debian's `dnsmasq` and `nftables` source packages |
+| **IceWM**, **twm**, **xterm**, **X.Org** (server, fbdev and evdev drivers) | the lighter X desktop images (`tools/build-debian-image.sh x-root`) | LGPL-2.0, MIT/X11 style | Debian source packages |
+| **Catppuccin** palette | the landing page's colours (`site/`) | MIT | <https://github.com/catppuccin/catppuccin> |
+| **FFmpeg** (libavcodec) | reference decoder and test-clip maker in `gpu/vdec/test/`; not in the release | LGPL-2.1-or-later / GPL-2.0-or-later | <https://ffmpeg.org/> |
+| **QEMU** | the baseline the emulator is benchmarked against (`tools/build-qemu-*.sh`); not in the release | GPL-2.0-only | <https://www.qemu.org/> |
 
 ## Native desktop shell (Qt, KDE Frameworks, Plasma compiled to WebAssembly)
 

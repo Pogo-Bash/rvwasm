@@ -1,6 +1,6 @@
 # Trademarks
 
-> **Draft: not legal advice; to be reviewed by a lawyer before publication.**
+> **Not legal advice; may be revised.**
 
 - **rvwasm** and **plasmaontheweb.com** (the name, and the domain and its subdomains) belong to
   Swap. The licence in `LICENSE.md` covers the code. It gives no right to use these names.
