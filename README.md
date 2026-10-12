@@ -130,6 +130,13 @@ rvwasm is built on a lot of other people's work. Each project below keeps its ow
 [THIRD-PARTY.md](THIRD-PARTY.md)); the names belong to their owners, and rvwasm is not affiliated with or endorsed
 by any of them.
 
+**How it was made**
+
+rvwasm was designed and directed by Swap and written with [Claude](https://www.anthropic.com/claude), Anthropic's
+AI model, through [Claude Code](https://claude.com/claude-code): most of the code, the build tooling and the
+documentation were written by Claude agents (Opus, Sonnet and Fable models), with Swap choosing the direction,
+testing every build in the browser and deciding what shipped.
+
 **The foundation**
 
 - [linux-wasm](https://github.com/joelseverin/linux-wasm) by Joel Severin: the Linux kernel's WebAssembly port, its JavaScript runtime and build script. Everything runs on it.
