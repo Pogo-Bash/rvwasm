@@ -1,0 +1,10 @@
+# zstd 1.5.6: its CMake project is in build/cmake; this top level only sets options (library only, shared) and includes it.
+cmake_minimum_required(VERSION 3.16)
+project(zstd-top C)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED ON CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/build/cmake zstd)

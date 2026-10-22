@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Kate (native)
+GenericName=Advanced Text Editor
+Comment=Kate as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run kate %U
+Icon=kate
+MimeType=text/plain;
+Categories=Qt;KDE;Utility;TextEditor;
+Terminal=false
+StartupWMClass=kate

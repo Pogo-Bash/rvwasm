@@ -20,12 +20,13 @@
 //   pressel:SELECTOR      press: at the middle of the page's element that matches SELECTOR
 //   type:TEXT             the keys that make TEXT on a US keyboard
 //   mdrag:X,Y,X2,Y2       the middle button held from one point to the other (Blender orbits its view so)
-//   fkey:NAME             as key:, but to whatever has the keyboard (a page shown in a window: blenderweb), not the screen
+//   fkey:NAME             as key:, but to whatever has the keyboard (a page shown in a window), not the screen
 //   key:NAME              one key by the browser's name for it (Enter, Escape, Tab, F2, ArrowDown, ...),
 //                         with modifiers before it: key:ctrl+alt+KeyT, key:alt+F4, key:meta
 //   sh:COMMAND            a second command on the terminal, waited for, its output printed
 //                         (only if COMMAND above ended or was put in the background with &)
 //   log:N                 the last N lines of the page's log
+//   workers               how many Workers (the page's and those they started) are alive now (--worker-errors)
 //   kernel                what the kernel's own variables say (clock, run queues, disk requests), read from memory
 //   js:EXPRESSION         the value of a JavaScript expression evaluated in the page (after eval:tools/kde-perf-probe.js:
 //                         js:kdePerf.rate(5) and the like)
@@ -55,6 +56,9 @@
 //   waitwin:REGEX[,S]     wait (at most S seconds, default 600) for a window of the window server whose title or app
 //                         id matches REGEX, and say how long after the last mark it came, and what it is
 //   waittitle:REGEX[,S]   the same for a window whose title matches REGEX (a page's title in a browser's window)
+// --worker-errors: every Worker of the page (and the Workers they start) is attached to as it starts, and an exception
+// thrown in one is printed ("---- a Worker threw: ...") and counted; "worker errors: N" at the end, exit status 6 when N > 0.
+// (Not with --profile, which attaches to the Workers as well and does not count.)
 // --profile US: every Worker of the page is attached to as it starts, with the browser's profiler ready in it
 // (sampling every US microseconds); then
 //   profstart             start the profiler in every Worker there is (and in those that start later)
@@ -96,6 +100,7 @@ const headed = flag("--headed");
 const sh_timeout = Number(option("--sh-timeout")) || 180000;
 const on_hang = option("--on-hang");
 const profile_us = Number(option("--profile")) || 0;
+const worker_errors = flag("--worker-errors");
 if (args.length < 1) {
   console.error("usage: desktop-drive.js [--disk NAME] [--image NAME] [--pool N] [--headed] 'COMMAND' ACTION...");
   process.exit(2);
@@ -350,6 +355,30 @@ async function main() {
     // A request to a Worker that may never answer (one that is gone, or never ran): null after `ms`.
     const ask = (method, params, w, ms) => Promise.race([send(method, params, w).catch(() => null),
                                                          sleep(ms).then(() => null)]);
+    let worker_error_count = 0;
+    const live_workers = new Set();	// (--worker-errors) Workers attached to and not yet gone; the `workers` action prints how many
+    if (worker_errors && !profile_us) {
+      const attach = { autoAttach: true, waitForDebuggerOnStart: true, flatten: true };
+      event_hooks.push((msg) => {
+        if (msg.method === "Target.detachedFromTarget") {
+          live_workers.delete(msg.params.sessionId);
+        }
+        if (msg.method === "Target.attachedToTarget") {
+          const w = msg.params.sessionId;
+          live_workers.add(w);
+          (async () => {
+            await ask("Runtime.enable", {}, w, 5000);
+            await ask("Target.setAutoAttach", attach, w, 5000);
+            await ask("Runtime.runIfWaitingForDebugger", {}, w, 5000);
+          })();
+        } else if (msg.method === "Runtime.exceptionThrown" && msg.sessionId && msg.sessionId !== sessionId) {
+          const d = msg.params.exceptionDetails;
+          worker_error_count++;
+          console.log("---- a Worker threw: " + ((d.exception && d.exception.description) || d.text).split("\n").slice(0, 4).join(" | "));
+        }
+      });
+      await send("Target.setAutoAttach", attach, sessionId);
+    }
     // A Worker's profile as counts by function: own samples, and samples with the function anywhere in the stack.
     const fold = (profile) => {
       const self = {}, incl = {};
@@ -769,6 +798,8 @@ async function main() {
         await send("Input.insertText", { text: value }, sessionId);
       } else if (what == "kernel") {
         console.log("---- the kernel ----\n" + await kernel_state());
+      } else if (what == "workers") {
+        console.log("workers: " + live_workers.size + " (needs --worker-errors)");
       } else if (what == "mark") {
         marked = Date.now();
       } else if (what == "waitwin" || what == "waittitle") {
@@ -828,6 +859,12 @@ async function main() {
     }
     done = true;
     ws.close();
+    if (worker_errors && !profile_us) {
+      console.log("worker errors: " + worker_error_count);
+      if (worker_error_count) {
+        status = 6;
+      }
+    }
     if (hung) {
       status = 4;
     }

@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>vfront replay</title>
+<!-- vfront in the page: the Worker (rvgpu-worker.js) replays a virgl capture (?cap=NAME.vfcap, next to this
+     page) into vfront inside rvgpu.wasm, on zink on wgvk on this page's WebGPU device, and prints what
+     vfront-replay prints (live-run results matched N of M: the readbacks equal the native run's).
+     window.rvgpuSmoke holds the result for gpu/webgpu/build/smoke-browser.js (SMOKE_PAGE=rvgpu-vfront.html). -->
+<style>
+  body { background: #222; color: #ddd; font: 14px monospace; margin: 16px; }
+  pre { white-space: pre-wrap; }
+</style>
+<pre id="out">starting...</pre>
+<script>
+  const out = document.getElementById("out");
+  const say = (t) => { out.textContent += "\n" + t; };
+  const base = location.href.replace(/[^/?]*(\?.*)?$/, "");
+  const cap = new URLSearchParams(location.search).get("cap") || "glm-small.vfcap";
+  const worker = new Worker("rvgpu-worker.js");
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "log") { say(m.text); return; }
+    if (m.type === "vfront-replay") {
+      const lines = out.textContent.split("\n");
+      const replayed = lines.filter((l) => /replayed|time:/.test(l)).join(" | ");
+      window.rvgpuSmoke = Object.assign({}, m, { replayed });
+      say((m.ok ? "ok" : "FAIL") + " " + JSON.stringify(m));
+    }
+  };
+  worker.onerror = (e) => { window.rvgpuSmoke = { ok: false, msg: "worker error: " + e.message }; say(window.rvgpuSmoke.msg); };
+  out.textContent = "crossOriginIsolated=" + self.crossOriginIsolated + " capture=" + cap;
+  worker.postMessage({ type: "vfront-replay", base, url: base + cap });
+</script>

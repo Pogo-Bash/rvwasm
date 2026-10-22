@@ -1,0 +1,20 @@
+== gpu-nm vkcube ==
+program:  vkcube
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3924 ms
+ring:     submitted 819, done 819, heartbeat 1620
+jspi waits:1 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+presents: 300 (stage B frames from the executor), last 500x500, 8 PNGs
+boot:     808 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 184553472 (pid 178), caps at 188749824
+windows:  slot 0 "vkcube" 500x500: 298 looks, present 299
+device:   GPU 0 Virtio-GPU Venus (wgvk (WebGPU: device)), type DiscreteGpu
+probe:    8 of 8 presented PNGs show the cube; gpu-res6-2.png 500x500: teal 6.0%, light 6.1%
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (819 submits)
+  ok   vkcube selected the Venus device, a GPU type (Virtio-GPU Venus (wgvk (WebGPU: device)) / DiscreteGpu)
+  ok   vkcube presented (300 presents)
+  ok   pixel probe (the cube, not grey) (8/8)
+PASS
+MATRIX_RESULT {"app":"vkcube","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":819,"presents":300,"device":"Virtio-GPU Venus (wgvk (WebGPU: device))","pass":true,"failed":[]}

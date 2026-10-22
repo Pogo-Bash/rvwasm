@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=System Settings (native)
+GenericName=System Settings
+Comment=System Settings as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run systemsettings
+Icon=preferences-system
+Categories=Qt;KDE;Settings;
+Terminal=false
+StartupWMClass=systemsettings

@@ -1,0 +1,17 @@
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+// 64-bit integers: arithmetic, shifts, compares, multiplies, buffer loads and stores
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer In { uint64_t a[]; };
+layout(set = 0, binding = 1) buffer Out { uint64_t o[]; };
+layout(set = 0, binding = 2) buffer W { uint w[]; };
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   uint64_t x = a[i], y = a[(i + 7u) & 255u];
+   int64_t s = int64_t(x) - int64_t(y) * 3l;
+   uint64_t r = (x * y) ^ (x >> (i & 63u)) ^ (y << 5u);
+   if (s < 0l)
+      r += uint64_t(-s) / 7ul;
+   o[i] = r;
+   w[i] = uint(r >> 32u) + uint(x < y) + uint(s >> 40);
+}

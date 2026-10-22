@@ -632,3 +632,19 @@ wallpaper over D-Bus: wlserver/PLASMA-PROTOCOL.md.)
   libffi has no wasm64 port and Wasm cannot call a signature chosen at run
   time.
 - libxkbcommon 1.7.0 (no X11, no registry, no tools).
+
+## memfd_create and the kernel image at address 0 (VK-18, 2026-10-13)
+
+The kernel has no `memfd_create` (CONFIG_MEMFD_CREATE unset: ENOSYS). Mesa's wl_shm back buffer
+(`dri2_wl_swrast_allocate_buffer`) then failed, the EGL swap went on with a NULL buffer and
+`dri2_wl_swrast_get_image` did `memset(NULL, 0, W*H*4)`. There is no MMU, so address 0 is the kernel's own image
+(sys_call_table at 0x1e2c0, the console's and the network driver's operations): the next kernel call through a zeroed
+table died with "table index is out of bounds", in whatever driver ran first. Qt Quick on OpenGL over wayland-egl
+(VK-11) hit the same thing at its first `eglSwapBuffers`.
+
+Fix: `crt/nqmemfd.c`, a `memfd_create` that falls back to an unlinked file in `$XDG_RUNTIME_DIR` (or /tmp). Static
+programs get it from `libnqcrt.a` (`build-runtimes.sh`; its member is pulled in before libc's); dynamically linked ones
+from `ld-wasm`, the C library of every module (`tests/wasmdyn/build.sh` links it and leaves libc.a's `memfd_create.lo`
+out of the whole-archive link). Repro and check: `native/tests/egl-wl` (EGL wayland swrast on softpipe, an xdg
+toplevel): 1000 frames, no oops, 239 fps; the plain wl_shm path was always clean. The general hazard (any NULL write
+from a native program lands in the kernel) is in `docs/backlog.md`.

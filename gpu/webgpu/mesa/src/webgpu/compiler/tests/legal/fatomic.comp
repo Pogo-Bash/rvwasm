@@ -1,0 +1,15 @@
+#version 450
+#extension GL_EXT_shader_atomic_float : require
+// float atomics on buffers and shared memory
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer Out { float sum[4]; float acc[]; };
+shared float s;
+void main() {
+   uint i = gl_LocalInvocationIndex;
+   if (i == 0u) s = 0.0;
+   barrier();
+   atomicAdd(s, 0.5);
+   atomicAdd(sum[i & 3u], 1.0);
+   barrier();
+   if (i == 0u) acc[gl_WorkGroupID.x] = s;
+}

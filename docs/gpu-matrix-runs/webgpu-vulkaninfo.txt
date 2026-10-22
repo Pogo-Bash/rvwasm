@@ -1,0 +1,18 @@
+== gpu-nm vulkaninfo ==
+program:  vulkaninfo
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3840 ms
+ring:     submitted 33, done 33, heartbeat 186
+jspi waits:0 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+boot:     763 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 184553472 (pid 178), caps at 188749824
+vulkan:   Virtio-GPU Venus (wgvk (WebGPU: device))
+time:     vulkaninfo --summary took 3926 ms
+rc:       program 124, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (33 submits)
+  ok   venus device first (Virtio-GPU Venus (wgvk (WebGPU: device)))
+  ok   venus is wgvk (Virtio-GPU Venus (wgvk (WebGPU: device)))
+  ok   Vulkan >= 1.1 (1.1)
+PASS
+MATRIX_RESULT {"app":"vulkaninfo","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":33,"presents":0,"ms":3926,"device":"Virtio-GPU Venus (wgvk (WebGPU: device))","pass":true,"failed":[]}

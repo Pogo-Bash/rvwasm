@@ -1,0 +1,8 @@
+== gpu-nm vkcube ==
+program:  vkcube  (STUB executor: nothing is drawn)
+boot:     993 ms
+device:   GPU 0 llvmpipe (LLVM 19.1.7, 128 bits), type Cpu
+rc:       program 124, node-machine 0
+  ok   vkcube fell to lavapipe (no Vulkan in the executor) (llvmpipe (LLVM 19.1.7, 128 bits) / Cpu)
+PASS
+MATRIX_RESULT {"app":"vkcube","device":"llvmpipe (LLVM 19.1.7, 128 bits)","pass":true,"failed":[]}

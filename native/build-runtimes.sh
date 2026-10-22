@@ -49,6 +49,7 @@ nq-clang -c -O2 -o $B/nqcrt.o $NQ_TREE/crt/nqcrt.c
 nq-clang -c -o $B/cpp_exception.o $NQ_TREE/crt/cpp_exception.S
 nq-clang -c -O2 -o $B/nqsjlj.o $NQ_TREE/crt/nqsjlj.c
 nq-clang -c -O2 -o $B/nqmain.o $NQ_TREE/crt/nqmain.c
+nq-clang -c -O2 -o $B/nqmemfd.o $NQ_TREE/crt/nqmemfd.c
 nq-clang -c -o $B/sjlj_tag.o $NQ_TREE/crt/sjlj_tag.S
 # The long double comparisons (__eqtf2 and the rest), again: compiler-rt 18 returns `long` from them on
 # every LP64 target but AArch64, and on wasm64 that is an i64, where LLVM calls them expecting an i32 (as
@@ -58,5 +59,5 @@ rm -rf $CRT && mkdir -p $CRT && cp $LW/src/llvm/compiler-rt/lib/builtins/{compar
 sed -i 's/^typedef long CMP_RESULT;/typedef int CMP_RESULT;/' $CRT/fp_compare_impl.inc
 nq-clang -c -O2 -o $B/comparetf2.o $CRT/comparetf2.c
 rm -f $NQ_SYSROOT/usr/lib/libnqcrt.a
-$NQ_LLVM/llvm-ar rcs $NQ_SYSROOT/usr/lib/libnqcrt.a $B/nqcrt.o $B/cpp_exception.o $B/nqsjlj.o $B/sjlj_tag.o $B/comparetf2.o $B/nqmain.o
+$NQ_LLVM/llvm-ar rcs $NQ_SYSROOT/usr/lib/libnqcrt.a $B/nqcrt.o $B/cpp_exception.o $B/nqsjlj.o $B/sjlj_tag.o $B/comparetf2.o $B/nqmain.o $B/nqmemfd.o
 echo nqcrt ok

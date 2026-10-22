@@ -15,6 +15,11 @@ P="$S/patches/kernel-rvwasm.diff $S/patches/kernel-memsize.diff $S/patches/kerne
 sum=$(cat $P | cksum | cut -d' ' -f1)
 if [ ! -e $K/.patches-$sum ]; then
 	echo "kernel source: $K (patches $sum)"
+	# Other kernel trees (ksrc-mmu, ksrc-p1) are git worktrees of this one: removing it would take their object store.
+	if [ -d $K/.git ] && [ "$(git -C $K worktree list 2> /dev/null | wc -l)" -gt 1 ]; then
+		echo "audio-kernel: $K has worktrees (git -C $K worktree list); not removing it. Move them first." >&2
+		exit 1
+	fi
 	rm -rf $K $B
 	git clone -q --shared $LW/workspace/src/kernel $K
 	git -C $K checkout -q 039e5f3e583f56f329657d1fe9945510dba10f41 2>/dev/null || true

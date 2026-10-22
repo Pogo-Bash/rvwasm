@@ -1,0 +1,24 @@
+== gpu-nm mpv ==
+program:  mpv
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3823 ms
+ring:     submitted 447, done 447, heartbeat 682
+jspi waits:424 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+presents: 51 (stage B frames from the executor), last 640x360, 24 PNGs
+boot:     800 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 184553472 (pid 181), caps at 188749824
+windows:  slot 0 "h264-high.mp4 - mpv" 640x360: 22 looks, present 52
+mpv:      hardware decoding (vaapi)
+decoder:  stand-in: 60 chunks, 60 frames, 57 sent to the executor, 0 errors
+executor: vdecFrames 57, drawn 57 (rgba 57, external 0, exact 0), skipped 0, errors 0; 4.8 ms a frame, last 640x368 NV12 seq 60
+probe:    24 of 24 window PNGs show the test card; last gpu-res90-24.png 640x360: 8 of 8 bars, ramp 16 -> 243, bottom 0
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (447 submits)
+  ok   mpv used the VA-API driver (yes)
+  ok   frames drawn > 0 (rvGpu.stats.exec.vdecDrawn) (57)
+  ok   no frame skipped or failed (skipped 0, errors 0)
+  ok   every frame the decoder sent was received (57 of 57)
+  ok   pixel probe (the test card in mpv's window, the right way up) (24/24)
+PASS
+MATRIX_RESULT {"app":"mpv","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":447,"presents":51,"drawn":57,"msPerFrame":4.8,"pass":true,"failed":[]}

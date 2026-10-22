@@ -1,0 +1,14 @@
+#version 450
+// Denormal inputs (small integers read as floats): the reference and WGSL must agree on flushing.
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 1) buffer O { uint o[]; };
+layout(set = 0, binding = 2) buffer I { uint inp[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	float a = uintBitsToFloat(i + 1u), b = uintBitsToFloat((i * 7u) % 13u + 1u);
+	o[i * 4u + 0u] = floatBitsToUint(a / b);
+	o[i * 4u + 1u] = floatBitsToUint(a * b * 1e30);
+	o[i * 4u + 2u] = floatBitsToUint(a + b);
+	o[i * 4u + 3u] = floatBitsToUint(inversesqrt(a));
+}

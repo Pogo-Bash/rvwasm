@@ -1,0 +1,46 @@
+#!/bin/bash
+# T2, wgvk's commands: t2-test (mesa/src/webgpu/tests/t2) runs the same Vulkan program on lavapipe and on wgvk
+# and compares what every case produced (clear, triangle, indexed, instanced, indirect, depth, dynamic UBO
+# offsets, texture upload + sampling, draws in secondary command buffers, compute, copies/blit/fill/update, clear attachments, y-flip, pass
+# splitting, snapshots). WGVK_STATS=1 prints the pass-splitting numbers. Arguments: case names (default all).
+S=$WT/gpu/webgpu/mesa/src/webgpu/tests/t2
+O=$B/tests/t2
+mkdir -p $O/spv
+for f in $S/*.vert $S/*.frag $S/*.comp $S/*.geom; do
+	glslangValidator -V --target-env vulkan1.1 -o $O/spv/$(basename $f).spv $f > $O/glslang.log 2>&1 ||
+		{ cat $O/glslang.log; echo "FAIL t2: $(basename $f) did not compile"; exit 1; }
+done
+cc -O1 -g -Wall -Wno-missing-braces -I$TREE/include -o $O/t2-test $S/t2-test.c -lvulkan || { echo "FAIL t2: build"; exit 1; }
+rm -rf $O/lvp $O/wgvk
+VK_DRIVER_FILES=$LVP_ICD timeout 120 $O/t2-test $O/lvp $O/spv "$@" > $O/lvp.log 2>&1 ||
+	{ tail -20 $O/lvp.log; echo "FAIL t2: lavapipe run"; exit 1; }
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD WGVK_STATS=1 timeout 300 $O/t2-test $O/wgvk $O/spv "$@" \
+	> $O/wgvk.log 2>&1; s=$?
+grep -E "^wgvk: stats" $O/wgvk.log | sed 's/^wgvk: /info t2: /'
+if [ $s != 0 ]; then tail -30 $O/wgvk.log; echo "FAIL t2: wgvk run (exit $s)"; fi
+$O/t2-test --compare $O/lvp $O/wgvk "$@" | sed 's/^\(ok\|FAIL\) /\1 t2-/'
+r=${PIPESTATUS[0]}
+# the persistent pipeline cache: a run that fills it, a run that preloads it (no pipeline made at a draw)
+rm -f $O/pipeline.cache; rm -rf $O/wgvk-c1 $O/wgvk-c2
+for c in c1 c2; do
+	VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD WGVK_STATS=1 WGVK_PIPELINE_CACHE=$O/pipeline.cache \
+		timeout 120 $O/t2-test $O/wgvk-$c $O/spv triangle depth texture > $O/wgvk-$c.log 2>&1
+done
+made1=$(grep -m1 "pipelines made" $O/wgvk-c1.log | sed 's/.*stats: \([0-9]*\) pipelines made.*/\1/')
+made2=$(grep -m1 "pipelines made" $O/wgvk-c2.log | sed 's/.*stats: \([0-9]*\) pipelines made.*/\1/')
+pre2=$(grep -m1 "pipelines preloaded from" $O/wgvk-c2.log | sed 's/.*stats: \([0-9]*\) pipelines preloaded.*/\1/')
+if [ -n "$made1" ] && [ "$made1" -gt 0 ] && [ "$pre2" = "$made1" ] && [ "$made2" = "$pre2" ] &&
+	$O/t2-test --compare $O/lvp $O/wgvk-c2 triangle depth texture > /dev/null; then
+	echo "ok t2-pipeline-cache: run 1 made $made1 pipelines, run 2 preloaded $pre2 and made none at draws; pixels equal"
+else
+	echo "FAIL t2-pipeline-cache: run 1 made '$made1', run 2 preloaded '$pre2', made '$made2'"; r=1
+fi
+# smoke-draw: the page's draw smoke test (self-checking), natively on lavapipe and on wgvk
+T2S=$WT/gpu/webgpu/mesa/src/webgpu/tests
+cc -O1 -g -Wall -I$TREE/include -I$T2S -o $O/smoke-draw $T2S/smoke-draw.c -lvulkan || { echo "FAIL t2-smoke-draw: build"; exit 1; }
+VK_DRIVER_FILES=$LVP_ICD timeout 60 $O/smoke-draw llvmpipe $O/smoke-draw-lvp.ppm 2>&1 | grep -E "^(ok|FAIL)" | sed 's/smoke-draw/t2-smoke-draw-lvp/'
+d=${PIPESTATUS[0]}
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 120 $O/smoke-draw wgvk $O/smoke-draw-wgvk.ppm 2>&1 |
+	grep -E "^(ok|FAIL)" | sed 's/smoke-draw/t2-smoke-draw/'
+w=${PIPESTATUS[0]}
+[ $s = 0 ] && [ $r = 0 ] && [ $d = 0 ] && [ $w = 0 ]

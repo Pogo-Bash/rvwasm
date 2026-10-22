@@ -1,0 +1,10 @@
+== gpu-nm vulkaninfo ==
+program:  vulkaninfo  (STUB executor: nothing is drawn)
+boot:     941 ms
+vulkan:   llvmpipe (LLVM 19.1.7, 128 bits)
+time:     vulkaninfo --summary took 5473 ms
+rc:       program 124, node-machine 0
+  ok   no venus under a stub executor (it has no Vulkan) (none)
+  ok   falls to lavapipe (llvmpipe listed)
+PASS
+MATRIX_RESULT {"app":"vulkaninfo","ms":5473,"device":"llvmpipe (LLVM 19.1.7, 128 bits)","pass":true,"failed":[]}

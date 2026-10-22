@@ -18,6 +18,10 @@
   <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="xterm.css">
+  <!-- The landing page's font (the bar above the display is set in it too). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
   <style>
     /* The relay's note that this machine waits for the network (netBanner below): outside the machine's canvas, over the
        bottom edge of the page, small, and out of the way of the mouse. Catppuccin Mocha. */
@@ -29,6 +33,40 @@
       pointer-events: none; opacity: .94;
     }
     #netbanner[hidden] { display: none; }
+    /* The note that the browser took the site's storage away (storageNote below): a persistent one, over the bottom edge
+       of the page like the relay's, with a button; it is the one place a person is told that their files are not kept. */
+    #storagenote {
+      position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 40001;
+      max-width: min(94vw, 100ch); box-sizing: border-box; padding: 8px 12px; border-radius: 6px;
+      background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-left: 4px solid #f38ba8;
+      font: 12px/1.5 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      display: flex; gap: 12px; align-items: flex-start;
+    }
+    #storagenote[hidden] { display: none; }
+    #storagenote button {
+      flex: none; font: inherit; color: inherit; background: #313244; border: 1px solid #45475a; border-radius: 4px;
+      padding: 2px 8px; cursor: pointer;
+    }
+    /* What a program that is slow to start is doing (launchNote below), in the bar above the machine's display (display.js makes
+       #launchnote there, at the bar's right end): not over the display. Catppuccin Mocha and JetBrains Mono, as the landing page. */
+    #launchnote {
+      display: flex; align-items: center; justify-content: flex-end; gap: 14px; min-width: 0; margin-left: auto;
+      flex: 0 1 auto; overflow: hidden; white-space: nowrap; font: inherit; color: #bac2de;
+    }
+    #launchnote[hidden] { display: none; }
+    #launchnote .ln { display: flex; align-items: center; gap: 7px; min-width: 0; transition: opacity .6s ease; }
+    #launchnote .ln-main { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    #launchnote .ln-more { flex: 0 1000 auto; color: #7f849c; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    #launchnote .ln-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #cba6f7; }
+    #launchnote .ln-start .ln-dot { animation: ln-pulse 1.2s ease-in-out infinite; }
+    #launchnote .ln-done .ln-dot { background: #a6e3a1; }
+    #launchnote .ln-done { color: #a6e3a1; }
+    #launchnote .ln-fail { color: #f38ba8; }
+    #launchnote .ln-fail .ln-dot { background: #f38ba8; }
+    #launchnote .ln-fade { opacity: 0; }
+    #launchnote [hidden] { display: none; }
+    @keyframes ln-pulse { 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) { #launchnote .ln-start .ln-dot { animation: none; } #launchnote .ln { transition: none; } }
   </style>
   <script>
     // The relay shares the network of one public address between the machines behind it (campus and public wifi have
@@ -53,14 +91,14 @@
         }
         const others = count(message.others), queue = count(message.queue), waiting = count(message.waiting);
         if (message.state == "waiting") {
-          const text = "network relay in use by " + others + " other" + (others == 1 ? "" : "s")
+          const text = "rvRelay in use by " + others + " other" + (others == 1 ? "" : "s")
             + " on your network (shared IP). waiting for a free slot, "
             + (queue <= 1 ? "you're next" : "place " + queue + " of " + waiting + " in line")
             + "; it switches automatically when someone goes idle.";
           console.log("[net] " + text);
           show(text);
         } else {
-          console.log("[net] network relay: this machine has the network (" + others + " other"
+          console.log("[net] rvRelay: this machine has the network (" + others + " other"
                       + (others == 1 ? "" : "s") + " on your network)");
           show("");
         }
@@ -85,7 +123,267 @@
       };
     })();
   </script>
+  <script>
+    // A program started from Plasma's launcher or panel has no window for a while when it is the first of the visit to need its libraries
+    // (native programs: the libraries are fetched from the server and prepared by the browser, a minute or two on a slow connection), and
+    // Plasma's own launch feedback (the busy cursor, the task button) used to end after 20 s: a program that was still on its way looked as
+    // if it had quit. The window server tells the page about every launch with an app id (wlserver/plasmashell.js: rv-plasma "launch",
+    // "launch-done", and it keeps Plasma's feedback up for five minutes). The page says what is going on from the sixth second on, in the
+    // bar above the display (not over it): the program, the time, how many libraries its Workers have loaded since, and, if the tab is
+    // hidden, the tab's title (a hidden tab's timers and frames are slowed down by the browser: it should be in front while a program
+    // starts); when the program is up, "Launched ... (57 s)" for a few seconds.
+    (() => {
+      const NAMES = { systemsettings: "System Settings", kcalc: "KCalc", kwrite: "KWrite", kate: "Kate", konsole: "Konsole",
+                      dolphin: "Dolphin", okular: "Okular", gwenview: "Gwenview", ark: "Ark" };
+      const SHOW_AFTER_MS = 6000, GIVE_UP_MS = 300000;
+      const pending = new Map();
+      let timer = 0, title0 = null;
+      const nameOf = (appId) => {
+        const base = String(appId).replace(/^org\.kde\./, "").replace(/\.desktop$/, "");
+        return NAMES[base.toLowerCase()] || base.charAt(0).toUpperCase() + base.slice(1);
+      };
+      const windowsOf = (appId) => {
+        const d = window.rvDisplay;
+        try {
+          return d && d.windows ? d.windows().filter((w) => w.kind === 1 && (w.appId || "").toLowerCase() === appId.toLowerCase()).length : 0;
+        } catch (error) {
+          return 0;
+        }
+      };
+      const libs = (since) => {
+        const log = window.linuxOs && window.linuxOs.dl && window.linuxOs.dl.log;
+        if (!log) {
+          return null;
+        }
+        const seen = new Set();
+        let bytes = 0;
+        for (let i = log.length - 1; i >= 0 && i >= since; i--) {
+          if (log[i].runner !== "main" && log[i].size && !seen.has(log[i].key)) {
+            seen.add(log[i].key);
+            bytes += log[i].size;
+          }
+        }
+        return { n: seen.size, mib: Math.round(bytes / 1048576) };
+      };
+      // What the bar says. While programs start: "Starting Kate... 17 s" and, if it fits, how many libraries are in; when one is up:
+      // "Launched Kate (57 s)", a few seconds, then it fades. Several at once make one line each of the two kinds, not a pile: at
+      // most two names, then "+N"; the time is the oldest launch's.
+      const DONE_SHOW_MS = 4000, DONE_FADE_MS = 600, FAIL_SHOW_MS = 30000, MAX_NAMES = 2;
+      const done = [];			// { name, secs } of the launches that finished lately (the last three)
+      let doneFade = 0, doneClear = 0, doneFadeTimer = 0, failText = "", failTimer = 0;
+      const names = (list) => list.slice(0, MAX_NAMES).join(", ") + (list.length > MAX_NAMES ? " +" + (list.length - MAX_NAMES) : "");
+      const secs = (ms) => Math.round(ms / 1000);
+      const part = (el, cls) => {
+        let c = el.querySelector("." + cls);
+        if (!c) {
+          c = document.createElement("div");
+          c.className = "ln " + cls;
+          c.appendChild(Object.assign(document.createElement("span"), { className: "ln-dot" }));
+          c.appendChild(Object.assign(document.createElement("span"), { className: "ln-main" }));
+          c.appendChild(Object.assign(document.createElement("span"), { className: "ln-more" }));
+          el.appendChild(c);
+        }
+        return c;
+      };
+      const setPart = (el, cls, main, more, title) => {
+        const c = part(el, cls);
+        c.hidden = !main;
+        if (main) {
+          c.querySelector(".ln-main").textContent = main;
+          const m = c.querySelector(".ln-more");
+          m.textContent = more || "";
+          m.hidden = !more;
+          c.title = title || "";
+        }
+        return c;
+      };
+      const render = () => {
+        const el = document.getElementById("launchnote");
+        if (!el) {
+          return;
+        }
+        const now = performance.now();
+        const shown = [...pending.values()].filter((p) => now - p.at >= SHOW_AFTER_MS).sort((a, b) => a.at - b.at);
+        let main = "", more = "", title = "";
+        if (shown.length) {
+          const first = shown[0], l = libs(first.logAt);
+          main = "Starting " + names(shown.map((p) => p.name)) + "\u2026 " + secs(now - first.at) + " s";
+          more = l && l.n ? l.n + " libraries, " + l.mib + " MiB" : "";
+          title = "A program's first start in a visit fetches its libraries and prepares them, a minute or two on a slow connection; " +
+                  "it opens by itself. Keep this tab in front meanwhile.";
+        }
+        const start = setPart(el, "ln-start", main, more, title);
+        const d = done.slice(-3);
+        setPart(el, "ln-done", d.length ? "Launched " + names(d.map((x) => x.name + " (" + x.secs + " s)")) : "", "", "");
+        el.querySelector(".ln-done").classList.toggle("ln-fade", doneFade === 2);
+        setPart(el, "ln-fail", failText, "", failText);
+        el.hidden = !(main || d.length || failText);
+        // (the libraries only if they fit whole: no half a number)
+        if (more && start.querySelector(".ln-more").scrollWidth > start.querySelector(".ln-more").clientWidth) {
+          start.querySelector(".ln-more").hidden = true;
+        }
+      };
+      const sayDone = (name, ms) => {
+        done.push({ name, secs: secs(ms) });
+        done.splice(0, Math.max(0, done.length - 3));
+        doneFade = 1;
+        clearTimeout(doneClear);
+        clearTimeout(doneFadeTimer);
+        doneFadeTimer = setTimeout(() => { doneFade = 2; render(); }, DONE_SHOW_MS - DONE_FADE_MS);
+        doneClear = setTimeout(() => { done.length = 0; doneFade = 0; render(); }, DONE_SHOW_MS);
+      };
+      const finish = (appId, why, failed) => {
+        const p = pending.get(appId);
+        if (!p) {
+          return;
+        }
+        pending.delete(appId);
+        const ms = performance.now() - p.at;
+        console.log("[Launch]: " + p.name + ": " + why + " after " + Math.round(ms / 100) / 10 + " s");
+        if (failed) {
+          failText = p.name + " has not opened after five minutes. Reload the page if it does not show up.";
+          clearTimeout(failTimer);
+          failTimer = setTimeout(() => { failText = ""; render(); }, FAIL_SHOW_MS);
+        } else if (ms >= SHOW_AFTER_MS) {
+          sayDone(p.name, ms);		// (one that took so little that the bar never showed it needs no message)
+        }
+        if (!pending.size) {
+          clearInterval(timer);
+          timer = 0;
+          if (title0 !== null) {
+            document.title = title0;
+            title0 = null;
+          }
+        }
+        render();
+      };
+      const tick = () => {
+        const now = performance.now();
+        for (const [appId, p] of [...pending]) {
+          if (windowsOf(appId) > p.windows) {
+            finish(appId, "window");
+          } else if (now - p.at > GIVE_UP_MS) {
+            finish(appId, "no window, given up", true);
+          }
+        }
+        if (document.hidden && pending.size) {
+          if (title0 === null) {
+            title0 = document.title;
+          }
+          document.title = "Starting " + [...pending.values()].map((p) => p.name).join(", ") + "... " + title0;
+        } else if (title0 !== null) {
+          document.title = title0;
+          title0 = null;
+        }
+        render();
+      };
+      const listen = () => {
+        if (typeof window.rvChannel != "function") {
+          return;
+        }
+        const channel = window.rvChannel("rv-plasma");
+        channel.addEventListener("message", (event) => {
+          const m = event.data;
+          if (!m || typeof m.appId != "string") {
+            return;
+          }
+          if (m.type === "launch") {
+            const log = window.linuxOs && window.linuxOs.dl && window.linuxOs.dl.log;
+            pending.set(m.appId, { name: nameOf(m.appId), at: performance.now(), windows: windowsOf(m.appId), logAt: log ? log.length : 0 });
+            console.log("[Launch]: " + nameOf(m.appId) + " asked for by the launcher");
+            if (!timer) {
+              timer = setInterval(tick, 1000);
+            }
+          } else if (m.type === "launch-done") {
+            // (the window server saw a window of the app, or gave the launch up: the tick looks at the windows itself)
+            // (it also ends a launch it gave up, after five minutes: that is no "Launched")
+            setTimeout(() => {
+              const p = pending.get(m.appId);
+              finish(m.appId, "window server: done", !!p && performance.now() - p.at >= GIVE_UP_MS - 5000);
+            }, 0);
+          }
+        });
+      };
+      window.rvLaunching = () => pending.size > 0;
+      document.addEventListener("DOMContentLoaded", listen);
+    })();
+  </script>
+  <script>
+    // The browser can take this site's storage away while the page is open (Chrome does it to a Guest or private window
+    // when it is short of room or the data is removed; the person can clear the site's data): then every disk's files,
+    // the person's own among them, are gone. The disks (disk-worker.js) and the store of translations (jitcache.js) go
+    // on from memory and say so on the BroadcastChannel "rvwasm-storage" ({ type: "lost", disk, at, keep, kept, gone };
+    // { type: "nospace", disk }); a look at the directories of the disks every few seconds (storageWatch, from the page
+    // that knows their names) is the other way to learn it, and is the only one when the files are on a disk that the
+    // browser unlinked (an open file goes on working: nothing is written that will be there next time). The note is the
+    // same in all cases, and once.
+    (() => {
+      let shown = false;
+      window.storageNote = (info) => {
+        if (shown) {
+          return;
+        }
+        const el = document.getElementById("storagenote");
+        const text = document.getElementById("storagenote-text");
+        if (!el || !text) {
+          return;
+        }
+        shown = true;
+        const at = new Date(info && info.at || Date.now());
+        const time = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        text.textContent = "The browser removed this site's storage at " + time + ": your files since then are not saved. " +
+          "This machine goes on from memory, and closing or reloading this tab starts it again from scratch. " +
+          (info && info.gone ? "Some files from before could not be kept. " : "") +
+          "(Guest and private windows get little storage, and a browser can take it back.)";
+        el.hidden = false;
+        console.log("[Storage]: the browser removed this site's storage at " + time + (info && info.reason ? " (" + info.reason + ")" : ""));
+      };
+      if (typeof BroadcastChannel == "function") {
+        const channel = new BroadcastChannel("rvwasm-storage");
+        channel.onmessage = (event) => {
+          if (event.data && event.data.type == "lost") {
+            window.storageNote(event.data);
+          }
+        };
+      }
+      // Look every 10 s whether the directories of these disks (their names, as the page gave them to the disk workers) are
+      // still in the origin's private file system, once each has been seen there.
+      window.storageWatch = (names) => {
+        if (!navigator.storage || !navigator.storage.getDirectory) {
+          return;
+        }
+        const seen = new Set();
+        const look = async () => {
+          try {
+            const root = await navigator.storage.getDirectory();
+            for (const name of names) {
+              try {
+                await root.getDirectoryHandle("disk-" + name);
+                seen.add(name);
+              } catch (error) {
+                if (error.name == "NotFoundError" && seen.has(name)) {
+                  window.storageNote({ at: Date.now(), reason: "the directory of the disk " + name + " is gone" });
+                  return;
+                }
+              }
+            }
+          } catch (error) {
+            // (No file system to look at: nothing to say.)
+          }
+        };
+        const timer = setInterval(() => {
+          if (!shown) {
+            look();
+          } else {
+            clearInterval(timer);
+          }
+        }, 10000);
+      };
+    })();
+  </script>
   <script src="linux.js"></script>
+  <!-- The store of translated code that every process shares and this browser keeps (jitcache.js). -->
+  <script src="jitcache.js"></script>
   <script src="xterm.js"></script>
   <!-- The windows of the machine's Wayland clients, over the screen, when its window server runs (wlserver/). -->
   <script src="display.js"></script>
@@ -94,8 +392,6 @@
   <script src="vdec.js"></script>
   <!-- Web addresses from the machine, opened in this browser (hostopen/: rv-host-open, xdg-open). -->
   <script src="hostopen.js"></script>
-  <!-- Blender on the host's GPU in a window of the desktop (blenderweb/: blender-gpu). -->
-  <script src="blenderweb.js"></script>
   <!-- The machine's sound (audio.js: the sound card's player, in the page's one AudioContext; ?audio=0 for none). -->
   <script src="audio.js"></script>
   <!-- The machine at full speed while the page is not in front (background.js says how; ?background=off). -->
@@ -228,6 +524,183 @@
         const pool_param = new URLSearchParams(location.search).get("pool");
         const pool = pool_param !== null ? Number(pool_param) || 0
                      : Math.max(2, Math.min(8, Math.ceil((navigator.hardwareConcurrency || 4) / 2)));
+        // BEGIN dl-background
+        // The background compile of the native programs' libraries (tests/wasmdyn/dl-bg-test.js runs this text with a mock machine).
+        // Which libraries: the manifest's "preload": false ones that the machine has no Module of yet, in the manifest's "order"
+        // (the libraries Konsole, Dolphin and System Settings need first, then Kate and KWrite, then Okular, Gwenview and Ark: the
+        // NEEDED closures, nativeqt/shared/dl-order.py), one at a time. When: after the desktop is up (a window of the window
+        // server is drawn) and the screen and the machine have been quiet for DL_BACKGROUND_START_QUIET_MS; and before each library
+        // the machine has been quiet for DL_BACKGROUND_QUIET_MS. Not quiet is: the tab hidden, more than DL_BACKGROUND_BUSY_BYTES
+        // drawn in the last second, the number of windows changed, or a Worker loaded a library in the last second (a program is
+        // starting: it compiles what it needs itself, as without this job, and this job leaves the machine to it). A library a
+        // program took meanwhile is not fetched again. A library with an order below keepBelow is compiled and its Module kept (a
+        // Module in the page is code space for good: os.dl.preload); the rest are only fetched and compiled once and let go
+        // (os.dl.warm: the browser's HTTP and code caches keep them for the next launch and the next visit).
+        const DL_BACKGROUND_KEEP_BELOW = Infinity;
+        const DL_BACKGROUND_START_QUIET_MS = 8000;
+        const DL_BACKGROUND_QUIET_MS = 1500;
+        const DL_BACKGROUND_BUSY_BYTES = 400000;
+        const dlBackground = async (os, url, o) => {
+          const manifest = await o.fetchJson(url);
+          const base = new URL(url, o.base);
+          const todo = manifest.libs.filter((lib) => lib.preload === false)
+            .sort((a, b) => (a.order === undefined ? 1e9 : a.order) - (b.order === undefined ? 1e9 : b.order) || a.size - b.size);
+          const workerLoads = () => os.dl.log.reduce((n, e) => n + (e.runner === "main" ? 0 : 1), 0);
+          let last = { bytes: 0, windows: 0, loads: workerLoads() };
+          let quietSince = o.now();
+          let started = false;
+          const sample = () => {
+            const d = o.display();
+            const loads = workerLoads();
+            const busy = o.hidden() || !d || d.bytes - last.bytes > DL_BACKGROUND_BUSY_BYTES || d.windows !== last.windows ||
+              loads !== last.loads;
+            last = { bytes: d ? d.bytes : 0, windows: d ? d.windows : 0, loads };
+            if (busy) {
+              quietSince = o.now();
+            }
+            return d;
+          };
+          // (every second: a library is compiled only after a second look that finds the machine quiet)
+          const idle = async () => {
+            for (;;) {
+              const d = sample();
+              const need = started ? DL_BACKGROUND_QUIET_MS : DL_BACKGROUND_START_QUIET_MS;
+              if (d && (started || d.windows >= 1) && o.now() - quietSince >= need) {
+                started = true;
+                return;
+              }
+              await o.sleep(1000);
+            }
+          };
+          let done = 0, kept = 0;
+          for (const lib of todo) {
+            await idle();
+            if (os.dl.keys().includes(lib.key)) {
+              continue;
+            }
+            const entry = { key: lib.key, url: new URL(lib.url, base).href, size: lib.size };
+            try {
+              if (lib.order !== undefined && lib.order < o.keepBelow) {
+                await os.dl.preload([entry]);
+                kept++;
+              } else {
+                await os.dl.warm(entry);
+              }
+              done++;
+            } catch (error) {
+              o.log("[Dl]: background compile of " + lib.name + " failed (" + error.message + ")");
+            }
+          }
+          o.log("[Dl]: background compile done: " + done + " libraries (" + kept + " kept as Modules)");
+          return { done, kept };
+        };
+        // END dl-background
+
+        // BEGIN disk-warm
+        // The first start of a native program in a visit reads some 380 MiB from the server that nothing before it has read: the program
+        // libraries of the nqs disk (read ahead past what it needs: nearly the whole disk, 230 MiB) and some 190 MiB of Debian's disk (the
+        // fonts, icons and shell the program uses). At a visitor's speed (24 Mbit/s: two minutes) that is the whole wait: compiling the
+        // libraries takes tenths of a second in Chrome (tests/wasmdyn, the manual test sheets "First launch"). So once the
+        // desktop is up and nothing is going on, the page fetches those pieces itself, three at a time, into the browser's HTTP
+        // cache (the pieces are immutable and content addressed: the disk workers' own requests for them are then answered from it,
+        // and nothing else changes). Which: a disk's manifest `warm` list (what the programs' first starts read: docker/boot/NAME-warm.json,
+        // tools/r2-publish.py), else, for the nqs disk, all its pieces. Not on a connection that says it is slow or saving data
+        // (navigator.connection), once a visit's warm-up has finished (localStorage: the disks' own files hold the pieces then), and not
+        // while a program is starting (the program's own reads come first: o.launching()). ?warm=0 turns it off.
+        // (tests/wasmdyn/warm-test.js runs this text with a mock.)
+        const WARM_START_QUIET_MS = 5000;
+        const WARM_AFTER_LAUNCH_MS = 4000;
+        const WARM_CONCURRENCY = 3;
+        const warmDisks = async (o) => {
+          const c = o.connection();
+          if (c && (c.saveData || /^(slow-2g|2g|3g)$/.test(c.effectiveType || ""))) {
+            o.log("[Warm]: not fetching ahead (" + (c.saveData ? "data saver is on" : "the connection is " + c.effectiveType) + ")");
+            return { fetched: 0, skipped: "connection" };
+          }
+          // the plan: each disk's piece URLs in order, the disks taken in turn
+          const plans = [];
+          for (const d of o.disks) {
+            const m = await o.fetchJson(d.url + "manifest.json");
+            if (!m || !Array.isArray(m.hashes) || !m.base) {
+              continue;
+            }
+            const base = new URL(m.base.endsWith("/") ? m.base : m.base + "/", o.base).href;
+            let list = Array.isArray(m.warm) ? m.warm : null;
+            if (!list && d.all) {
+              list = [];
+              for (let i = 0; i < m.hashes.length; i++) {
+                if (m.hashes[i] && (parseInt(m.present[i >> 2], 16) >> (3 - (i & 3))) & 1) {
+                  list.push(i);
+                }
+              }
+            }
+            if (list && list.length) {
+              plans.push({ name: d.name, id: m.id, urls: list.filter((i) => m.hashes[i]).map((i) => base + m.hashes[i] + ".bin") });
+            }
+          }
+          const key = "rv-warm-" + plans.map((p) => p.name + ":" + p.id).join(",");
+          if (!plans.length || o.done(key)) {
+            return { fetched: 0, skipped: plans.length ? "done before" : "nothing to fetch" };
+          }
+          const queue = [];
+          for (let n = 0; plans.some((p) => n < p.urls.length); n++) {
+            for (const p of plans) {
+              if (n < p.urls.length) {
+                queue.push(p.urls[n]);
+              }
+            }
+          }
+          // when: the desktop is up (a window of the window server is drawn) and it has been quiet for a while, then before every piece
+          // no program is starting
+          let quietSince = null;
+          const ready = async () => {
+            for (;;) {
+              const d = o.display();
+              if (d && d.windows >= 2 && !o.launching()) {
+                quietSince = quietSince === null ? o.now() : quietSince;
+                if (o.now() - quietSince >= (queue.started ? WARM_AFTER_LAUNCH_MS : WARM_START_QUIET_MS)) {
+                  return;
+                }
+              } else {
+                quietSince = null;
+              }
+              await o.sleep(1000);
+            }
+          };
+          let fetched = 0, bytes = 0, failed = 0, next = 0;
+          const t0 = o.now();
+          const worker = async () => {
+            for (;;) {
+              await ready();
+              queue.started = true;
+              if (next >= queue.length || failed > 5) {
+                return;
+              }
+              const url = queue[next++];
+              try {
+                bytes += await o.fetchPiece(url);
+                fetched++;
+              } catch (error) {
+                failed++;
+              }
+            }
+          };
+          o.log("[Warm]: fetching " + queue.length + " pieces ahead once the desktop is idle (" + plans.map((p) => p.name + " " + p.urls.length).join(", ") + ")");
+          await Promise.all(Array.from({ length: WARM_CONCURRENCY }, worker));
+          o.log("[Warm]: fetched " + fetched + " pieces (" + Math.round(bytes / 1048576) + " MiB) in " + Math.round((o.now() - t0) / 1000) + " s" +
+                (failed ? ", " + failed + " failed" : ""));
+          if (failed <= 5 && fetched >= queue.length) {
+            o.setDone(key);
+          }
+          return { fetched, bytes, failed };
+        };
+        // END disk-warm
+
+        // The native programs on shared libraries (the nqs disk; docs/wasm-dynamic-linking.md): on by default, ?dl=0 turns them off, ?dl=1 on
+        // where they are not by default (Firefox). The rule is one function, rv_dl_wanted in linux.js (tools/patch-runtime.py item 28,
+        // the FIREFOX GATE); an older linux.js without it keeps the old rule (?dl=1 only).
+        const dl_wanted = typeof rv_dl_wanted == "function" ? rv_dl_wanted(location.search, navigator.userAgent)
+                                                            : new URLSearchParams(location.search).get("dl") === "1";
         let boot_cmdline =
           "maxcpus=3 nohz_full=0,2-63 rcu_nocbs=0,2-63 root=/dev/ram0 rootfstype=ramfs init=/init console=hvc console=ttyS0"
           // The machine has no clock of its own: /init sets the date from this.
@@ -277,6 +750,11 @@
           if (params.get("kargs")) {
             boot_cmdline += " " + params.get("kargs");
           }
+          // The native programs (see dl_wanted above; the runtime decides the same way from the URL): tell the guest, which cannot
+          // see the URL, so /init and the desktop can offer them. Absent with ?dl=0 (and in Firefox, by default).
+          if (dl_wanted) {
+            boot_cmdline += " rvdl=1";
+          }
           // ?autostart=0: the machine does not start what its disk says to start at boot (a disk with
           // /etc/rvwasm/autostart, such as the release image's desktop; tools/initramfs-init): a shell prompt only.
           if (params.get("autostart") === "0" || params.get("autostart") === "off") {
@@ -325,7 +803,7 @@
                 break;
               }
               const wait = Math.min(Math.max(Number(answer.headers.get("Retry-After")) || 2, 1), 10);
-              console.log("[net] the relay is busy (" + answer.status + "), asking again in " + wait + " s");
+              console.log("[net] rvRelay is busy (" + answer.status + "), asking again in " + wait + " s");
               await new Promise((resolve) => setTimeout(resolve, wait * 1000));
             } catch (error) {
               break;
@@ -353,8 +831,12 @@
         // (disk-worker.js). /init mounts it on /debian. ?disk=NAME&fresh forgets what was kept.
         // (Without ?disk at all, the site's disk if it names one: ?disk= with nothing after it is no disk.)
         const disk_name = params.has("disk") ? params.get("disk") : site.disk || null;
+        // ?fetchers=N (pieces fetched ahead at a time, default 6, 0 for none) and ?trace (a line for every piece the
+        // machine touches) go on to the disk workers (disk-worker.js).
+        const disk_query = ["fetchers", "trace"].filter((key) => params.has(key))
+          .map((key) => "&" + key + "=" + encodeURIComponent(params.get(key))).join("");
         const disk = !disk_name ? null : [{
-          worker: "disk-worker.js?v=" + version,
+          worker: "disk-worker.js?v=" + version + disk_query,
           url: "disk/" + disk_name + "/",
           name: disk_name,
           reset: params.has("fresh"),
@@ -366,24 +848,115 @@
         // then on the system's disk, and goes when that does), ?fresh-home forgets it.
         if (disk && params.get("home") != "off") {
           disk.push({
-            worker: "disk-worker.js?v=" + version,
+            worker: "disk-worker.js?v=" + version + disk_query,
             url: "disk/home/",
             keep: true,
             name: "home-" + (params.get("home") || "home"),
             reset: params.has("fresh-home"),
           });
         }
+        // The native programs (dl_wanted): and a third disk, their shared libraries and the programs (disk/nqs/,
+        // nativeqt/shared/build-nqs-image.sh), which /init mounts read-only on /opt/nq-shared when the kernel's command line
+        // says rvdl=1; the desktop's menu has them in place of the emulated ones. It has to be the third disk (wdc): /init takes
+        // the second for the home directory. So it is only with a home disk (not ?home=off), and not at all with ?dl=0 (or in
+        // Firefox without ?dl=1): then the machine has the disks it had.
+        if (disk && dl_wanted && params.get("home") != "off") {
+          disk.push({
+            worker: "disk-worker.js?v=" + version + disk_query,
+            url: "disk/nqs/",
+            name: "nqs",
+            reset: params.has("fresh"),
+          });
+        }
+        if (disk && window.storageWatch) {
+          window.storageWatch(disk.map((d) => d.name));
+        }
         if (disk && navigator.storage && navigator.storage.persist) {
-          // Ask the browser not to throw the disk away when it runs short of space. (It decides by itself.)
-          navigator.storage.persist().then((granted) => {
+          // Ask the browser not to throw the disk away when it runs short of space. (Chrome decides by itself.
+          // Firefox asks the person, with a prompt: that is not shown out of the blue at page load, but at the
+          // first click or key, when the person is looking at the page.)
+          const persist = () => navigator.storage.persist().then((granted) => {
             log("[Disk]: the browser " + (granted ? "will keep the disk until you remove it"
                                                   : "may remove the disk if it runs short of space"));
           }, () => {});
+          if (/Firefox\//.test(navigator.userAgent)) {
+            const once = () => {
+              removeEventListener("pointerdown", once, true);
+              removeEventListener("keydown", once, true);
+              persist();
+            };
+            addEventListener("pointerdown", once, true);
+            addEventListener("keydown", once, true);
+          } else {
+            persist();
+          }
         }
+        // The store of translated code (jitcache.js, rv/jitcache.c): what the emulator has translated, kept for
+        // every process of the machine and, in this origin's private file system, for the next visit; it starts
+        // from the disk's own (disk/NAME/jitcache.bin, made with the image) if there is one. ?jitcache=MB gives it
+        // that much room (384 if not said: one g++ fills 128), ?jitcache=0 turns it off, ?fresh-jitcache forgets what was kept.
+        const jit_megabytes = params.has("jitcache") ? Number(params.get("jitcache")) : 384;
+        // Only the emulator may use it (tools/patch-runtime.py, 29): the SHA-256 of the staged rv, which the server
+        // has next to the page (tools/stage.sh). Without that, no store.
+        const jit_program = jit_megabytes > 0 ? await fetch("rv.sha256?v=" + version).then((r) => r.ok ? r.text() : "",
+                                                                                          () => "") : "";
+        const jit_cache = !(jit_megabytes > 0) || !/^[0-9a-f]{64}\s*$/.test(jit_program) ? null : await jitcache.open({
+          megabytes: jit_megabytes,
+          program: jit_program.trim(),
+          base: disk_name ? "disk/" + disk_name + "/" : null,
+          reset: params.has("fresh-jitcache"),
+          log: log,
+        });
         os = await linux("linux-worker.js?v=" + version, variant, vmlinux, boot_cmdline, initrd, log, console_write,
-                         net_url, document.getElementById("screen"), disk);
+                         net_url, document.getElementById("screen"), disk,
+                         jit_cache ? { buffer: jit_cache, program: jit_program.trim() } : null);
+        window.linuxJitCache = jit_cache;  // (for tools: jitcache.info(linuxJitCache))
         term.onData((data) => os.key_input(data));
         window.linuxOs = os;  // (for tools that look at the machine from outside: its memory, its disks' words)
+        if (os.dl && os.dl.enabled && disk && params.get("warm") !== "0") {
+          // (see disk-warm above)
+          const names = new Set(disk.map((d) => d.name));
+          warmDisks({
+            base: location.href,
+            disks: [{ name: disk_name, url: "disk/" + disk_name + "/" }, ...(names.has("nqs") ? [{ name: "nqs", url: "disk/nqs/", all: true }] : [])],
+            fetchJson: async (url) => { try { return await (await fetch(url, { cache: "no-store" })).json(); } catch (error) { return null; } },
+            fetchPiece: async (url) => { const r = await fetch(url); if (!r.ok) { throw new Error("HTTP " + r.status); } return (await r.arrayBuffer()).byteLength; },
+            sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+            now: () => performance.now(),
+            display: () => (window.rvDisplay && window.rvDisplay.stats ? { windows: window.rvDisplay.stats.windows } : null),
+            launching: () => !!(window.rvLaunching && window.rvLaunching()),
+            connection: () => navigator.connection || null,
+            done: (key) => { try { return localStorage.getItem(key) === "1"; } catch (error) { return false; } },
+            setDone: (key) => { try { localStorage.setItem(key, "1"); } catch (error) { } },
+            log,
+          }).catch((error) => log("[Warm]: stopped (" + error.message + ")"));
+        }
+        if (os.dl && os.dl.enabled) {
+          // The native programs: compile the libraries of dl/libs.json that the manifest marks "preload" now, as they stream in
+          // (the browser keeps the compiled code with the cached file for the next visit; docs/wasm-dynamic-linking.md). A page
+          // without the manifest goes on. The others (most of the 270) are compiled in the background once the desktop is up and
+          // the machine idle (dlBackground, ?dlbg=1 turns it on: off for now), so that a program's first launch does not compile them.
+          os.dl.preload_manifest("dl/libs.json").then(
+            () => log("[Dl]: " + os.dl.keys().length + " libraries compiled ahead"),
+            (error) => log("[Dl]: no libraries compiled ahead (" + error.message + ")")).then(() => {
+            // (Off unless ?dlbg=1: measured under node-machine only, not yet in a browser; the manual test sheets)
+            if (params.get("dlbg") !== "1" || !os.dl.warm) {
+              return;
+            }
+            const keep = params.get("dlkeep");
+            return dlBackground(os, "dl/libs.json", {
+              base: location.href,
+              fetchJson: async (url) => (await fetch(url)).json(),
+              sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+              now: () => performance.now(),
+              hidden: () => document.hidden,
+              display: () => (window.rvDisplay && window.rvDisplay.stats
+                              ? { bytes: window.rvDisplay.stats.uploadBytes, windows: window.rvDisplay.stats.windows } : null),
+              keepBelow: keep === null ? DL_BACKGROUND_KEEP_BELOW : Number(keep),
+              log,
+            }).catch((error) => log("[Dl]: background compile stopped (" + error.message + ")"));
+          });
+        }
       } catch (error) {
         log("Linux/Wasm failed with (" + error.name + "): " + error.message + "\n" + error.stack);
         throw error;
@@ -394,6 +967,11 @@
 <body>
   <!-- Says that the relay has this machine wait for the network, see netBanner in the head; hidden otherwise. -->
   <div id="netbanner" role="status" aria-live="polite" hidden></div>
+  <!-- Says that the browser removed this site's storage, see storageNote in the head; hidden otherwise. -->
+  <div id="storagenote" role="alert" hidden>
+    <span id="storagenote-text"></span>
+    <button type="button" onclick="document.getElementById('storagenote').hidden = true">OK</button>
+  </div>
   <!-- The machine's display (click it to give it the keyboard), and below it the serial console. -->
   <canvas id="screen" tabindex="0" width="1024" height="768"
           style="display: block; max-width: 100%; background: #000; outline: none; margin-bottom: 8px;"></canvas>

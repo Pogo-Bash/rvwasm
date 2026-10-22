@@ -80,8 +80,7 @@ Two things make that work and are worth knowing:
 
 A struct in the server's memory, announced on `BroadcastChannel("rv-display-ID")`
 (ID: the page load's id, `rvtab=ID` on the kernel's command line, read by `boot.js` from `/proc/cmdline`; plain
-`rv-display` where there is none, as under `tools/node-machine.js`; the other channels, `rv-plasma`, `rv-gpu`, `rv-host`
-and `rv-blenderweb`, are named the same way) as `{ type: "table", address, pid, slots, slotSize, header, width, height,
+`rv-display` where there is none, as under `tools/node-machine.js`; the other channels, `rv-plasma`, `rv-gpu` and `rv-host`, are named the same way) as `{ type: "table", address, pid, slots, slotSize, header, width, height,
 scale, version, layouts }` at start and once a second (`layouts`: `[{ name,
 description }]`, the keymaps there are). All words are 32-bit little-endian; "page" marks
 the words the page writes, everything else is the server's. The page
@@ -706,7 +705,13 @@ pair whose other end is a client of the server (`addClient`, marked
 `xwayland`: the only client that sees the `xwayland_shell_v1` global); 4 is
 one end of another pair, on which Xwayland makes a client for the window
 manager, and the server speaks X11 on the other end. Xwayland's output goes
-to `/root/xwayland.log`. It ends itself 30 seconds after its last X program
+to `/root/xwayland.log`. In a Plasma session (`WLSERVER_SHELL=plasma`) plasmashell has `DISPLAY=:0` (the
+programs it starts inherit it) and makes one X connection of its own at start, its KScreen XRandR backend
+asking for RANDR; that would start Xwayland for every session and keep it for good. So until that connection
+has come (or 60 seconds have passed), a connection waiting on the socket is taken by the server and its
+process looked at (`SO_PEERCRED`): plasmashell's is closed and Xwayland stays off; any other program's starts
+Xwayland as usual and the connection is carried to it (`bridge`; only that one connection, which cannot pass
+descriptors). `WLSERVER_X_PEEK=0` turns this off. Xwayland ends itself 30 seconds after its last X program
 (`WLSERVER_X_LINGER`), the server sees it go (apps.js reaps its children)
 and watches the socket again; a server that fails three times in 30
 seconds is not started again. `desktop wayland` gives every program

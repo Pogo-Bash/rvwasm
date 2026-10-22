@@ -1,0 +1,101 @@
+#!/bin/sh
+# nqs-run kcalc|konsole [ARGS...]: a native program on the shared Qt/KF6 libraries of the nqs disk (mounted at
+# /opt/nq-shared), loaded by ld-wasm, as a Wayland client of the window server (`desktop wayland`).
+# Run natively (not in the Debian chroot). Everything it sets can be set before: only unset variables get a default.
+# No $(...) in this file: the machine's shell cannot fork without exec.
+NQS=${NQS:-/opt/nq-shared}
+# Where the Debian disk's data (fonts, icons, xkb) is: /debian from the native system, / from inside the chroot (`debian`,
+# where `desktop` and the launcher run it: /init bind-mounts the nqs disk there too, so this script and ld-wasm are at the
+# same paths). The chroot has no /debian.
+D=/debian
+[ -d $D/usr/share ] || D=
+name=$1
+case $name in
+"") echo "usage: nqs-run PROGRAM [ARGS...]  (kcalc, konsole, ...)" >&2; exit 2 ;;
+*) shift ;;
+esac
+if [ ! -x $NQS/usr/bin/$name ]; then
+	echo "nqs-run: $NQS/usr/bin/$name: the nqs disk is not mounted" >&2
+	exit 1
+fi
+# Qt maps a plugin file MAP_SHARED to read its metadata (and the MIME cache), and this kernel (no MMU) allows that only on the
+# in-memory file system, and only for a file whose pages are one contiguous run: not on a disk (ENODEV, "failed to map to
+# memory"), not for a file cp wrote a piece at a time. So those files (maps.list: size and path, 2 MB) are copied to $RUN once per
+# boot, each after being given its size (dd seek ends in ftruncate, which allocates the run: what the kernel's own cpio unpacking
+# does). The libraries are loaded by ld-wasm (MAP_PRIVATE: a copy) and stay on the disk.
+RUN=${NQS_RUN:-/run/nqs}
+if [ ! -e $RUN/ready ]; then
+	rm -rf $RUN
+	mkdir -p $RUN/share
+	cp -a $NQS/usr/share/mime $RUN/share/ || exit 1
+	rm -f $RUN/share/mime/mime.cache
+	# QML modules: the whole tree, then the plugins again as below
+	if [ -d $NQS/usr/lib/qt6/qml ]; then
+		mkdir -p $RUN/lib/qt6
+		cp -a $NQS/usr/lib/qt6/qml $RUN/lib/qt6/ || exit 1
+	fi
+	while read -r size f; do
+		rm -f $RUN/$f
+		mkdir -p $RUN/${f%/*}
+		dd if=/dev/null of=$RUN/$f bs=1 seek=$size 2> /dev/null
+		dd if=$NQS/usr/$f of=$RUN/$f bs=65536 conv=notrunc 2> /dev/null
+	done < $NQS/share/nqs/maps.list
+	echo ready > $RUN/ready
+fi
+# The libraries by their NEEDED names (ld-wasm: LD_LIBRARY_PATH first), the plugins (the Qt prefix is baked in as /usr).
+export LD_LIBRARY_PATH=$NQS/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export QT_PLUGIN_PATH=$RUN/lib/qt6/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}
+# KPackage's dependency handlers (a Global Theme's "kns://colorschemes.knsrc/..." colour scheme): nqs/knshandler, which runs Debian's.
+export KPACKAGE_DEP_RESOLVERS_PATH=${KPACKAGE_DEP_RESOLVERS_PATH:-$NQS/usr/lib/libexec/kf6/kpackagehandlers}
+# QML modules (qmldir + plugin): in memory like the plugins; maps.list has them.
+export QML_IMPORT_PATH=$RUN/lib/qt6/qml${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}
+export QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland}
+# No OpenGL here: Qt Quick draws with its software renderer.
+export QT_QUICK_BACKEND=${QT_QUICK_BACKEND:-software}
+export QT_QUICK_CONTROLS_STYLE=${QT_QUICK_CONTROLS_STYLE:-org.kde.desktop}
+# Data: mime from memory, this disk's, then the Debian disk's (icon themes).
+export XDG_DATA_DIRS=$RUN/share:$NQS/usr/share:${XDG_DATA_DIRS:-$D/usr/share}
+export ICU_DATA=${ICU_DATA:-$NQS/usr/share/icu/76.1}
+export FONTCONFIG_FILE=${FONTCONFIG_FILE:-$NQS/etc/fonts/fonts.conf}
+export XKB_CONFIG_ROOT=${XKB_CONFIG_ROOT:-$D/usr/share/X11/xkb}
+export XLOCALEDIR=${XLOCALEDIR:-$D/usr/share/X11/locale}
+export QT_QPA_FONTDIR=${QT_QPA_FONTDIR:-$D/usr/share/fonts/truetype/dejavu}
+# HOME: the machine's own is "/" (a ramfs). Natively (here, outside the chroot) it is the home disk, which the chroot has at /root: the same files,
+# so native programs keep their settings across reloads and share them with the emulated ones (~/.config, ~/.local/share).
+case ${HOME:-/} in
+/) if [ -d /debian/root ]; then HOME=/debian/root; else HOME=/tmp; fi ;;
+esac
+export HOME
+# The KDE platform theme (plasma-integration's KDEPlasmaPlatformTheme6, in the image): the icon theme (Breeze from the Debian disk's
+# /debian/usr/share/icons, found through XDG_DATA_DIRS; kdeglobals [Icons] Theme can say another), fonts, colours, file dialogs.
+export QT_QPA_PLATFORMTHEME=${QT_QPA_PLATFORMTHEME:-KDE}
+export XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-KDE}
+export KDE_SESSION_VERSION=${KDE_SESSION_VERSION:-6}
+export KDE_FULL_SESSION=${KDE_FULL_SESSION:-true}
+export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp}
+# The window server and the session bus `desktop wayland` made in the Debian chroot (/tmp there is /debian/tmp natively).
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-$D/tmp/runtime-root}
+export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -S $XDG_RUNTIME_DIR/bus ]; then
+	export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+fi
+if [ $name = konsole ]; then
+	# Konsole opens Debian's bash (nqs-shell); --nofork: it stays this process.
+	export SHELL=${NQS_SHELL:-$NQS/bin/nqs-shell}
+	export TERM=${TERM:-xterm-256color}
+	set -- --nofork "$@"
+fi
+if [ $name = ark ]; then
+	# Ark runs archive tools by name (KProcess: unzip, 7z, unrar ...): the ones the Debian disk has, as commands that enter it (tools that
+	# are not there are not offered; zip and tar go through libarchive inside Ark). No $(...) here: the machine's shell cannot fork without exec.
+	TOOLS=${NQS_TOOLS:-/tmp/nqs-tools}
+	mkdir -p $TOOLS
+	for t in unzip zip 7z 7za 7zr unrar rar unar lsar arj lrzip lzop; do
+		if [ -x /debian/usr/bin/$t ] && [ ! -e $TOOLS/$t ]; then
+			printf '#!/bin/sh\nexec /bin/debian %s "$@"\n' $t > $TOOLS/$t
+			chmod +x $TOOLS/$t
+		fi
+	done
+	export PATH=$TOOLS:$PATH
+fi
+exec $NQS/lib/ld-wasm $NQS/usr/bin/$name "$@"

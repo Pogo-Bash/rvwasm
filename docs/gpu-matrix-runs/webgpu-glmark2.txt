@@ -1,0 +1,15 @@
+== gpu-nm glmark2 ==
+program:  glmark2
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3996 ms
+ring:     submitted 1711736, done 1711736, heartbeat 720677
+jspi waits:573119 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+boot:     811 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 176164864 (pid 178), caps at 180361216
+glmark2:  Score 1726
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (1711736 submits)
+  ok   glmark2 completed (glmark2 Score: 1726)
+PASS
+MATRIX_RESULT {"app":"glmark2","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":1711736,"presents":0,"score":1726,"pass":true,"failed":[]}

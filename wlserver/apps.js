@@ -24,7 +24,7 @@
   const AT_FDCWD = -100;
   const WNOHANG = 1;
   const HN_SPAWN_DETACHED = 1;
-  // (and the desktop's own, with the window server: tools/x/xdg/data/applications, e.g. blender-gpu)
+  // (and the desktop's own, with the window server: tools/x/xdg/data/applications)
   const DIRS = ["/usr/share/applications", "/usr/local/share/applications", "/root/.local/share/applications",
                 "/run/wlserver/xdg/data/applications"];
   const LOG = "/root/wlserver-apps.log";

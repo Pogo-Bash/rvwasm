@@ -1,0 +1,11 @@
+(transcribed from the node-machine output of `NM_ENV="QSG_RHI_BACKEND=vulkan" tools/gpu-nm.sh qtquick`; the run's report is extra-qtquick-vulkan.txt)
+qt.scenegraph.general: Creating QRhi with backend Vulkan for window 0x140016d0 (wflags 0x1)
+Failed to load vulkan: Cannot load library vulkan: vulkan: cannot open shared object file: No such file or directory
+initInstance: No Vulkan library available
+Failed to create platform Vulkan instance
+QVulkanDefaultInstance: Failed to create Vulkan instance
+qt.scenegraph.general: No Vulkan instance from QVulkanDefaultInstance, expect problems
+No QVulkanInstance set for QQuickWindow, this is wrong.
+rv: segmentation fault: address 0x0 at pc 0x30d782c
+Segmentation fault
+MATRIX app=qtquick rc=139 secs=18

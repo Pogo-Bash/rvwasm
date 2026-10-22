@@ -1,0 +1,4 @@
+draw plain count 10 instances 2 first 2 first_instance 1 indirect
+topology lines
+vb 0 stride 4 rate vertex data bytes
+attr 0 binding 0 format R8G8B8A8_UNORM offset 0

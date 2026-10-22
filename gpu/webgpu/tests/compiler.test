@@ -1,0 +1,20 @@
+#!/bin/bash
+# T3a, the NIR -> WGSL back end (src/webgpu/compiler):
+#   cs      compute shaders run as SPIR-V on lavapipe and as our WGSL on Dawn native, buffers compared word by word
+#   draw    vertex + fragment pairs rendered on lavapipe and, as our WGSL, on Dawn native, pixels compared
+#   gfx     vertex/fragment/compute shaders using every texture and I/O form, WGSL checked by Tint
+#   corpus  Blender 4.3's 177 zink SPIR-V modules: every module we emit must pass Tint (count in STATUS.md)
+#           (numbered by T1's binding remap over each module's own descriptors: wgsl-corpus -layout)
+C=$WT/gpu/webgpu/mesa/src/webgpu/compiler/tools
+bash $WT/gpu/webgpu/build/native.sh src/webgpu/compiler/wgsl-corpus src/webgpu/compiler/cs-run src/webgpu/compiler/draw-run > /dev/null || { echo "FAIL compiler: build"; exit 1; }
+fail=0
+out=$(NO_BUILD=1 bash $C/cs-check.sh 2>&1); echo "$out" | sed -n 's/^\(ok\|FAIL\) \([^ ]*\)\.spv/\1 compiler-cs \2:/p'
+echo "$out" | grep -q "^FAIL" && fail=1
+out=$(NO_BUILD=1 bash $C/draw-check.sh 2>&1); echo "$out" | sed -n 's/^\(ok\|FAIL\) /\1 compiler-draw /p'
+echo "$out" | grep -q "^FAIL" && fail=1
+out=$(NO_BUILD=1 bash $C/gfx-check.sh 2>&1); echo "$out" | sed -n 's/^\(ok\|FAIL\) /\1 compiler-gfx /p'
+echo "$out" | grep -q "^FAIL" && fail=1
+out=$(NO_BUILD=1 bash $C/corpus.sh $B/tests/corpus -features -layout 2>&1)
+line=$(echo "$out" | grep "^modules:")
+if echo "$line" | grep -q " 0 invalid"; then echo "ok compiler-corpus: $line"; else echo "FAIL compiler-corpus: $line"; fail=1; fi
+exit $fail

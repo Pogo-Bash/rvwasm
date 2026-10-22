@@ -1,0 +1,12 @@
+=== virgl
+peglgears: EGL version = 1.5
+peglgears: EGL_VENDOR = Mesa Project
+7805 frames in 5.0 seconds = 1560.817 FPS
+client rc 0
+---- server log
+=== zinkvenus
+peglgears: EGL version = 1.5
+peglgears: EGL_VENDOR = Mesa Project
+9288 frames in 5.0 seconds = 1854.527 FPS
+client rc 0
+---- server log

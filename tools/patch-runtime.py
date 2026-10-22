@@ -305,6 +305,46 @@ Usage: patch-runtime.py path/to/linux-wasm/runtime
    (header(), irq_word(): 0 until known, and for good with a kernel without
    the card). The page's player (tools/www/audio.js, audio-worklet.js) does
    the rest: nothing here plays anything.
+26. Dynamic libraries for native wasm programs (linux.js, linux-worker.js; docs/wasm-dynamic-linking.md), only with
+   ?dl=1 on the page (--query "?dl=1" under node-machine); without it a program gets nothing it did not have
+   and no code of this runs. The host's one primitive, __wasm_dl(op, arg): instantiate a module that is in the
+   program's memory with the imports the program's dynamic linker names (tests/wasmdyn/ldso/wasm_dl.h), and
+   a new task calls its program's __dl_clone_hook (the library load log, replayed) before its own function.
+   Compiled modules are kept once per page: a library is keyed by its content (dl_key), the first Worker to
+   load it compiles it and posts the WebAssembly.Module to the main thread, and every task is started with
+   all the modules the main thread has (init, assign), so V8 holds a library's code once however many
+   programs and threads load it. os.dl.stats() says how often each was compiled or taken from the page's;
+   os.dl.preload([{key, url|bytes}]) compiles libraries ahead (compileStreaming: the browser's code cache).
+27. Programs compiled once per page, in Firefox (linux.js, linux-worker.js). Every task is a Worker and every Worker
+   compiled the program it runs, from its own copy of the bytes. V8 keeps one copy of the code for identical bytes
+   in a process; SpiderMonkey does not, and it limits all the executable code of a process to 2044 MiB
+   (js/src/jit/ProcessExecutableMemory.h): plasmashell is 141 MB of wasm, runs as several tasks (threads), and the
+   fourth compile of it failed with "InternalError: out of memory", every time, so Plasma never came up. Now, in a
+   browser whose user agent says Firefox (or with ?share=1; ?share=0 never), a program is keyed by its content
+   (dl_key, patch 26's hash), the first Worker to compile it posts the WebAssembly.Module to the main thread (dl_load,
+   as for a library), and every task is started with the modules the main thread has (init, assign): a Module
+   posted to another Worker shares its compiled code, so the code exists once. Chrome is not changed.
+29. The JIT cache (linux.js and linux-worker.js): a store of translated code
+   that all processes of the machine share and the page keeps between visits
+   (rv/jitcache.c says what it is for and why it is nowhere the guest can
+   write). linux() takes one more argument, jit_cache: a SharedArrayBuffer
+   laid out as tools/www/jitcache.js makes it, and the SHA-256 of the one
+   program that may use it: { buffer, program } (or null for none), handed to
+   every Worker. Programs get one more import, __rv_jit_cache(op, key,
+   buffer, length): op 0 copies the record of a 16-byte key into the
+   program's memory, op 1 keeps one. The store is memory of the page's own,
+   not the machine's, so nothing on the machine can reach it but through
+   this; and the import answers only the emulator: when an executable is
+   loaded, the SHA-256 of its bytes (the copy that is compiled) is taken, and
+   a program whose bytes are not the ones the page named gets -2, "no store",
+   for everything. (Otherwise any native program on the machine could put
+   WebAssembly into the store that a later rv process, root's say, runs as
+   its own, and the page would keep it for the next visit.)
+33. The relay's state, told to the machine (linux.js): one small frame (Ethertype 0x88B5, from 02:52:56:00:00:01, "RVNET1" and
+   a state byte: 1 the relay's WebSocket is open, 2 it is being opened again, 0 it is closed) is put into the receive
+   ring when the state changes and every 3 seconds. The IP stack ignores it; nq-networkmanager (nativeqt/shared/extra/
+   nqnetworkmanager) reads it through a packet socket and shows the relay to plasma-nm as the one Wi-Fi network, rvRelay,
+   connected or not. Nothing is sent when the page has no relay.
 """
 import sys
 
@@ -462,8 +502,8 @@ NET_MAIN_SETUP = """  const text_encoder = new TextEncoder();
   if (net_url) {
     net_socket = new WebSocket(net_url);
     net_socket.binaryType = "arraybuffer";
-    net_socket.onopen = () => log("[Main]: network relay connected: " + net_url);
-    net_socket.onerror = () => log("[Main]: no network relay at " + net_url);
+    net_socket.onopen = () => log("[Main]: rvRelay connected: " + net_url);
+    net_socket.onerror = () => log("[Main]: no rvRelay at " + net_url);
     net_socket.onmessage = (event) => {
       const frame = new Uint8Array(event.data);
       const written = Atomics.load(net.index, 0);
@@ -485,7 +525,7 @@ NET_MAIN_SETUP = """  const text_encoder = new TextEncoder();
         socket.binaryType = "arraybuffer";
         socket.onmessage = net_socket.onmessage;
         socket.onopen = () => {
-          log("[Main]: network relay connected again: " + net_url);
+          log("[Main]: rvRelay connected again: " + net_url);
           net_socket = socket;
         };
         socket.onclose = () => {
@@ -495,14 +535,14 @@ NET_MAIN_SETUP = """  const text_encoder = new TextEncoder();
         };
         socket.addEventListener("close", () => {
           if (net_socket === socket) {
-            log("[Main]: network relay lost; connecting again");
+            log("[Main]: rvRelay lost; connecting again");
             net_reconnect(2000);
           }
         });
       }, delay);
     };
     net_socket.onclose = () => {
-      log("[Main]: network relay lost; connecting again");
+      log("[Main]: rvRelay lost; connecting again");
       net_reconnect(2000);
     };
   }
@@ -1836,6 +1876,122 @@ START_RUN_NEW = """      const user_executable_run = (instance) => {
           host_callbacks.wasm_user_mode_tail(1);
         }
 """
+JITCACHE_WORKER_DECL_ANCHOR = "  /// The ring of input events"
+JITCACHE_WORKER_DECL = """  /// The store of translated code (tools/www/jitcache.js has its layout), or null; the SHA-256 (hex) of the program
+  /// that may use it; and whether the program running now is that one (see wasm_load_executable).
+  let jit_cache = null;
+  let jit_cache_program = null;
+  let jit_cache_ok = false;
+  let user_executable_may_cache = null;
+
+"""
+JITCACHE_WORKER_INIT_ANCHOR = "      disks = message.disks || [];\n"
+JITCACHE_WORKER_INIT = """      disks = message.disks || [];
+      jit_cache = (message.jit_cache && message.jit_cache.buffer) || null;
+      jit_cache_program = (message.jit_cache && message.jit_cache.program) || null;
+"""
+# An executable is compiled from a copy of its bytes; the same copy's SHA-256 says whether it is the program that may
+# use the store, and the answer goes with the module (an own property of it) to where the module is instantiated.
+JITCACHE_LOAD_OLD = """      const user_bytes = new Uint8Array(memory.buffer).slice(bin_start, bin_end);
+"""
+JITCACHE_LOAD_NEW = """      const user_bytes = new Uint8Array(memory.buffer).slice(bin_start, bin_end);
+      // (29) Whether these bytes are the one program that may use the store of translated code (see __rv_jit_cache).
+      user_executable_may_cache = jit_cache && jit_cache_program ?
+        crypto.subtle.digest("SHA-256", user_bytes).then((digest) =>
+          Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("") == jit_cache_program,
+          () => false) : null;
+"""
+JITCACHE_INSTANTIATE_OLD = """        let woken = user_executable.then((user_module) => WebAssembly.instantiate(user_module, user_executable_imports));
+"""
+JITCACHE_INSTANTIATE_NEW = """        let woken = user_executable.then(async (user_module) => {
+          // (Only the program the page named may use the store of translated code: see __rv_jit_cache.)
+          jit_cache_ok = user_executable_may_cache ? (await user_executable_may_cache) === true : false;
+          return WebAssembly.instantiate(user_module, user_executable_imports);
+        });
+"""
+JITCACHE_HOOK = """            // The store of translated code (rv/jitcache.c, tools/www/jitcache.js). op 0: the record of the
+            // 16-byte key at `key` into [buf, buf + len); returns its length (more than len: nothing copied),
+            // or -1 if there is none. op 1: keep [buf, buf + len) as the record of `key`; 0, or -1 if not kept
+            // (there already is one, or the store is full). -2: there is no store, or not for this program.
+            __rv_jit_cache: (op, key, buf, len) => {
+              if (!jit_cache || !jit_cache_ok) {
+                return Ulong(-2);
+              }
+              const words = new Int32Array(jit_cache);
+              const bytes = new Uint8Array(jit_cache);
+              const mem = new Uint8Array(memory.buffer);
+              const k = Number(key), b = Number(buf), n = Number(len);
+              const capacity = words[2], mask = capacity - 1, data_cap = words[3], index = 64, data = index + 32 * capacity;
+              const find = () => {
+                for (let i = (mem[k] | mem[k + 1] << 8 | mem[k + 2] << 16 | mem[k + 3] << 24) & mask, tries = 0;
+                     tries < capacity; i = (i + 1) & mask, tries++) {
+                  const at = index + 32 * i;
+                  if (Atomics.load(words, (at >> 2) + 5) == 0) {
+                    return -1 - i;  // an empty place: not there
+                  }
+                  let same = true;
+                  for (let j = 0; j < 16 && same; j++) {
+                    same = bytes[at + j] == mem[k + j];
+                  }
+                  if (same) {
+                    return i;
+                  }
+                }
+                return -1 - capacity;
+              };
+              if (Number(op) == 0) {
+                const i = find();
+                if (i < 0) {
+                  return Ulong(-1);
+                }
+                const at = index + 32 * i, offset = words[(at >> 2) + 4], length = words[(at >> 2) + 5];
+                if (length <= n) {
+                  mem.set(bytes.subarray(data + offset, data + offset + length), b);
+                  // (Used in this visit: for keeping what is used most lately, tools/www/jitcache.js compact().)
+                  words[(at >> 2) + 6] = words[8];
+                  Atomics.add(words, 9, 1);
+                }
+                return Ulong(length);
+              }
+              if (Number(op) != 1 || n <= 0) {
+                return Ulong(-1);
+              }
+              // One writer at a time: word 1 is the lock. (Readers need none: a place's length is written last.)
+              // A writer holds it for a copy, microseconds; one that waited 100 ms gives up and keeps nothing,
+              // so that a lock left held (by a Worker ended while it held it) costs records, not a machine.
+              for (let tries = 0; Atomics.compareExchange(words, 1, 0, 1) != 0; tries++) {
+                if (tries == 100) {
+                  return Ulong(-1);
+                }
+                Atomics.wait(words, 1, 1, 1);
+              }
+              let result = -1;
+              const i = find();
+              const used = words[4];
+              if (i < 0 && i != -1 - capacity && 2 * (words[5] + 1) <= capacity && used + n <= data_cap) {
+                const place = -1 - i, at = index + 32 * place;
+                bytes.set(mem.subarray(b, b + n), data + used);
+                bytes.set(mem.subarray(k, k + 16), at);
+                words[(at >> 2) + 4] = used;
+                words[(at >> 2) + 6] = words[8];
+                Atomics.store(words, (at >> 2) + 5, n);
+                words[4] = used + ((n + 7) & ~7);
+                words[5]++;
+                Atomics.add(words, 6, 1);
+                result = 0;
+              }
+              Atomics.store(words, 1, 0);
+              Atomics.notify(words, 1, 1);
+              return Ulong(result);
+            },
+"""
+JITCACHE_MAIN_SIGNATURE_OLD = "initrd, log, console_write, net_url, canvas, disk_options) => {\n"
+JITCACHE_MAIN_SIGNATURE_NEW = "initrd, log, console_write, net_url, canvas, disk_options, jit_cache) => {\n"
+JITCACHE_MAIN_INIT_ANCHOR = "      disks: disks,\n"
+JITCACHE_MAIN_INIT = """      disks: disks,
+      jit_cache: jit_cache && jit_cache.buffer && jit_cache.program ? jit_cache : null,
+"""
+
 
 def patch_file(path, name, marker, edits):
     """Apply (anchor, replacement) edits to a file unless `marker` shows it was done before."""
@@ -1943,12 +2099,16 @@ JITCODE_WORKER_SET_NEW = """                const instance = new WebAssembly.Ins
                 // (measured with rv's regions as made on the machine: Liftoff's code is 3.1 to 3.9 times as long
                 // as the module, TurboFan's 3.5) and its jump tables, in pages of 16 KiB.
                 const kib = Math.ceil((Number(len) * 7 / 2 + 2048) / 16384) * 16;
-                // A batch (slot -16 - count): the module has put its functions into their slots itself, by its
-                // element segments, when it was instantiated; the slots follow the module in memory.
+                // A batch (slot -16 - count): the slots follow the module in memory, and its function "i" goes
+                // into the i-th. (A module of an older rv put its functions there itself, by element segments,
+                // when it was instantiated, and exports none.)
                 if (Number(slot) <= -16) {
                   const count = -16 - Number(slot);
                   const slots = new DataView(memory.buffer, start + Number(len), 4 * count);
                   for (let i = 0; i < count; i++) {
+                    if (instance.exports[String(i)]) {
+                      table.set(slots.getUint32(4 * i, true), instance.exports[String(i)]);
+                    }
                     jit_account(slots.getUint32(4 * i, true), Math.ceil(kib / count));
                   }
                   return Ulong(0);
@@ -2199,6 +2359,566 @@ AUDIO_MAIN_RETURN = """    /// (25) The sound card, for the page's player (tools
 """
 
 
+# (26) Dynamic libraries for native wasm programs (docs/wasm-dynamic-linking.md), off unless the page has ?dl=1.
+DL_DECL_ANCHOR = "  let user_executable_imports = null;\n"
+DL_DECL = """  /// (26) Dynamic libraries (docs/wasm-dynamic-linking.md). On with ?dl=1 on the page (globalThis.rv_query under
+  /// node-machine): programs are then given __wasm_dl, and a new task calls its program's __dl_clone_hook before
+  /// anything of its own runs. Off, nothing here is reached.
+  let dl_on = false;
+  /// What this Worker has loaded for its program: its main instance and the instances in load order.
+  let dl_state = null;
+  /// Compiled libraries by content key. The main thread's (linux.js) at the time the task started (the init or assign
+  /// message), and every one this Worker compiled itself (told to the main thread at once). A WebAssembly.Module goes
+  /// to another Worker by postMessage and V8 keeps one copy of its code: a library is compiled once per page.
+  let dl_shared = new Map();
+  /// The content key of len bytes at address: two 32-bit lanes (position dependent) and the length, as 8+8 hex digits
+  /// and the length. A cache key for one page, not a cryptographic hash (tools/dl-hash.py computes the same).
+  const dl_key = (address, len) => {
+    const buffer = memory.buffer;
+    const words = Math.floor(len / 4);
+    let h1 = 0x9e3779b9 | 0, h2 = 0x85ebca6b | 0;
+    const step = (w, i) => {
+      h1 = Math.imul(h1 ^ w, 0x9e3779b1);
+      h1 ^= h1 >>> 15;
+      h2 = Math.imul((h2 + w + i) | 0, 0x85ebca6b);
+      h2 ^= h2 >>> 13;
+    };
+    if (address % 4 == 0) {
+      const u = new Uint32Array(buffer, address, words);
+      for (let i = 0; i < words; i++) {
+        const w = u[i];
+        h1 = Math.imul(h1 ^ w, 0x9e3779b1);
+        h1 ^= h1 >>> 15;
+        h2 = Math.imul((h2 + w + i) | 0, 0x85ebca6b);
+        h2 ^= h2 >>> 13;
+      }
+    } else {
+      const view = new DataView(buffer);
+      for (let i = 0; i < words; i++) {
+        step(view.getUint32(address + 4 * i, true), i);
+      }
+    }
+    if (len % 4) {
+      const b = new Uint8Array(buffer, address + 4 * words, len % 4);
+      let t = 0;
+      for (let k = 0; k < b.length; k++) {
+        t |= b[k] << (8 * k);
+      }
+      step(t >>> 0, words);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16) ^ len, 0x7feb352d);
+    h2 = Math.imul(h2 ^ (h2 >>> 16) ^ h1, 0x846ca68b);
+    return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0") + "-" + len;
+  };
+"""
+DL_INIT_OLD = "      sigfix_off = message.sigfix_off === true;\n"
+DL_INIT_NEW = """      sigfix_off = message.sigfix_off === true;
+      dl_on = message.dl === true;
+      dl_shared = message.dl_modules || new Map();
+"""
+DL_ASSIGN_OLD = """          message = assignment;
+          runner_name = message.runner_name;
+"""
+DL_ASSIGN_NEW = """          message = assignment;
+          runner_name = message.runner_name;
+          if (message.dl_modules) {
+            dl_shared = message.dl_modules;  // (26) what the main thread has compiled by now
+          }
+"""
+DL_IMPORT = """            // (26) Dynamic libraries: op 0 load the module the descriptor at arg describes, 1 how many instances this
+            // Worker has (the program's included), 2 the length of the function table. Only with ?dl=1.
+            ...(dl_on ? { __wasm_dl: (op, arg) => {
+              const table = user_executable_imports.env.__indirect_function_table;
+              if (!dl_state || dl_state.main !== user_executable_instance) {
+                dl_state = { main: user_executable_instance, instances: [user_executable_instance] };
+              }
+              const dl = dl_state;
+              if (Number(op) == 1) {
+                return Ulong(dl.instances.length - 1);
+              } else if (Number(op) == 2) {
+                return Ulong(table.length);
+              }
+              try {
+                const view = new DataView(memory.buffer);
+                const word = (address) => view.getBigUint64(Number(address), true);
+                const cstring = (address) => get_cstring(memory, Number(address));
+                const desc = Number(arg);
+                const bytes = Number(word(desc)), len = Number(word(desc + 8));
+                const nimports = Number(word(desc + 16)), plan = Number(word(desc + 24));
+                const table_min = Number(word(desc + 32)), place = Number(word(desc + 40));
+                if (table.length < table_min) {
+                  table.grow(table_min - table.length);
+                }
+                let instance = dl.instances[Number(word(desc + 48))];
+                const t0 = performance.now();
+                let t1 = t0, t2 = t0;
+                if (len) {
+                  // The module: the page's, by content; else compiled here (a copy: a module cannot be compiled from
+                  // shared memory) and given to the main thread for every task after this one. The key is hashed from the
+                  // bytes by the first load and left in the descriptor (the program's log keeps it): a thread replaying
+                  // the log reads it there instead of hashing megabytes again. (All programs share one memory and one
+                  // kernel here; a program that lies about a key can do nothing it could not do anyway. A key that
+                  // names nothing the page has is checked against the bytes before anything is compiled for it.)
+                  const keyfield = new Uint8Array(memory.buffer, desc + 80, 32);
+                  let key = "";
+                  for (let k = 0; k < 32 && keyfield[k]; k++) {
+                    key += String.fromCharCode(keyfield[k]);
+                  }
+                  let module = key ? dl_shared.get(key) : undefined;
+                  let how = "shared";
+                  if (!module) {
+                    const actual = dl_key(bytes, len);
+                    if (actual != key) {
+                      key = actual;
+                      module = dl_shared.get(key);
+                    }
+                    if (!module) {
+                      how = "compile";
+                      module = new WebAssembly.Module(new Uint8Array(memory.buffer).slice(bytes, bytes + len));
+                      dl_shared.set(key, module);
+                    }
+                    if (!keyfield[0] && key.length < 32) {
+                      for (let k = 0; k < key.length; k++) {
+                        keyfield[k] = key.charCodeAt(k);
+                      }
+                    }
+                  }
+                  port.postMessage({ method: "dl_load", key: key, how: how, size: len, runner: runner_name,
+                                     us: Math.round((performance.now() - t0) * 1000), module: how == "compile" ? module : undefined });
+                  const imports = {};
+                  const wanted = WebAssembly.Module.imports(module);
+                  if (wanted.length != nimports) {
+                    throw new Error("the module has " + wanted.length + " imports, the descriptor binds " + nimports);
+                  }
+                  wanted.forEach((item, i) => {
+                    const entry = plan + 32 * i;
+                    const kind = Number(word(entry)), type = Number(word(entry + 8));
+                    const a = word(entry + 16), b = word(entry + 24);
+                    let value;
+                    if (kind == 1) {
+                      value = user_executable_imports.env[cstring(a)];
+                    } else if (kind == 2) {
+                      const i64 = (type & 0xff) == 0x7e;
+                      value = new WebAssembly.Global({ value: i64 ? "i64" : "i32", mutable: !!(type & 0x100) },
+                                                     i64 ? BigInt.asIntN(64, a) : Number(BigInt.asIntN(32, a)));
+                    } else if (kind == 3) {
+                      value = table.get(Number(a));
+                    } else if (kind == 4) {
+                      value = dl.instances[Number(a)].exports[cstring(b)];
+                    } else if (kind == 5) {
+                      const name = cstring(a);
+                      value = () => { throw new WebAssembly.RuntimeError("undefined symbol: " + name); };
+                    }
+                    if (value === undefined || value === null) {
+                      throw new Error("nothing to bind import " + item.module + "." + item.name + " to (kind " + kind + ")");
+                    }
+                    (imports[item.module] = imports[item.module] || {})[item.name] = value;
+                  });
+                  t1 = performance.now();
+                  instance = new WebAssembly.Instance(module, imports);
+                  t2 = performance.now();
+                }
+                if (place) {
+                  let slot = place;
+                  for (const value of Object.values(instance.exports)) {
+                    if (typeof value == "function") {
+                      table.set(slot++, value);
+                    }
+                  }
+                }
+                const t3 = performance.now();
+                view.setBigUint64(desc + 56, BigInt(Math.round((t1 - t0) * 1000)), true);
+                view.setBigUint64(desc + 64, BigInt(Math.round((t2 - t1) * 1000)), true);
+                view.setBigUint64(desc + 72, BigInt(Math.round((t3 - (len ? t2 : t0)) * 1000)), true);
+                dl.instances.push(len ? instance : null);
+                return Ulong(dl.instances.length - 1);
+              } catch (error) {
+                log("__wasm_dl: " + error + "\\n" + error.stack);
+                return Ulong(-1);
+              }
+            } } : {}),
+"""
+DL_CLONE_OLD = "            instance.exports.__libc_clone_callback();\n"
+DL_CLONE_NEW = """            // (26) A new task loads its process's dynamic libraries before anything of its own runs.
+            if (dl_on && instance.exports.__dl_clone_hook) {
+              instance.exports.__dl_clone_hook();
+            }
+            instance.exports.__libc_clone_callback();
+"""
+
+DL_MAIN_DECL_ANCHOR = "  /// Memory shared between all CPUs.\n"
+DL_MAIN_DECL = """  /// (26) Dynamic libraries (linux-worker.js): on with ?dl=1 on the page (globalThis.rv_query under node-machine). The
+  /// libraries compiled so far, by content key, one WebAssembly.Module each for the whole page: every Worker that
+  /// compiles one tells us (dl_load), and every task starts with all of them (init, assign), so V8 has one copy of a
+  /// library's code however many programs and threads use it. dl_log is what happened, for tests and tools.
+  const dl_enabled = /[?&]dl=1(&|$)/.test(typeof location != "undefined" ? location.search : (globalThis.rv_query || ""));
+  const dl_modules = new Map();
+  const dl_log = [];
+  const dl_stats = () => {
+    const per = {};
+    for (const entry of dl_log) {
+      const e = per[entry.key] = per[entry.key] || { size: entry.size, compile: 0, shared: 0, preload: 0, compile_us: 0, shared_us: 0, preload_us: 0 };
+      e[entry.how]++;
+      if (entry.how == "preload") {
+        e.preload_us += entry.us;
+      } else if (entry.how == "compile") {
+        e.compile_us += entry.us;
+      } else if (entry.how == "shared") {
+        e.shared_us += entry.us;
+      }
+    }
+    return per;
+  };
+  /// Compile libraries ahead of any program (the page knows them: a manifest of {key, url} or {key, bytes}). A url is
+  /// compiled as it streams in (WebAssembly.compileStreaming), which is what lets the browser keep the compiled code
+  /// with the HTTP cache for the next visit; the key is the library's tools/dl-hash.py key.
+  const dl_preload = async (entries) => {
+    await Promise.all(entries.map(async (entry) => {
+      if (dl_modules.has(entry.key)) {
+        return;
+      }
+      const t0 = performance.now();
+      let module;
+      if (entry.bytes) {
+        module = await WebAssembly.compile(entry.bytes);
+      } else if (typeof WebAssembly.compileStreaming == "function") {
+        module = await WebAssembly.compileStreaming(fetch(entry.url));
+      } else {
+        module = await WebAssembly.compile(await (await fetch(entry.url)).arrayBuffer());
+      }
+      if (!dl_modules.has(entry.key)) {
+        dl_modules.set(entry.key, module);
+      }
+      dl_log.push({ key: entry.key, how: "preload", size: entry.size || 0, us: Math.round((performance.now() - t0) * 1000), runner: "main" });
+    }));
+  };
+
+  /// The page's manifest of libraries (tools/dl-manifest.py's libs.json at url; each library's url is relative to it):
+  /// the ones not marked "preload": false are compiled now, together. Resolves when all are done.
+  const dl_preload_manifest = async (url) => {
+    const manifest = await (await fetch(url)).json();
+    const base = new URL(url, typeof location != "undefined" ? location.href : undefined);
+    await dl_preload(manifest.libs.filter((lib) => lib.preload !== false).map((lib) => (
+      { key: lib.key, url: new URL(lib.url, base).href, size: lib.size })));
+  };
+
+"""
+DL_MAIN_CALLBACK_ANCHOR = "    kernel_crashed: (message) => {\n"
+DL_MAIN_CALLBACK = """    dl_load: (message) => {
+      // (26) A Worker loaded a library: how it got the module ("compile": it compiled one, and this is it).
+      if (message.module && !dl_modules.has(message.key)) {
+        dl_modules.set(message.key, message.module);
+      }
+      dl_log.push({ key: message.key, how: message.how, size: message.size, us: message.us, runner: message.runner });
+      if (dl_log.length > 20000) {
+        dl_log.splice(0, 10000);
+      }
+    },
+
+"""
+DL_MAIN_INIT_OLD = "      sigfix_off: typeof location"
+DL_MAIN_INIT_NEW = """      dl: dl_enabled,
+      dl_modules: dl_enabled ? dl_modules : null,
+      sigfix_off: typeof location"""
+DL_MAIN_ASSIGN_OLD = """      spare.worker.postMessage({ ...options, method: "assign", runner_name: runner_name });
+"""
+DL_MAIN_ASSIGN_NEW = """      spare.worker.postMessage({ ...options, method: "assign", runner_name: runner_name,
+                                 dl_modules: dl_enabled ? dl_modules : null });
+"""
+DL_MAIN_RETURN_ANCHOR = "    runner_names: runner_names,\n"
+DL_MAIN_RETURN = """    /// (26) Dynamic libraries: whether they are on, the content keys of the modules compiled so far, what happened
+    /// (stats(): per key how many Workers compiled it, took it from the page's, and the time), and preload().
+    dl: { enabled: dl_enabled, keys: () => [...dl_modules.keys()], stats: dl_stats, log: dl_log, preload: dl_preload, preload_manifest: dl_preload_manifest },
+"""
+
+# (27) Programs compiled once per page (Firefox).
+SHARE_WORKER_DECL_ANCHOR = "  let dl_shared = new Map();\n"
+SHARE_WORKER_DECL = """  /// (27) Programs compiled once per page, where the engine does not share the code of identical modules by itself
+  /// (Firefox): a program is kept in dl_shared under "program:" and its content key. The page says (init, assign).
+  let share_programs = false;
+"""
+SHARE_INIT_OLD = "      dl_shared = message.dl_modules || new Map();\n"
+SHARE_INIT_NEW = """      dl_shared = message.dl_modules || new Map();
+      share_programs = message.share_programs === true;
+"""
+SHARE_ASSIGN_OLD = "            dl_shared = message.dl_modules;  // (26) what the main thread has compiled by now\n          }\n"
+SHARE_ASSIGN_NEW = SHARE_ASSIGN_OLD + "          share_programs = message.share_programs === true;\n"
+SHARE_LOAD_OLD = """      const user_bytes = new Uint8Array(memory.buffer).slice(bin_start, bin_end);
+      user_executable = WebAssembly.compile(user_bytes);
+"""
+SHARE_LOAD_NEW = """      const user_bytes = new Uint8Array(memory.buffer).slice(bin_start, bin_end);
+      // (27) The same program is compiled once: by content, from the modules the page has, else here and told to the page.
+      const program_key = share_programs ? "program:" + dl_key(Number(bin_start), program_size) : null;
+      const program_have = program_key ? dl_shared.get(program_key) : undefined;
+      if (program_have) {
+        user_executable = Promise.resolve(program_have);
+        port.postMessage({ method: "dl_load", key: program_key, how: "shared", size: program_size, runner: runner_name, us: 0 });
+      } else {
+        user_executable = WebAssembly.compile(user_bytes);
+        if (program_key) {
+          user_executable.then((module) => {
+            if (!dl_shared.has(program_key)) {
+              dl_shared.set(program_key, module);
+            }
+            port.postMessage({ method: "dl_load", key: program_key, how: "compile", size: program_size, runner: runner_name,
+                               us: 0, module: module });
+          }, () => {});
+        }
+      }
+"""
+SHARE_MAIN_DECL_ANCHOR = "  const dl_modules = new Map();\n"
+SHARE_MAIN_DECL = """  /// (27) Programs compiled once per page (linux-worker.js): on in Firefox, where the engine does not share the code
+  /// of identical modules and caps all the code of a process at 2 GiB; ?share=1 turns it on elsewhere, ?share=0 off.
+  const share_search = typeof location != "undefined" ? location.search : (globalThis.rv_query || "");
+  const share_programs = !/[?&]share=0(&|$)/.test(share_search) &&
+    (/[?&]share=1(&|$)/.test(share_search) || (typeof navigator != "undefined" && /Firefox\\//.test(navigator.userAgent || "")));
+"""
+SHARE_MAIN_INIT_OLD = "      dl_modules: dl_enabled ? dl_modules : null,\n      sigfix_off"
+SHARE_MAIN_INIT_NEW = "      dl_modules: dl_enabled || share_programs ? dl_modules : null,\n      share_programs: share_programs,\n      sigfix_off"
+SHARE_MAIN_ASSIGN_OLD = """                                 dl_modules: dl_enabled ? dl_modules : null });
+"""
+SHARE_MAIN_ASSIGN_NEW = """                                 dl_modules: dl_enabled || share_programs ? dl_modules : null, share_programs: share_programs });
+"""
+
+
+# (29) Compiled batches shared by content, and a bound on compiling at the same time.
+JITSHARE_WORKER_DECL = """  /// (29) Modules of batches of translated regions by content key: the page's (the main thread's, at the time the task
+  /// started: init, assign) and every one this Worker compiled (told to the main thread at once). Taking a module
+  /// from here instead of compiling the same bytes again is what a program started twice, or by two processes, saves.
+  let jit_shared = new Map();
+  let jit_share = true;
+  /// The bound on modules compiled at once, all Workers together: [0] how many may, 0 for any number, [1] how many are.
+  let jit_gate = null;
+  /// A content key of len bytes at address: three 32-bit lanes and the length. For one page, not cryptographic (the
+  /// guest makes these bytes from its own code, in the memory it shares with everything else here).
+  const jit_hash = (u8) => {
+    const len = u8.length, words = Math.floor(len / 4);
+    let h1 = 0x9e3779b9 | 0, h2 = 0x85ebca6b | 0, h3 = 0xc2b2ae35 | 0;
+    const mix = (w, i) => {
+      h1 = Math.imul(h1 ^ w, 0x9e3779b1);
+      h1 ^= h1 >>> 15;
+      h2 = Math.imul((h2 + w + i) | 0, 0x85ebca6b);
+      h2 ^= h2 >>> 13;
+      h3 = Math.imul(h3 ^ (w + Math.imul(i, 0x27d4eb2f)), 0x165667b1);
+      h3 ^= h3 >>> 16;
+    };
+    if (u8.byteOffset % 4 == 0) {
+      const u = new Uint32Array(u8.buffer, u8.byteOffset, words);
+      for (let i = 0; i < words; i++) {
+        mix(u[i], i);
+      }
+    } else {
+      const view = new DataView(u8.buffer, u8.byteOffset, len);
+      for (let i = 0; i < words; i++) {
+        mix(view.getUint32(4 * i, true), i);
+      }
+    }
+    if (len % 4) {
+      let t = 0;
+      for (let k = 0; k < len % 4; k++) {
+        t |= u8[4 * words + k] << (8 * k);
+      }
+      mix(t >>> 0, words);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16) ^ len, 0x7feb352d);
+    h2 = Math.imul(h2 ^ (h2 >>> 16) ^ h1, 0x846ca68b);
+    h3 = Math.imul(h3 ^ (h3 >>> 15) ^ h2, 0x2c1b3c6d);
+    return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0") +
+      (h3 >>> 0).toString(16).padStart(8, "0") + "-" + len;
+  };
+  const jit_key = (address, len) => jit_hash(new Uint8Array(memory.buffer, address, len));
+  /// A program's module (the emulator's own, the one every process of the machine runs): compiled once for the page,
+  /// by content, and kept by the page, so that a process started after the last one has ended (a program opened
+  /// again) is given a module whose code the engine has already compiled and optimized. Programs over 8 MB (native
+  /// Qt programs: see 26) are left to the way they have.
+  const jit_program_compile = (bytes) => {
+    if (!jit_share || bytes.length > 8 * 1048576) {
+      return WebAssembly.compile(bytes);
+    }
+    const key = "program:" + jit_hash(bytes);
+    const have = jit_shared.get(key);
+    if (have) {
+      port.postMessage({ method: "jit_module", key: key, how: "hit", size: bytes.length, us: 0, program: true });
+      return Promise.resolve(have);
+    }
+    const t0 = performance.now();
+    return WebAssembly.compile(bytes).then((module) => {
+      if (!jit_shared.has(key)) {
+        jit_shared.set(key, module);
+      }
+      port.postMessage({ method: "jit_module", key: key, how: "compile", size: bytes.length,
+                         us: Math.round((performance.now() - t0) * 1000), module: module, program: true });
+      return module;
+    });
+  };
+  /// Compile bytes to a module, holding a place in the bound on compiling at once (the gate) while the engine does.
+  const jit_compile = (bytes) => {
+    if (!jit_gate || Atomics.load(jit_gate, 0) <= 0) {
+      return new WebAssembly.Module(bytes);
+    }
+    // (A place held by a Worker that was ended while it compiled would be lost for good: waiting more than 2 s,
+    // compile without one.)
+    let held = false;
+    for (let waited = 0; waited < 100; waited++) {
+      const n = Atomics.load(jit_gate, 1);
+      if (n < Atomics.load(jit_gate, 0)) {
+        if (Atomics.compareExchange(jit_gate, 1, n, n + 1) == n) {
+          held = true;
+          break;
+        }
+      } else {
+        Atomics.wait(jit_gate, 1, n, 20);
+      }
+    }
+    try {
+      return new WebAssembly.Module(bytes);
+    } finally {
+      if (held) {
+        Atomics.sub(jit_gate, 1, 1);
+        Atomics.notify(jit_gate, 1, 1);
+      }
+    }
+  };
+
+"""
+JITSHARE_PROGRAM_OLD = "WebAssembly.compile(user_bytes)"
+JITSHARE_PROGRAM_NEW = "jit_program_compile(user_bytes)"
+JITSHARE_WORKER_INIT_OLD = "      sigfix_off = message.sigfix_off === true;\n"
+JITSHARE_WORKER_INIT_NEW = """      sigfix_off = message.sigfix_off === true;
+      jit_shared = message.jit_modules || new Map();
+      jit_share = message.jit_share !== false;
+      jit_gate = message.jit_gate ? new Int32Array(message.jit_gate) : null;
+"""
+JITSHARE_WORKER_ASSIGN_OLD = """          runner_name = message.runner_name;
+"""
+JITSHARE_WORKER_ASSIGN_NEW = """          runner_name = message.runner_name;
+          if (message.jit_modules) {
+            jit_shared = message.jit_modules;  // (29) what the main thread has by now
+          }
+"""
+JITSHARE_COMPILE_OLD = """                // A copy: a module cannot be compiled from shared memory.
+                const bytes = new Uint8Array(memory.buffer).slice(start, start + Number(len));
+                const module = new WebAssembly.Module(bytes);
+"""
+JITSHARE_COMPILE_NEW = """                // (29) A batch of regions is compiled once for the page, by content: the same batch made by another
+                // process (the same program again) is the same bytes, so the module the page has is the one taken.
+                const shared_key = jit_share && Number(slot) <= -16 ? jit_key(start, Number(len)) : null;
+                let module = shared_key ? jit_shared.get(shared_key) : undefined;
+                const how = module ? "hit" : "compile";
+                const t0 = performance.now();
+                if (!module) {
+                  // A copy: a module cannot be compiled from shared memory.
+                  const bytes = new Uint8Array(memory.buffer).slice(start, start + Number(len));
+                  module = jit_compile(bytes);
+                  if (shared_key) {
+                    jit_shared.set(shared_key, module);
+                  }
+                }
+                if (shared_key) {
+                  port.postMessage({ method: "jit_module", key: shared_key, how: how, size: Number(len),
+                                     us: Math.round((performance.now() - t0) * 1000), module: how == "compile" ? module : undefined });
+                }
+"""
+
+JITSHARE_MAIN_DECL = """  /// (29) Compiled batches of translated regions (linux-worker.js, __rv_jit_install), by content key, one
+  /// WebAssembly.Module each for the whole page: every Worker that compiles one tells us (jit_module), and every task
+  /// starts with all of them (init, assign), so a program started again finds its batches compiled, with the
+  /// engine's optimized code in them. What is kept is bounded (?jitkeep=MB, an estimate of the engine's code for
+  /// them: 3.5 times their length; 256 if not said), the batch used least lately going first. ?jitshare=0 turns
+  /// it off. ?jitgate=N lets at most N Workers compile at a time (0, the default: any number).
+  const jit_search = typeof location != "undefined" ? location.search : (globalThis.rv_query || "");
+  const jit_query = (name) => { const m = jit_search.match(new RegExp("[?&]" + name + "=([0-9]+)(&|$)")); return m ? Number(m[1]) : null; };
+  const jit_share = jit_query("jitshare") !== 0;
+  const jit_keep_kib = (jit_query("jitkeep") === null ? 256 : jit_query("jitkeep")) * 1024;
+  const jit_gate = new Int32Array(new SharedArrayBuffer(8));
+  jit_gate[0] = jit_query("jitgate") || 0;
+  const jit_modules = new Map();
+  const jit_kib = new Map();
+  let jit_kept_kib = 0;
+  const jit_log = { program_hits: 0, program_compiles: 0, hits: 0, compiles: 0, hit_us: 0, compile_us: 0, evicted: 0, bytes_hit: 0, bytes_compiled: 0 };
+"""
+JITSHARE_MAIN_CALLBACK = """    jit_module: (message) => {
+      // (29) A Worker installed a batch: how it got the module ("compile": it compiled one, and this is it).
+      const kib = Math.ceil(message.size * 3.5 / 1024);
+      if (message.program) {
+        jit_log[message.how == "compile" ? "program_compiles" : "program_hits"]++;
+      } else if (message.how == "compile") {
+        jit_log.compiles++;
+        jit_log.compile_us += message.us;
+        jit_log.bytes_compiled += message.size;
+      } else {
+        jit_log.hits++;
+        jit_log.hit_us += message.us;
+        jit_log.bytes_hit += message.size;
+      }
+      if (!jit_share) {
+        return;
+      }
+      const have = jit_modules.get(message.key);
+      if (have) {
+        jit_modules.delete(message.key);  // (the newest)
+        jit_modules.set(message.key, have);
+      } else if (message.module) {
+        jit_modules.set(message.key, message.module);
+        jit_kib.set(message.key, kib);
+        jit_kept_kib += kib;
+        while (jit_kept_kib > jit_keep_kib && jit_modules.size > 1) {
+          const oldest = jit_modules.keys().next().value;
+          jit_modules.delete(oldest);
+          jit_kept_kib -= jit_kib.get(oldest) || 0;
+          jit_kib.delete(oldest);
+          jit_log.evicted++;
+        }
+      }
+    },
+
+"""
+JITSHARE_MAIN_INIT_OLD = "      sigfix_off: typeof location"
+JITSHARE_MAIN_INIT_NEW = """      jit_modules: jit_share ? jit_modules : null,
+      jit_share: jit_share,
+      jit_gate: jit_gate.buffer,
+      sigfix_off: typeof location"""
+JITSHARE_MAIN_ASSIGN_OLD = """      spare.worker.postMessage({ ...options, method: "assign", runner_name: runner_name,
+"""
+JITSHARE_MAIN_ASSIGN_NEW = """      spare.worker.postMessage({ ...options, method: "assign", runner_name: runner_name,
+                                 jit_modules: jit_share ? jit_modules : null,
+"""
+JITSHARE_MAIN_RETURN = """    /// (29) Compiled batches: what the page keeps (keys), and what the Workers did (hits, compiles, microseconds).
+    jit: { keys: () => [...jit_modules.keys()], kept_kib: () => jit_kept_kib, stats: () => ({ ...jit_log, kept: jit_modules.size, kept_kib: jit_kept_kib }),
+           gate: jit_gate },
+"""
+# (33) The relay's state for the machine's network applet.
+NETSTAT_MAIN_OLD = "  const lock_notify = (locks, lock, count) => {\n"
+NETSTAT_MAIN_NEW = """  /// (33) The state of the relay, as frames in the receive ring (see the docstring of tools/patch-runtime.py, item 33).
+  if (net_url) {
+    let net_status_state = -1;
+    let net_status_at = 0;
+    const net_status = () => {
+      const state = net_socket ? (net_socket.readyState == WebSocket.OPEN ? 1 : net_socket.readyState == WebSocket.CONNECTING ? 2 : 0) : 0;
+      const now = Date.now();
+      if (state == net_status_state && now - net_status_at < 3000) {
+        return;
+      }
+      net_status_state = state;
+      net_status_at = now;
+      const written = Atomics.load(net.index, 0);
+      if (((written - Atomics.load(net.index, 1)) | 0) >= net.slots) {
+        return;
+      }
+      const frame = new Uint8Array(60);
+      frame.fill(0xff, 0, 6);
+      frame.set([0x02, 0x52, 0x56, 0x00, 0x00, 0x01, 0x88, 0xb5, 0x52, 0x56, 0x4e, 0x45, 0x54, 0x31, state], 6);
+      const slot = (written % net.slots) * net.slot_size;
+      net.bytes[slot] = frame.length & 0xff;
+      net.bytes[slot + 1] = frame.length >> 8;
+      net.bytes.set(frame, slot + 2);
+      Atomics.store(net.index, 0, (written + 1) | 0);
+    };
+    setInterval(net_status, 1000);
+  }
+""" + NETSTAT_MAIN_OLD
+
+
 def main():
     runtime = sys.argv[1]
     worker = runtime + "/linux-worker.js"
@@ -2358,6 +3078,247 @@ def main():
                [(AUDIO_MAIN_DECL_ANCHOR, AUDIO_MAIN_DECL + AUDIO_MAIN_DECL_ANCHOR),
                 (AUDIO_MAIN_INIT_OLD, AUDIO_MAIN_INIT_NEW),
                 (AUDIO_MAIN_RETURN_ANCHOR, AUDIO_MAIN_RETURN + AUDIO_MAIN_RETURN_ANCHOR)])
+
+    patch_file(worker, "dynamic libraries", "(26) Dynamic libraries",
+               [(DL_DECL_ANCHOR, DL_DECL_ANCHOR + DL_DECL), (DL_INIT_OLD, DL_INIT_NEW), (DL_ASSIGN_OLD, DL_ASSIGN_NEW),
+                (ANCHOR, DL_IMPORT + ANCHOR), (DL_CLONE_OLD, DL_CLONE_NEW)])
+    patch_file(runtime + "/linux.js", "dynamic libraries (main)", "(26) Dynamic libraries",
+               [(DL_MAIN_DECL_ANCHOR, DL_MAIN_DECL + DL_MAIN_DECL_ANCHOR),
+                (DL_MAIN_CALLBACK_ANCHOR, DL_MAIN_CALLBACK + DL_MAIN_CALLBACK_ANCHOR),
+                (DL_MAIN_INIT_OLD, DL_MAIN_INIT_NEW), (DL_MAIN_ASSIGN_OLD, DL_MAIN_ASSIGN_NEW),
+                (DL_MAIN_RETURN_ANCHOR, DL_MAIN_RETURN + DL_MAIN_RETURN_ANCHOR)])
+
+    patch_file(worker, "programs compiled once (Firefox)", "(27) Programs compiled once",
+               [(SHARE_WORKER_DECL_ANCHOR, SHARE_WORKER_DECL_ANCHOR + SHARE_WORKER_DECL), (SHARE_INIT_OLD, SHARE_INIT_NEW),
+                (SHARE_ASSIGN_OLD, SHARE_ASSIGN_NEW), (SHARE_LOAD_OLD, SHARE_LOAD_NEW)])
+    patch_file(runtime + "/linux.js", "programs compiled once (Firefox) (main)", "(27) Programs compiled once",
+               [(SHARE_MAIN_DECL_ANCHOR, SHARE_MAIN_DECL_ANCHOR + SHARE_MAIN_DECL), (SHARE_MAIN_INIT_OLD, SHARE_MAIN_INIT_NEW),
+                (SHARE_MAIN_ASSIGN_OLD, SHARE_MAIN_ASSIGN_NEW)])
+
+    # (29) After 23, 26 and 27: it looks for the line that 23 leaves where a program is loaded.
+    patch_file(worker, "the JIT cache (worker)", "__rv_jit_cache",
+               [(JITCACHE_WORKER_DECL_ANCHOR, JITCACHE_WORKER_DECL + JITCACHE_WORKER_DECL_ANCHOR),
+                (JITCACHE_WORKER_INIT_ANCHOR, JITCACHE_WORKER_INIT),
+                (JITCACHE_LOAD_OLD, JITCACHE_LOAD_NEW),
+                (JITCACHE_INSTANTIATE_OLD, JITCACHE_INSTANTIATE_NEW),
+                (ANCHOR, JITCACHE_HOOK + ANCHOR)])
+    patch_file(runtime + "/linux.js", "the JIT cache (main)", "jit_cache",
+               [(JITCACHE_MAIN_SIGNATURE_OLD, JITCACHE_MAIN_SIGNATURE_NEW),
+                (JITCACHE_MAIN_INIT_ANCHOR, JITCACHE_MAIN_INIT)])
+    patch_file(worker, "the JIT cache: batches shared by content (worker)", "jit_shared",
+               [(JITCACHE_WORKER_DECL_ANCHOR, JITSHARE_WORKER_DECL + JITCACHE_WORKER_DECL_ANCHOR),
+                (JITSHARE_WORKER_INIT_OLD, JITSHARE_WORKER_INIT_NEW),
+                (JITSHARE_WORKER_ASSIGN_OLD, JITSHARE_WORKER_ASSIGN_NEW),
+                (JITSHARE_COMPILE_OLD, JITSHARE_COMPILE_NEW),
+                (JITSHARE_PROGRAM_OLD, JITSHARE_PROGRAM_NEW)])
+    patch_file(runtime + "/linux.js", "the JIT cache: batches shared by content (main)", "jit_modules",
+               [(DL_MAIN_DECL_ANCHOR, JITSHARE_MAIN_DECL + DL_MAIN_DECL_ANCHOR),
+                (DL_MAIN_CALLBACK_ANCHOR, JITSHARE_MAIN_CALLBACK + DL_MAIN_CALLBACK_ANCHOR),
+                (JITSHARE_MAIN_INIT_OLD, JITSHARE_MAIN_INIT_NEW),
+                (JITSHARE_MAIN_ASSIGN_OLD, JITSHARE_MAIN_ASSIGN_NEW),
+                (DL_MAIN_RETURN_ANCHOR, JITSHARE_MAIN_RETURN + DL_MAIN_RETURN_ANCHOR)])
+
+
+    patch_file(runtime + "/linux.js", "dynamic libraries on by default (main)", "(28) Whether the native programs",
+               [(DLDEF_GLOBAL_ANCHOR, DLDEF_GLOBAL + DLDEF_GLOBAL_ANCHOR), (DLDEF_ENABLED_OLD, DLDEF_ENABLED_NEW),
+                (DLDEF_WARM_ANCHOR, DLDEF_WARM + DLDEF_WARM_ANCHOR), (DLDEF_RETURN_OLD, DLDEF_RETURN_NEW)])
+
+    # (28, default ON): a linux.js patched by 28 while the default was off (2026-10-13 .. 14) gets it flipped; a fresh one already has true.
+    # (32) The network relay's name in what the page logs is "rvRelay" (owner, 2026-10-15). A linux.js patched with the old words gets them
+    # replaced here (every occurrence); a fresh one already has the new text from item "network (main)" above.
+    with open(runtime + "/linux.js") as f:
+        relay_text = f.read()
+    if "[Main]: network relay" in relay_text or "[Main]: no network relay" in relay_text:
+        for old, new in [("[Main]: network relay connected again: ", "[Main]: rvRelay connected again: "),
+                         ("[Main]: network relay connected: ", "[Main]: rvRelay connected: "),
+                         ("[Main]: no network relay at ", "[Main]: no rvRelay at "),
+                         ("[Main]: network relay lost; ", "[Main]: rvRelay lost; ")]:
+            relay_text = relay_text.replace(old, new)
+        with open(runtime + "/linux.js", "w") as f:
+            f.write(relay_text)
+        print("rvRelay name in the page's log lines (main): patched")
+    else:
+        print("rvRelay name in the page's log lines (main): already patched")
+
+    patch_file(runtime + "/linux.js", "native programs default on (main)", "const DEFAULT_ON = true;",
+               [("  const DEFAULT_ON = false;\n", "  const DEFAULT_ON = true;\n")])
+
+    patch_file(runtime + "/linux.js", "one worker script for the session (main)", "(30) Every task's Worker",
+               [(WBLOB_ANCHOR, WBLOB + WBLOB_ANCHOR), (WBLOB_ERR_OLD, WBLOB_ERR_NEW)])
+
+    # (A fresh runtime already has the gate dropped, by the text of item 28; a linux.js patched while it was there gets it dropped here.)
+    with open(runtime + "/linux.js") as f:
+        main_text = f.read()
+    patch_file(runtime + "/linux.js", "Firefox code budget (main)", "(31) Firefox",
+               [(FFCAP_MAIN_SHARE_OLD, FFCAP_MAIN_SHARE_NEW), (FFCAP_MAIN_BUDGET_OLD, FFCAP_MAIN_BUDGET_NEW)] +
+               ([(FFCAP_GATE_OLD, FFCAP_GATE_NEW)] if FFCAP_GATE_OLD in main_text else []))
+    patch_file(worker, "Firefox code budget (worker)", "(31) Firefox",
+               [(FFCAP_WORKER_DECL_ANCHOR, FFCAP_WORKER_DECL + FFCAP_WORKER_DECL_ANCHOR), (FFCAP_WORKER_KIB_OLD, FFCAP_WORKER_KIB_NEW),
+                (FFCAP_DL_COMPILE_OLD, FFCAP_DL_COMPILE_NEW), (FFCAP_PROGRAM_OLD, FFCAP_PROGRAM_NEW)])
+
+    patch_file(runtime + "/linux.js", "the relay's state for the machine (main)", "net_status_state",
+               [(NETSTAT_MAIN_OLD, NETSTAT_MAIN_NEW)])
+
+
+
+# (28) Dynamic libraries on by default in a page (Firefox too, since 31), ?dl=0 off, ?dl=1 on anywhere; os.dl.warm for the page's background
+# compile. rv_dl_wanted below is the one place that decides (dev.html asks it too); it had a Firefox gate until item 31.
+DLDEF_GLOBAL_ANCHOR = "const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, console_write, net_url"
+DLDEF_GLOBAL = """// (28) Whether the native programs on shared libraries (?dl=1, docs/wasm-dynamic-linking.md) are on: ?dl=1 yes, ?dl=0 no, and
+// without either, yes in a page (Firefox too since item 31, which keeps its 2044 MiB code cap: the JIT budget and no kept batches).
+// Not in a page (node-machine: no document) it is off unless asked. dev.html asks this same function for the kernel's command line and
+// the nqs disk, so there is one place for the rule.
+const rv_dl_wanted = (query, user_agent) => {
+  if (/[?&]dl=1(&|$)/.test(query || "")) {
+    return true;
+  }
+  if (/[?&]dl=0(&|$)/.test(query || "")) {
+    return false;
+  }
+  // Default ON (the third try, branch ndcomeback): twice rolled back on the live site, first for Worker script fetches (item 30 fixed that),
+  // then for apps started from Plasma's launcher that showed a busy cursor and quit (the first launch fetches the app's libraries for
+  // minutes; see the manual test sheets "First launch"). Set DEFAULT_ON to false to make the native programs ?dl=1 only again.
+  // True turns the native programs on by default (Firefox too since item 31).
+  const DEFAULT_ON = true;
+  return DEFAULT_ON && typeof document != "undefined";
+};
+"""
+DLDEF_ENABLED_OLD = 'const dl_enabled = /[?&]dl=1(&|$)/.test(typeof location != "undefined" ? location.search : (globalThis.rv_query || ""));\n'
+DLDEF_ENABLED_NEW = 'const dl_enabled = rv_dl_wanted(typeof location != "undefined" ? location.search : (globalThis.rv_query || ""), typeof navigator != "undefined" ? navigator.userAgent : "");\n'
+DLDEF_WARM_ANCHOR = "  /// The page's manifest of libraries (tools/dl-manifest.py's libs.json at url; each library's url is relative to it):\n"
+DLDEF_WARM = """  /// (28) Fetch and compile a library as it streams in, then let the Module go: only the browser's HTTP cache and its code cache keep
+  /// it (the next launch that needs it, or the next visit, finds it compiled). For the page's background job, for libraries it does
+  /// not keep a Module of (a Module in the page is code space for good). A key that is loaded already is not fetched again.
+  const dl_warm = async (entry) => {
+    if (dl_modules.has(entry.key)) {
+      return;
+    }
+    if (typeof WebAssembly.compileStreaming == "function") {
+      await WebAssembly.compileStreaming(fetch(entry.url));
+    } else {
+      await (await fetch(entry.url)).arrayBuffer();
+    }
+  };
+
+"""
+DLDEF_RETURN_OLD = "preload: dl_preload, preload_manifest: dl_preload_manifest }"
+DLDEF_RETURN_NEW = "preload: dl_preload, preload_manifest: dl_preload_manifest, warm: dl_warm }"
+
+
+# (30) Every task's Worker from one copy of linux-worker.js, fetched once when the machine starts (a Blob URL), not from the server
+# each time. The server sends the script with "no-cache", so every new task (a spare runner, every thread) asked the server again; a
+# Worker whose script cannot be fetched (the network gone for a moment) fails with a bare "error" Event and its task never starts,
+# and the kernel waits for it for good: on the live site (2026-10-13) opening an app took nine tasks down that way and the whole
+# desktop with them. One copy also keeps a deploy during the session from mixing two versions of the runtime. Only in a page:
+# Node's Workers (tools/node-machine.js) load files.
+WBLOB_ANCHOR = '  const arch_bits = variant.startsWith("wasm32_") ? 32 : 64;\n'
+WBLOB = """  // (30) Every task's Worker from one copy of the worker script, fetched now (see tools/patch-runtime.py).
+  if (typeof document != "undefined" && typeof Blob == "function" && typeof URL != "undefined" && URL.createObjectURL) {
+    try {
+      const response = await fetch(worker_url);
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      worker_url = URL.createObjectURL(new Blob([await response.text()], { type: "text/javascript" }));
+    } catch (error) {
+      log("[Main]: the worker script will be fetched for every task (" + error + ")");
+    }
+  }
+"""
+WBLOB_ERR_OLD = """    worker.onerror = (error) => {
+      throw error;
+    };
+
+    worker.onmessage = (message_event) => {
+      const data = message_event.data;
+      message_callbacks[data.method](data, worker);
+    };
+"""
+WBLOB_ERR_NEW = """    worker.onerror = (error) => {
+      // (30) A bare Event (no message) is a Worker that could not start: its script was not loaded.
+      if (!(error && error.message)) {
+        log("[Main]: a task's Worker (" + name + ") could not start: its script was not loaded");
+      }
+      throw error;
+    };
+
+    worker.onmessage = (message_event) => {
+      const data = message_event.data;
+      message_callbacks[data.method](data, worker);
+    };
+"""
+
+# (31) Firefox's code budget. SpiderMonkey keeps ONE reservation of executable memory per process, 2044 MiB (js/src/jit/
+# ProcessExecutableMemory.h, MaxCodeBytesPerProcess), for all the wasm code of every Worker of the page together (V8 shares the code
+# of identical modules and has 4 GiB), in blocks of 64 KiB, and a wasm module takes at least two of them (its code and its stubs):
+# measured with the regions the JIT makes (tests/wasmdyn/native-firefox.js, probe pages in docs/firefox.md), a batch of 12-24 KB
+# of wasm costs 128 KiB of the cap, 30-55 KB 256 KiB, 60-76 KB 268 KiB, 90-110 KB 332 KiB. Code is freed when the last reference to
+# its Module or Instance has been garbage collected. What kept the cap full (native programs or not) was the JIT: every Worker kept
+# every batch Module it ever compiled in its jit_shared map (29), for good, so rv's evictions (16) freed nothing, and the budget (1536
+# MiB, counted as 3.5 times the wasm, written for V8) was larger than what the cap has left after plasmashell and the libraries.
+# In Firefox, then: batches are not shared by content (no Module is kept beyond its instance: ?jitshare=1 turns it back on), the
+# budget is 256 MiB (?jitcode=MB), and a batch is counted as the cap takes it.
+FFCAP_MAIN_SHARE_OLD = '  const jit_share = jit_query("jitshare") !== 0;\n'
+FFCAP_MAIN_SHARE_NEW = """  /// (31) Firefox (see tools/patch-runtime.py 31): batches of translated code are not shared by content or kept, unless ?jitshare=1.
+  const firefox_code_cap = typeof navigator != "undefined" && /Firefox\\//.test(navigator.userAgent || "");
+  const jit_share = jit_query("jitshare") === null ? !firefox_code_cap : jit_query("jitshare") !== 0;
+"""
+FFCAP_MAIN_BUDGET_OLD = "    jit_code[0] = (asked ? Number(asked[1]) : 1536) * 1024;\n"
+FFCAP_MAIN_BUDGET_NEW = FFCAP_MAIN_BUDGET_OLD + """    // (31) Firefox: 192 MiB of translated code (counted as the engine's cap takes it, linux-worker.js), not V8's 1536.
+    if (!asked && typeof navigator != "undefined" && /Firefox\\//.test(navigator.userAgent || "")) {
+      jit_code[0] = 192 * 1024;
+    }
+"""
+FFCAP_WORKER_DECL_ANCHOR = "  const jit_account = (slot, kib) => {\n"
+FFCAP_WORKER_DECL = """  /// (31) Firefox: what a module of len bytes (a batch of regions) takes of the engine's 2044 MiB of code, in KiB: measured, see
+  /// tools/patch-runtime.py 31 (blocks of 64 KiB, two at least).
+  const firefox_code_cap = typeof navigator != "undefined" && /Firefox\\//.test(navigator.userAgent || "");
+  const firefox_module_kib = (len) => (len < 25000 ? 128 : len < 58000 ? 256 : len < 80000 ? 272 : 64 + Math.ceil(len * 3 / 1024));
+  /// (31) Firefox: a module that does not compile for want of code space ("out of memory") may find it a moment later: the
+  /// other Workers of a program starting are compiling too, and code that was let go is only freed when it has been collected.
+  /// So it is tried again, for up to about 6 seconds, before the program (which dies when a library will not load) is told.
+  const firefox_retry_wait = new Int32Array(new SharedArrayBuffer(4));
+  const firefox_compile_retry = (compile) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return compile();
+      } catch (error) {
+        if (!firefox_code_cap || attempt >= 24 || !/out of memory/i.test(String(error))) {
+          throw error;
+        }
+        if (attempt == 0 || attempt == 12) {
+          log("[Firefox]: no code space for a module of the engine's 2044 MiB (" + error + "): trying again");
+        }
+        Atomics.wait(firefox_retry_wait, 0, 0, 250);
+      }
+    }
+  };
+  const firefox_compile_retry_async = async (compile) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await compile();
+      } catch (error) {
+        if (!firefox_code_cap || attempt >= 24 || !/out of memory/i.test(String(error))) {
+          throw error;
+        }
+        if (attempt == 0 || attempt == 12) {
+          log("[Firefox]: no code space for a program (" + error + "): trying again");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  };
+"""
+FFCAP_WORKER_KIB_OLD = "                const kib = Math.ceil((Number(len) * 7 / 2 + 2048) / 16384) * 16;\n"
+FFCAP_WORKER_KIB_NEW = "                const kib = firefox_code_cap ? firefox_module_kib(Number(len)) : Math.ceil((Number(len) * 7 / 2 + 2048) / 16384) * 16;\n"
+FFCAP_DL_COMPILE_OLD = "                      module = new WebAssembly.Module(new Uint8Array(memory.buffer).slice(bytes, bytes + len));\n"
+FFCAP_DL_COMPILE_NEW = "                      module = firefox_compile_retry(() => new WebAssembly.Module(new Uint8Array(memory.buffer).slice(bytes, bytes + len)));\n"
+FFCAP_PROGRAM_OLD = "        user_executable = jit_program_compile(user_bytes);\n"
+FFCAP_PROGRAM_NEW = "        user_executable = firefox_compile_retry_async(() => jit_program_compile(user_bytes));\n"
+# The gate of item 28 in a linux.js that has it already.
+FFCAP_GATE_OLD = '  return DEFAULT_ON && typeof document != "undefined" && !/Firefox\\//.test(user_agent || "");\n'
+FFCAP_GATE_NEW = '  // Firefox is no longer left out: its code cap is kept by the JIT budget and the sharing rules of item 31.\n  return DEFAULT_ON && typeof document != "undefined";\n'
+
 
 if __name__ == "__main__":
     main()

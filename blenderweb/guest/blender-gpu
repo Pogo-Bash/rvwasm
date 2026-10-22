@@ -1,9 +1,0 @@
-#!/bin/sh
-# Blender on the host's GPU, as a window of this desktop: blender-gpu [FILE.blend]
-# (boot.js next to this says how; FILE has to be in the home directory). It needs the page's window server:
-# started from outside a desktop, it asks `desktop wayland` to run it there.
-HERE=/run/wlserver/blenderweb
-if [ -z "$WAYLAND_DISPLAY" ]; then
-	exec desktop wayland "$HERE/blender-gpu" "$@"
-fi
-HOSTNODE_HOME=$HERE exec /run/hostnode/hostnode "$@"

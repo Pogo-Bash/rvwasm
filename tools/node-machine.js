@@ -11,8 +11,9 @@
 //   --runtime DIR      linux.js and linux-worker.js (as tools/patch-runtime.py leaves them)
 //   --kernel FILE      vmlinux-wasm64_nommu.wasm
 //   --initramfs FILE   (several: they are put one after the other, a later one's files win)
-//   --disk NAME        the disk whose pieces the dev server has in disk/NAME/ (as dev.html?disk=NAME);
-//                      what the machine writes to it is kept in memory and forgotten
+//   --disk NAME[,NAME...] the disk whose pieces the dev server has in disk/NAME/ (as dev.html?disk=NAME);
+//                      what the machine writes to it is kept in memory and forgotten. More than one: the second, third...
+//                      disk of the machine (wdb: the home disk, home; wdc: the nqs disk, nqs)
 //   --net              connect to the network relay (tools/net-relay.py)
 //   --relay URL        where it is (default: the server's host, port 8001; Docker's: http://localhost:8081)
 //   --server URL       the dev server (default http://localhost:8000)
@@ -25,7 +26,14 @@
 //   --append WORDS     more for the kernel's command line (e.g. wasm_pool=1; wasm_cache_max=0: no cache cap)
 //   --query STRING     what the runtime takes from a page's address (e.g. "?switches=main")
 //   --busy-main MS     keep the main thread busy MS ms out of every 16, as a page that draws is (once booted)
+//   --dl-preload FILE  [{"key": ..., "path": ...}, ...]: libraries compiled before the command (os.dl.preload; needs --query ?dl=1)
+//   --dl-manifest URL  the page's way: libs.json (tools/dl-manifest.py) fetched from URL, its libraries compiled with compileStreaming
 //   --verbose          everything the console and the runtime say, as it comes, on standard error
+//   --jitcache SPEC    a store of translated code (tools/www/jitcache.js, rv/jitcache.c) for this machine: "mem"
+//                      (in memory only), or a FILE it is read from if it is there and saved to at the end;
+//                      ":MB" after either gives it that much room (128 if not said). Without it, none.
+//   --jitcache-program FILE|SHA256   the one program that may use the store: the emulator's executable, or the
+//                      SHA-256 of its bytes (tools/patch-runtime.py, 29). Needed with --jitcache.
 //
 // Prints what the command printed, exits with its status. COMMAND is typed
 // into the machine's shell, as tools/bench-browser.js sh does.
@@ -34,12 +42,24 @@
 // current Chrome's), so nothing measured here says how fast something is
 // there, and what depends on the browser (the canvas, OPFS) is not here.
 // Node 22 has the 64-bit memory of WebAssembly behind a flag and with the
-// older form of its JavaScript interface, which is translated below.
+// older form of its JavaScript interface, which is translated below. Node 26 (V8 14: JSPI, and the memory64
+// of the standard: no flag, `address: "i64"`, BigInt sizes) runs it without the translation, and without the
+// flag (Node 26 refuses it); that is the Node of the real GPU executor (gpu/tools/rvgpu-nm.js, tools/gpu-nm.sh).
 "use strict";
 
 const { Worker: NodeWorker } = require("worker_threads");
 const fs = require("fs");
 const path = require("path");
+
+// (The standard's form of the 64-bit memory: Node 26 and newer. Older Nodes get the translation below.)
+const NATIVE_MEMORY64 = (() => {
+  try {
+    new WebAssembly.Memory({ address: "i64", initial: 1n, maximum: 1n });
+    return true;
+  } catch (error) {
+    return false;
+  }
+})();
 
 const args = process.argv.slice(2);
 const options = { initramfs: [], timeout: 60000, server: "http://localhost:8000", keys: "[]" };
@@ -68,10 +88,10 @@ const taskShim = `
 const { parentPort, workerData } = require("worker_threads");
 globalThis.self = globalThis;
 self.postMessage = (m) => parentPort.postMessage(m);
-// Node's memory for WebAssembly counts in numbers where the runtime counts in BigInts.
-const patch = (memory) => {
+// Node's memory for WebAssembly counts in numbers where the runtime counts in BigInts (Node 22; not Node 26).
+const patch = workerData.native ? () => {} : (memory) => {
   const grow = memory.grow;
-  memory.grow = function (n) { return BigInt(grow.call(this, Number(n))); };
+  memory.grow = function (n) { try { return BigInt(grow.call(this, Number(n))); } catch (e) { if (!(e instanceof TypeError)) throw e; return BigInt(grow.call(this, BigInt(n))); } };
 };
 parentPort.on("message", (d) => { if (d && d.memory) patch(d.memory); self.onmessage({ data: d }); });
 // What a browser tells a worker by events, Node tells its process: passed on in the browser's form.
@@ -127,7 +147,7 @@ class WebWorker {
     const disk = String(url).includes("disk-worker");
     this.w = new NodeWorker(disk ? diskShim : taskShim, {
       eval: true,
-      workerData: { source: disk ? diskSource : workerSource, server: options.server },
+      workerData: { source: disk ? diskSource : workerSource, server: options.server, native: NATIVE_MEMORY64 },
       name: workerOptions && workerOptions.name,
       // NM_WORKER_HEAP_MB: another limit for every task's JavaScript heap (maxOldGenerationSizeMb). Tried against
       // the ERR_WORKER_OUT_OF_MEMORY seen in runs with plasmashell's panel (2026-10-10); 4096 and 8192 did not
@@ -158,9 +178,17 @@ class WebWorker {
 }
 globalThis.Worker = WebWorker;
 const RealMemory = WebAssembly.Memory;
-WebAssembly.Memory = function (d) {
-  return new RealMemory({ initial: Number(d.initial), maximum: Number(d.maximum), shared: d.shared, index: d.address });
-};
+if (!NATIVE_MEMORY64) {
+  WebAssembly.Memory = function (d) {
+    const a = d.address || d.index;
+    try {
+      return new RealMemory({ initial: Number(d.initial), maximum: Number(d.maximum), shared: d.shared, index: a });
+    } catch (e) {
+      // Node 26 (V8 14): memory64 takes address: "i64" with BigInt limits
+      return new RealMemory({ initial: BigInt(d.initial), maximum: BigInt(d.maximum), shared: d.shared, address: a });
+    }
+  };
+}
 globalThis.confirm = () => false;
 // The relay lets in pages of the dev server; this stands in for one.
 const RealWebSocket = globalThis.WebSocket;
@@ -211,9 +239,47 @@ const linux = (0, eval)(fs.readFileSync(path.join(options.runtime, "linux.js"), 
     netUrl = relay.replace(/^http/, "ws") + "/?ip=" + address;
     cmdline += " ip=10.0.5." + address;
   }
-  const disks = !options.disk ? null : [{
-    worker: "disk-worker.js", url: options.server + "/disk/" + options.disk + "/", name: options.disk, reset: false,
-  }];
+  const disks = !options.disk ? null : String(options.disk).split(",").map((name) => ({
+    worker: "disk-worker.js", url: options.server + "/disk/" + name + "/", name, reset: false,
+  }));
+  let jitCache = null, jitFile = null, jitCacheOption = null;
+  if (options.jitcache) {
+    const jc = require(path.join(__dirname, "www", "jitcache.js"));
+    const [spec, mb] = options.jitcache.split(":");
+    const megabytes = Number(mb) || 128;
+    jitFile = spec == "mem" ? null : spec;
+    if (jitFile && fs.existsSync(jitFile)) {
+      jitCache = jc.restore(fs.readFileSync(jitFile), megabytes);
+      if (jitCache) {
+        const next = jc.next_visit(jitCache);
+        jitCache = next.buffer;
+        if (next.compacted) {
+          process.stderr.write("jitcache: " + next.compacted + " records used least lately forgotten\n");
+        }
+      } else {
+        process.stderr.write("jitcache: " + jitFile + " is not a store (or too big): starting empty\n");
+      }
+    }
+    jitCache = jitCache || jc.create(megabytes);
+    const program = options["jitcache-program"] || "";
+    const programHash = /^[0-9a-f]{64}$/.test(program) ? program
+      : program && fs.existsSync(program) ? require("crypto").createHash("sha256").update(fs.readFileSync(program)).digest("hex")
+      : null;
+    if (!programHash) {
+      process.stderr.write("jitcache: no --jitcache-program: the store is there but no program may use it\n");
+    }
+    jitCacheOption = { buffer: jitCache, program: programHash };
+    const i = jc.info(jitCache);
+    process.stderr.write("jitcache: " + i.records + " records, " + (i.used >> 20) + " MiB\n");
+    process.on("exit", () => {
+      const i = jc.info(jitCache);
+      process.stderr.write("jitcache: " + i.records + " records, " + (i.used >> 20) + " MiB at the end, " + i.found +
+                           " found\n");
+      if (jitFile) {
+        fs.writeFileSync(jitFile, jc.snapshot(jitCache));
+      }
+    });
+  }
   const began = Date.now();
   const booted = new Promise((resolve) => {
     ready = resolve;
@@ -225,7 +291,7 @@ const linux = (0, eval)(fs.readFileSync(path.join(options.runtime, "linux.js"), 
   globalThis.rv_query = options.query || "";
   const os = await linux("linux-worker.js", "wasm64_nommu", vmlinux, cmdline,
                          initrd.buffer.slice(initrd.byteOffset, initrd.byteOffset + initrd.byteLength),
-                         log, console_write, netUrl, null, disks);
+                         log, console_write, netUrl, null, disks, jitCacheOption);
   await booted;
   process.stderr.write("booted in " + (Date.now() - began) + " ms\n");
   if (options["busy-main"]) {
@@ -235,6 +301,13 @@ const linux = (0, eval)(fs.readFileSync(path.join(options.runtime, "linux.js"), 
       while (performance.now() < until) {
       }
     }, 16);
+  }
+  if (options["dl-manifest"]) {
+    // (the page's way: a libs.json by url, its libraries compiled as they stream in)
+    await os.dl.preload_manifest(options["dl-manifest"]);
+  }
+  if (options["dl-preload"]) {
+    await os.dl.preload(JSON.parse(fs.readFileSync(options["dl-preload"], "utf8")).map((e) => ({ key: e.key, bytes: fs.readFileSync(e.path), size: fs.statSync(e.path).size })));
   }
   const marker = "__rc" + Math.random().toString(36).slice(2) + "_";
   const start = output.length;

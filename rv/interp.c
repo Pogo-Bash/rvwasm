@@ -356,6 +356,8 @@ static void interp(struct rv_cpu *cpu, int one_block)
 			}
 			x[rd] = next;
 			next = (a + (uint64_t)imm_i) & ~1ULL;
+			if (cpu->jit)
+				rv_jit_note_jalr(cpu, pc, next);	/* (for the regions it will be in) */
 			break;
 
 		case 0x63: { /* BRANCH */

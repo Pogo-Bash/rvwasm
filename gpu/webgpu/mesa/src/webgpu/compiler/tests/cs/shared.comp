@@ -1,0 +1,60 @@
+#version 450
+// Workgroup memory, barriers, shared and buffer atomics (signed min/max, compare-exchange), a barrier under
+// conditions WGSL cannot prove uniform (a read_write buffer value and a loop bound from it).
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 1) buffer O { uint o[]; };
+layout(set = 0, binding = 2) buffer I { uint inp[]; };
+layout(set = 0, binding = 3) buffer A { int amin; int amax; uint aadd; uint axor; uint acas; uint rest[]; };
+shared uint sdata[64];
+shared int smin;
+shared int smax;
+shared uint scas;
+shared uint swon;
+void main()
+{
+	uint l = gl_LocalInvocationID.x, g = gl_GlobalInvocationID.x, wg = gl_WorkGroupID.x;
+	sdata[l] = inp[g];
+	if (l == 0u) {
+		smin = 0x7fffffff;
+		smax = int(0x80000000u);
+		scas = 0u;
+		swon = 0u;
+	}
+	barrier();
+	for (uint s = 32u; s > 0u; s >>= 1) {
+		if (l < s)
+			sdata[l] += sdata[l + s];
+		barrier();
+	}
+	atomicMin(smin, int(inp[g]));
+	atomicMax(smax, int(inp[g]));
+	atomicAdd(swon, atomicCompSwap(scas, 0u, 7u) == 0u ? 1u : 0u);
+	barrier();
+	if (l == 0u) {
+		o[wg * 4u + 0u] = sdata[0];
+		o[wg * 4u + 1u] = uint(smin);
+		o[wg * 4u + 2u] = uint(smax);
+		o[wg * 4u + 3u] = scas * 100u + swon;
+	}
+	atomicMin(amin, int(inp[g]));
+	atomicMax(amax, int(inp[g]));
+	atomicAdd(aadd, inp[g]);
+	atomicXor(axor, inp[g]);
+	uint prev = atomicCompSwap(rest[64u + wg], 0u, 5u);
+	atomicAdd(rest[wg], prev == 0u ? 1u : 0u);
+	/* uniform at run time, not provably so */
+	if (inp[1] == 1u) {
+		sdata[l] = l * 3u;
+		barrier();
+		o[64u + g] = sdata[63u - l];
+	}
+	uint n = inp[2] + 2u;
+	uint acc = 0u;
+	for (uint k = 0u; k < n; k++) {
+		barrier();
+		sdata[l] = k + l;
+		barrier();
+		acc += sdata[(l + 1u) & 63u];
+	}
+	o[512u + g] = acc;
+}

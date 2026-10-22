@@ -1,0 +1,108 @@
+diff --git a/src/gallium/drivers/zink/zink_public.h b/src/gallium/drivers/zink/zink_public.h
+index 2357696..a450ad4 100644
+--- a/src/gallium/drivers/zink/zink_public.h
++++ b/src/gallium/drivers/zink/zink_public.h
+@@ -31,6 +31,12 @@ struct pipe_screen_config;
+ struct pipe_screen *
+ zink_create_screen(struct sw_winsys *winsys, const struct pipe_screen_config *config);
+ 
++/* An embedder that has its own Vulkan implementation linked in (no loader library to open: vfront on wgvk in
++ * the page) gives zink that implementation's vkGetInstanceProcAddr here, before creating a screen. NULL goes
++ * back to loading the system's loader. The argument is a PFN_vkGetInstanceProcAddr. */
++void
++zink_set_vk_get_instance_proc_addr(void *get_instance_proc_addr);
++
+ struct pipe_screen *
+ zink_drm_create_screen(int fd, const struct pipe_screen_config *config);
+ struct pipe_screen *
+diff --git a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
+index bc0cc58..2c610dd 100644
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -80,6 +80,9 @@ bool zink_tracing = false;
+ #endif
+ #endif
+ 
++/* set by zink_set_vk_get_instance_proc_addr() */
++static PFN_vkGetInstanceProcAddr zink_external_get_instance_proc_addr;
++
+ #ifdef __APPLE__
+ #include "MoltenVK/mvk_vulkan.h"
+ // Source of MVK_VERSION
+@@ -3308,17 +3311,24 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
+ 
+    u_trace_state_init();
+ 
+-   screen->loader_lib = util_dl_open(VK_LIBNAME);
+-   if (!screen->loader_lib) {
+-      if (!screen->driver_name_is_inferred)
+-         mesa_loge("ZINK: failed to load "VK_LIBNAME);
+-      goto fail;
+-   }
++   if (zink_external_get_instance_proc_addr) {
++      /* the embedder's Vulkan: vkGetDeviceProcAddr comes from the instance once there is one */
++      screen->vk_GetInstanceProcAddr = zink_external_get_instance_proc_addr;
++      screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)
++         zink_external_get_instance_proc_addr(NULL, "vkGetDeviceProcAddr");
++   } else {
++      screen->loader_lib = util_dl_open(VK_LIBNAME);
++      if (!screen->loader_lib) {
++         if (!screen->driver_name_is_inferred)
++            mesa_loge("ZINK: failed to load "VK_LIBNAME);
++         goto fail;
++      }
+ 
+-   screen->vk_GetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetInstanceProcAddr");
+-   screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetDeviceProcAddr");
++      screen->vk_GetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetInstanceProcAddr");
++      screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetDeviceProcAddr");
++   }
+    if (!screen->vk_GetInstanceProcAddr ||
+-       !screen->vk_GetDeviceProcAddr) {
++       (!screen->vk_GetDeviceProcAddr && !zink_external_get_instance_proc_addr)) {
+       if (!screen->driver_name_is_inferred)
+          mesa_loge("ZINK: failed to get proc address");
+       goto fail;
+@@ -3346,6 +3356,15 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
+    screen->instance_info = &instance_info;
+    simple_mtx_unlock(&instance_lock);
+ 
++   if (!screen->vk_GetDeviceProcAddr) {
++      screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)
++         screen->vk_GetInstanceProcAddr(screen->instance, "vkGetDeviceProcAddr");
++      if (!screen->vk_GetDeviceProcAddr) {
++         mesa_loge("ZINK: no vkGetDeviceProcAddr from the embedder's Vulkan");
++         goto fail;
++      }
++   }
++
+    if (zink_debug & ZINK_DEBUG_VALIDATION) {
+       if (!screen->instance_info->have_layer_KHRONOS_validation &&
+           !screen->instance_info->have_layer_LUNARG_standard_validation) {
+@@ -3741,6 +3760,13 @@ fail:
+    return NULL;
+ }
+ 
++
++void
++zink_set_vk_get_instance_proc_addr(void *get_instance_proc_addr)
++{
++   zink_external_get_instance_proc_addr = (PFN_vkGetInstanceProcAddr)get_instance_proc_addr;
++}
++
+ struct pipe_screen *
+ zink_create_screen(struct sw_winsys *winsys, const struct pipe_screen_config *config)
+ {
+diff --git a/src/gallium/meson.build b/src/gallium/meson.build
+index 68f19d0..11a6218 100644
+--- a/src/gallium/meson.build
++++ b/src/gallium/meson.build
+@@ -272,3 +272,8 @@ if with_teflon
+   subdir('frontends/teflon')
+   subdir('targets/teflon')
+ endif
++
++# vfront (rvwasm's virgl decoder on zink) when its directory is linked in at frontends/vfront
++if with_gallium_zink and fs.exists('frontends/vfront/meson.build')
++  subdir('frontends/vfront')
++endif

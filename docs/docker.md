@@ -32,14 +32,11 @@ are published on 127.0.0.1 only. The relay takes WebSocket connections only from
 |---|---|---|
 | `RV_DIST` | `./dist` | the dist (`docker/release.sh`, `tools/pack-www.sh`) |
 | `RV_DISK` | `release` | the disk a page without `?disk=` gets (`RV_DISK=` for none) |
+| `RV_GPU_EXEC` | `vrend` | the GPU executor a page uses by default (`rv-site.json` `gpu_exec`: `vrend`, `webgpu`, `auto`); docs/deploy.md "GPU executor switch" |
 | `RV_HTTP_PORT` | 8080 | the page |
 | `RV_NET_PORT` | 8081 | the relay |
 | `RV_RELEASE_URL` | | a release archive to fetch when `RV_DIST` has none (`docker/release.sh tarball`) |
 | `RV_ORIGINS` | | more origins the relay accepts, separated by spaces |
-| `RV_BLENDER_PORT` | 8040 | Puter's Blender, when its profile is on |
-
-Puter's Blender (`blenderweb/serve.py`) is off unless its profile is named:
-`docker compose --profile blender up -d`. The first start downloads the release into the `blender` volume.
 
 Stop: `docker compose down`. The services restart with Docker unless stopped.
 

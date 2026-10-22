@@ -7,7 +7,7 @@
 #
 # Dolphin has it in a file's context menu as "Save to This Computer". The download starts at once if the
 # person clicked on the screen in the last few seconds (the browser lets a page start one then); otherwise the
-# page shows the file in the screen's top right corner, to be clicked. hostopen/README.md has the details.
+# page asks in a box at the top of the page ("Save NAME to this computer?": Save / Cancel). hostopen/README.md has the details.
 #
 # Exits 0 when every file was saved or shown, 1 if one could not be read or was refused, 3 if no page
 # answered.

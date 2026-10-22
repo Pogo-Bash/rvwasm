@@ -14,6 +14,8 @@
 # growth had freed (an abort in free() later, in the browser).
 #
 # Usage: jit-stress.sh RV [ROOT]     (ROOT: a Debian riscv64 root with g++, gcc and python3)
+# RV_JIT_CACHE=FILE: with a store of translations (rv/jitcache.c), shared by all the programs run; twice, the
+# second time finds most regions there.
 
 set -u
 
@@ -33,7 +35,7 @@ check() { # expected output, command...
 	shift
 	got="$(cd "$D" && /usr/bin/env -i "PATH=$R/usr/bin" HOME=/nonexistent LC_ALL=C TZ=UTC "RV_SYSROOT=$R" \
 		ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:detect_stack_use_after_return=0}" \
-		RV_JIT_FAKE=1 RV_JIT_HOT=1 RV_JIT_START=0 RV_VERBOSE=1 ${RV_FORK:+RV_FORK=$RV_FORK} "${EXTRA[@]}" \
+		RV_JIT_FAKE=1 RV_JIT_HOT=1 RV_JIT_START=0 RV_VERBOSE=1 ${RV_FORK:+RV_FORK=$RV_FORK} ${RV_JIT_CACHE:+RV_JIT_CACHE=$RV_JIT_CACHE} "${EXTRA[@]}" \
 		/usr/bin/timeout 1800 "$RV" "$@" 2> "$D/err"; echo "[exit $?]")"
 	if [ "$got" == "$want" ] && ! grep -q -E 'ERROR: AddressSanitizer|runtime error|heapcheck \(|stale translation' "$D/err"; then
 		pass=$((pass + 1))

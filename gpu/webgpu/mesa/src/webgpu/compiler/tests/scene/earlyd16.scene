@@ -1,0 +1,8 @@
+# early fragment tests: a fragment shader that counts its fragments with image atomics under
+# layout(early_fragment_tests), against a d16 depth pattern with LESS_OR_EQUAL (3); fragments the test
+# rejects must not count (wgvk tests depth in the shader first: driver binding 938, read-only)
+draw plain count 24 instances 2
+topology triangles
+vb 0 stride 8 rate vertex data floats
+attr 0 binding 0 format R32G32_FLOAT offset 0
+depth d16 3

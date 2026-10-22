@@ -642,9 +642,36 @@
 
   const feedbacks = new Set();
   const activations = [];	// { appId, objects: [], at }
+  // A launch is told to the page too (rv-plasma: "launch" when the launcher asks for a token for an app id, "launch-done" when a window
+  // of the app shows or the launch is given up), so that it can say what a long start is doing (tools/www/dev.html, launchNote).
+  // And the launch feedback is kept up for LAUNCH_FEEDBACK_MS, not KWin's few seconds: the first start of a native program in a visit
+  // fetches and compiles its libraries (a minute or two on a slow connection), and a busy cursor that ends after 20 s while the program is
+  // still on its way looks like a program that quit.
+  const LAUNCH_FEEDBACK_MS = 300000;
+  let launchChannel = null;
+  try {
+    launchChannel = ws.channel ? ws.channel("rv-plasma") : null;
+  } catch (error) {
+    launchChannel = null;
+  }
+  const launchTell = (message) => {
+    try {
+      if (launchChannel) {
+        launchChannel.postMessage(message);
+      }
+    } catch (error) {
+    }
+  };
 
+  // (The helpers that hand an address or a file to the person's own browser (hostopen/) are started through KDE's launcher like any
+  // program, but never show a window: no launch note in the bar and no busy cursor for five minutes.)
+  const NO_FEEDBACK = /^rv-host-(open|save)(\.desktop)?$/i;
   const feedbackStart = (appId) => {
-    if (!appId || !feedbacks.size) {
+    if (!appId || NO_FEEDBACK.test(appId)) {
+      return;
+    }
+    launchTell({ type: "launch", appId, at: Date.now() });
+    if (!feedbacks.size) {
       return;
     }
     const a = { appId, objects: [], at: performance.now() };
@@ -663,6 +690,7 @@
       }
     }
     activations.splice(activations.indexOf(a), 1);
+    launchTell({ type: "launch-done", appId: a.appId, at: Date.now() });
   };
   function feedbackSeen(appId) {
     for (const a of activations.slice()) {
@@ -674,7 +702,7 @@
   const feedbackTurn = () => {
     const t = performance.now();
     for (const a of activations.slice()) {
-      if (t - a.at > 20000) {
+      if (t - a.at > LAUNCH_FEEDBACK_MS) {
         feedbackDone(a);
       }
     }

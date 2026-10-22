@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=KCalc (native)
+GenericName=Calculator
+Comment=KCalc as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run kcalc
+Icon=accessories-calculator
+Categories=Qt;KDE;Utility;Calculator;
+Terminal=false
+StartupWMClass=kcalc

@@ -47,7 +47,6 @@ How to get source in general:
 | **Node.js**, **Python**, **git**, **GCC** and the other packages in `DEV_PACKAGES` (`tools/build-debian-image.sh`) | the system disk | MIT, PSF-2.0, GPL-2.0, GPL-3.0-or-later (per package) | Debian source packages |
 | **Node.js's JavaScript library** | run unchanged by `hostnode` (the window server and GPU server run on it in the machine); taken at build time from the Debian `nodejs` package by `hostnode/extract.js`, not stored here | MIT (Node.js; its bundled third-party parts have their own licences) | Debian's `nodejs` source package; <https://github.com/nodejs/node> |
 | **xterm.js** | the development page's terminal | MIT | <https://github.com/xtermjs/xterm.js>, as linux-wasm ships it |
-| **Puter's blender-wasm** and **Blender** (optional) | fetched at build time by `blenderweb/fetch-release.sh`, run in a frame; not bundled in this repository | GPL-2.0-or-later | `SOURCE.txt` next to the fetched release; <https://github.com/HeyPuter/blender-wasm> |
 
 ## Used by the server, the X desktop images and the tests
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Gwenview (native)
+GenericName=Image Viewer
+Comment=Gwenview as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run gwenview %U
+Icon=gwenview
+MimeType=image/png;image/jpeg;image/svg+xml;
+Categories=Qt;KDE;Graphics;Viewer;
+Terminal=false
+StartupWMClass=gwenview

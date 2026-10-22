@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>gpu-matrix chromium</title>
+<style>
+  body { margin: 0; background: #1b2733; }
+  .b { position: absolute; width: 36px; height: 36px; border-radius: 6px; animation: spin 2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) scale(1.2); } }
+  canvas { position: absolute; left: 0; top: 330px; }
+  #n { position: absolute; left: 8px; top: 4px; color: #fff; font: 20px sans-serif; }
+</style>
+<div id="n">gpu-matrix</div>
+<canvas id="c" width="640" height="150"></canvas>
+<script>
+// 120 CSS-animated boxes and a 2D canvas; every 2 s it logs "N frames in S seconds = F FPS" (requestAnimationFrame callbacks) to the console
+// (Chromium prints them on stderr with --enable-logging=stderr).
+for (let i = 0; i < 120; i++) {
+  const d = document.createElement("div");
+  d.className = "b";
+  d.style.left = 20 + (i % 15) * 40 + "px"; d.style.top = 40 + Math.floor(i / 15) * 40 + "px";
+  d.style.background = "hsl(" + (i * 23 % 360) + ",70%,55%)";
+  d.style.animationDuration = 1.5 + (i % 5) * 0.4 + "s";
+  document.body.appendChild(d);
+}
+const g = document.getElementById("c").getContext("2d");
+let frames = 0, last = performance.now(), lastFrames = 0, t = 0;
+function tick(now) {
+  frames++; t += 0.05;
+  g.fillStyle = "#1b2733"; g.fillRect(0, 0, 640, 150);
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = "hsl(" + (i * 9 + t * 40) % 360 + ",70%,55%)";
+    g.fillRect(i * 16, 75 + Math.sin(t + i / 4) * 60, 12, 12);
+  }
+  if (now - last >= 2000) {
+    const n = frames - lastFrames, dt = (now - last) / 1000;
+    console.log(n + " frames in " + dt.toFixed(1) + " seconds = " + (n / dt).toFixed(1) + " FPS");
+    last = now; lastFrames = frames;
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>

@@ -144,7 +144,10 @@ riscv64 (not needed: the server is ours).
 gpuserver allocates one block in its memory and announces it on
 `BroadcastChannel("rv-gpu-ID")` (ID: the page load's, `rvtab=ID` on the kernel's command line; `rv-gpu` where there is none) at start and once a second:
 `{ type: "gpu", version: 2, pid, ring, ringSize, caps, capsSize, exports,
-exportsCap, socket }` (addresses are linear-memory offsets as Numbers), and
+exportsCap, socket, lazy: 1, want }` (addresses are linear-memory offsets as Numbers: exact up to 2^53; the machine's memory is up to 16 GiB, 8 GiB by default on a big
+computer, so an address is past 2 GiB, and past 4 GiB, as often as not: never `>> 2`, `& ~4095` or `| 0` on one in JavaScript, which turn it
+negative or into a LOW address; index with `Math.floor(address / 4)`; gpu/tools/gpuaddr-check.sh and exec-worker-test.js with
+`GPUADDR_HIGH_GIB=4.5` check this; `lazy`, `want`: see exec_state 4), and
 at once whenever someone posts `{ type: "gpu?" }` on that channel (the window
 server does at its start; the executor may too; consumers must ignore
 messages of other types). The page hands the machine's `WebAssembly.Memory`
@@ -169,7 +172,7 @@ the executor writes, all others are gpuserver's):
 | 64 | tail | exec: bytes consumed (the executor may reuse nothing past it) |
 | 68 | done | exec: newest serial such that it and every record before it are done; `Atomics.notify` on it after ANY completion (also one that only moved a context's word) |
 | 72 | exec_heartbeat | exec: +1 every executor turn; still for 2 s = executor gone |
-| 76 | exec_state | exec: 0 not yet, 1 ready (caps written), 2 context lost, 3 failed |
+| 76 | exec_state | exec: 0 not yet, 1 ready (caps written), 2 context lost, 3 failed; 4 (the page, VK-15) promised, not started: the WebGPU executor (rvgpu.wasm) is started by the first program that connects. gpuserver then writes the ready file at once, and on the first connection announces `want: true`, which makes the page start the executor (a program waits for the caps up to 30 s instead of 10). An announcement without `lazy` (an older gpuserver) starts the executor at once; `?rvgpu=eager` does too |
 | 80 | exec_error | exec: a code when state is 2 or 3 |
 | 84 | caps_len | exec: bytes of caps written at `caps` (virgl caps v2, as `virgl_renderer_fill_caps(2, ...)`) |
 | 1024 + 4·ctx | ctx_done[ctx] | exec: for context `ctx` (1..255), the newest serial of its records such that they all are done |

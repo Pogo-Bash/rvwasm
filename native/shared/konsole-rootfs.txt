@@ -1,0 +1,79 @@
+    443156  libkonsoleapp.so.24.12.3
+   2794292  libkonsoleprivate.so.24.12.3
+     79817  libKF6NewStuffWidgets.so.6.13.0
+    941026  libKF6NewStuffCore.so.6.13.0
+    981194  libKF6Attica.so.6.13.0
+   5496695  libQt6Network.so.6.8.2
+   7446184  libQt6Core.so.6.8.2
+  15119651  libQt6Gui.so.6.8.2
+   2305170  libQt6DBus.so.6.8.2
+    950685  libxkbcommon.so.0
+    842883  libKF6ConfigCore.so.6.13.0
+    174643  libQt6Xml.so.6.8.2
+    201573  libKF6Package.so.6.13.0
+   1188446  libKF6CoreAddons.so.6.13.0
+    245557  libKF6Archive.so.6.13.0
+    548766  libKF6I18n.so.6.13.0
+   5122144  libKF6WidgetsAddons.so.6.13.0
+   8600761  libQt6Widgets.so.6.8.2
+    113168  libQt6QuickWidgets.so.6.8.2
+   8912474  libQt6Quick.so.6.8.2
+    161356  libQt6QmlMeta.so.6.8.2
+   1126695  libQt6QmlModels.so.6.8.2
+   7947503  libQt6Qml.so.6.8.2
+     69251  libQt6QmlWorkerScript.so.6.8.2
+    176500  libKF6I18nQml.so.6.13.0
+   1005475  libKF6XmlGui.so.6.13.0
+    327250  libKF6GlobalAccel.so.6.13.0
+    422129  libKF6ConfigWidgets.so.6.13.0
+     87145  libKF6ColorScheme.so.6.13.0
+    277984  libKF6ConfigGui.so.6.13.0
+    217705  libKF6GuiAddons.so.6.13.0
+    214293  libKF6Codecs.so.6.13.0
+    452041  libQt6PrintSupport.so.6.8.2
+    377281  libKF6ItemViews.so.6.13.0
+    103743  libKF6IconWidgets.so.6.13.0
+    224608  libKF6IconThemes.so.6.13.0
+    636641  libQt6Svg.so.6.8.2
+   1292476  libQt6Multimedia.so.6.8.2
+    277881  libKF6TextWidgets.so.6.13.0
+    183787  libKF6SonnetUi.so.6.13.0
+    292681  libKF6SonnetCore.so.6.13.0
+    256806  libKF6Completion.so.6.13.0
+   1394964  libKF6KIOWidgets.so.6.13.0
+    631761  libKF6KIOGui.so.6.13.0
+   1975882  libKF6KIOCore.so.6.13.0
+     12111  libQt6Concurrent.so.6.8.2
+    520497  libKF6Service.so.6.13.0
+     45075  libKF6Crash.so.6.13.0
+     88992  libKF6AuthCore.so.6.13.0
+    688780  libKF6Solid.so.6.13.0
+     64961  libKF6WindowSystem.so.6.13.0
+    285118  libKF6JobWidgets.so.6.13.0
+    304679  libKF6Notifications.so.6.13.0
+     39386  libKF6Pty.so.6.13.0
+    183552  libKF6DBusAddons.so.6.13.0
+   2253165  libicuuc.so.76.1
+      1089  libicudata.so.76.1
+   4404952  libicui18n.so.76.1
+    960864  libQt6Core5Compat.so.6.8.2
+     98648  libKF6BookmarksWidgets.so.6.13.0
+    124209  libKF6Bookmarks.so.6.13.0
+     84937  libKF6NotifyConfig.so.6.13.0
+  92848272  total with konsole (45134 bytes)
+--- plugins and helpers (dlopen / exec, not NEEDED)
+4575  libexec/kf6/kioworker
+1359123  libQt6WaylandClient.so.6.8.2   (loaded by the wayland platform plugin)
+582037  libwayland-client.so.0   (loaded by the wayland platform plugin)
+6696  qt6/plugins/platforms/libqwayland-generic.so
+115745  qt6/plugins/wayland-shell-integration/libxdg-shell.so
+27699  qt6/plugins/wayland-decoration-client/libbradient.so
+17622  qt6/plugins/platforminputcontexts/libcomposeplatforminputcontextplugin.so
+52024  qt6/plugins/iconengines/libqsvgicon.so
+16047  qt6/plugins/imageformats/libqsvg.so
+5884  qt6/plugins/kiconthemes6/iconengines/KIconEnginePlugin.so
+98460  qt6/plugins/kf6/kio/kio_file.so
+165163  qt6/plugins/kf6/kio/kio_trash.so
+47376  qt6/plugins/kf6/kiod/kioexecd.so
+119466  qt6/plugins/konsoleplugins/konsole_quickcommandsplugin.so
+174636  qt6/plugins/konsoleplugins/konsole_sshmanagerplugin.so

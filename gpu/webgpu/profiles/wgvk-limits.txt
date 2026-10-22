@@ -1,0 +1,21 @@
+# Limits where wgvk reports WebGPU's real number instead of P4's (lavapipe's, uncut by wgmask), because
+# nothing in the plan emulates more. check-profile.py --limits FILE: such a limit may be below P4's but
+# must stay at or above the floor given here (the Vulkan 1.1 minimum, or what GL 4.3 through zink needs).
+# name                                      floor     why
+maxDescriptorSetSamplers                    96        WebGPU: bindings < 1000 per group, the driver keeps 900..999 (4 x 900)
+maxDescriptorSetUniformBuffers              72        same
+maxDescriptorSetStorageBuffers              24        same
+maxDescriptorSetSampledImages               96        same
+maxDescriptorSetStorageImages               24        same
+maxDescriptorSetInputAttachments            4         same
+maxDescriptorSetUniformBuffersDynamic       8         WebGPU maxDynamicUniformBuffersPerPipelineLayout (Mac 10)
+maxDescriptorSetStorageBuffersDynamic       4         WebGPU maxDynamicStorageBuffersPerPipelineLayout (Mac 8)
+maxPerStageDescriptorInputAttachments       4         input attachments are textures: maxSampledTexturesPerShaderStage
+maxPerStageResources                        128       the sum of the per-stage limits (GL: MAX_COMBINED_SHADER_OUTPUT_RESOURCES >= 8)
+maxFragmentCombinedOutputResources          4         colour attachments + storage buffers + storage images
+maxVertexOutputComponents                   64        WebGPU maxInterStageShaderVariables x 4 (Mac 112; GL 4.3: 64)
+maxFragmentInputComponents                  64        same
+maxGeometryOutputComponents                 64        same
+maxTessellationEvaluationOutputComponents   64        same
+maxImageDimensionCube                       4096      WebGPU maxTextureDimension2D (16384)
+maxTexelBufferElements                      65536     texel buffers are storage buffers: maxStorageBufferBindingSize / 4 (GL: 65536)

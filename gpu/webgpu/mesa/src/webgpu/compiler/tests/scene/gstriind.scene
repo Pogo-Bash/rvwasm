@@ -1,0 +1,4 @@
+draw indexed32 count 9 instances 3 first 2 base_vertex 2 first_instance 2 indirect
+topology triangles
+vb 0 stride 8 rate vertex data floats
+attr 0 binding 0 format R32G32_FLOAT offset 0

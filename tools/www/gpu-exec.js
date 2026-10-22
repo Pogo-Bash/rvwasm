@@ -34,6 +34,11 @@
 (() => {
   "use strict";
 
+  // The index of the 32-bit word at a byte address of the machine's memory. That memory can be larger than 4 GiB
+  // (?mem=8192, the default on a big computer), so an address is an exact Number of up to 2^34 and more: never
+  // `>> 2`, `& ~n`, `| 0` or `>>> 0` on one (32-bit operators: from 2 GiB the index goes negative, from 4 GiB it
+  // wraps to a LOW address, the kernel's).
+  const ix32 = (address) => Math.floor(address / 4);
   const RING_MAGIC = 0x50475652;	// "RVGP"
   const H_MAGIC = 0, H_VERSION = 4, H_PID = 8, H_DATA_SIZE = 16, H_DATA_OFF = 20, H_HEAD = 24, H_DOORBELL = 28,
         H_TAIL = 64, H_DONE = 68, H_EXEC_HEARTBEAT = 72, H_EXEC_STATE = 76, H_CAPS_LEN = 84, H_CTX_DONE = 1024;
@@ -53,6 +58,106 @@
 
   const inWorker = typeof document === "undefined";
   const now = () => performance.timeOrigin + performance.now();
+
+  // ---- which executor (VK-13). The page asks this once, when gpuserver announces its ring (page side below).
+  // Precedence: ?exec= in the address > rv-site.json "gpu_exec" (the server's switch: docs/deploy.md "GPU executor
+  // switch") > vrend. The default is vrend and stays it unless the server says otherwise AND this browser passes:
+  //   site vrend (or missing, or anything else)  -> vrend
+  //   site webgpu  -> webgpu if navigator.gpu exists and the adapter probe passes, else vrend
+  //   site auto    -> the same, and only in Chrome or Edge on a desktop (decision D1: Safari, Firefox and phones stay
+  //                   on vrend until each is tested)
+  //   ?exec=vrend | webgpu | proto | auto: the visitor's own choice; ?exec=webgpu needs navigator.gpu and nothing else
+  //                   (it is how the site is tried before the switch is thrown; the Worker still falls back to vrend
+  //                   when it finds no device), ?exec=auto is the site rules again with the site's value ignored
+  //   no WebGL2 for display.js -> "none" (no executor; the machine draws in software)
+  // and a webgpu that fails to start falls back to vrend (the Worker's "fallback", a Worker error before "ready"),
+  // a vrend that fails leaves the guest to software (gpuserver's rvgpu-0.none after 10 s).
+  const EXEC_NAMES = ["vrend", "webgpu", "auto"];
+  // What the page needs of the adapter, before it starts rvgpu (the Worker asks the adapter for all of its limits and
+  // features anyway). Numbers are WebGPU's own minimums (what wgvk and the P4 profile ask for, gpu/webgpu/profiles/):
+  // 4 bind groups, 8 colour attachments, 8 vertex buffers of 16 attributes, 8 storage buffers per stage, a 128 MiB
+  // storage binding (Dawn's: EEVEE's shadow pool must fit, STATUS.md), 256 MiB buffers, 8192 px textures.
+  // A software adapter (isFallbackAdapter) never passes: lavapipe-in-wasm is behind it already.
+  const MIN_LIMITS = { maxBindGroups: 4, maxColorAttachments: 8, maxVertexBuffers: 8, maxVertexAttributes: 16,
+                       maxStorageBuffersPerShaderStage: 8, maxStorageBufferBindingSize: 128 << 20,
+                       maxBufferSize: 256 << 20, maxTextureDimension2D: 8192, maxStorageTexturesPerShaderStage: 4 };
+  const MIN_FEATURES = [];
+  const normExec = (v) => (typeof v === "string" && EXEC_NAMES.includes(v.toLowerCase()) ? v.toLowerCase() : null);
+  // Pure: the adapter's side of the probe. adapter: {limits, features, isFallbackAdapter?, info?} (a GPUAdapter).
+  const checkAdapter = (adapter) => {
+    if (!adapter) {
+      return { ok: false, reason: "no WebGPU adapter" };
+    }
+    if (adapter.isFallbackAdapter === true || (adapter.info && adapter.info.isFallbackAdapter === true)) {
+      return { ok: false, reason: "a software (fallback) adapter" };
+    }
+    const bad = [];
+    for (const k in MIN_LIMITS) {
+      const v = adapter.limits ? adapter.limits[k] : undefined;
+      if (!(v >= MIN_LIMITS[k])) {
+        bad.push(k + " " + v + " < " + MIN_LIMITS[k]);
+      }
+    }
+    for (const f of MIN_FEATURES) {
+      if (!adapter.features || !adapter.features.has(f)) {
+        bad.push("feature " + f);
+      }
+    }
+    return bad.length ? { ok: false, reason: "adapter below the minimum: " + bad.join(", ") } : { ok: true, reason: "" };
+  };
+  // The adapter probe (nothing is created from it; the Worker makes the device). Never throws, gives up after `ms`.
+  const probeAdapter = async (gpu, ms = 3000) => {
+    if (!gpu) {
+      return { ok: false, reason: "no navigator.gpu" };
+    }
+    try {
+      const adapter = await Promise.race([gpu.requestAdapter({ powerPreference: "high-performance" }),
+                                          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))]);
+      return checkAdapter(adapter);
+    } catch (error) {
+      return { ok: false, reason: "requestAdapter: " + (error && error.message || error) };
+    }
+  };
+  // D1: Chrome or Edge, on a desktop. userAgentData is Chromium's; Safari and Firefox have none, so they fail here.
+  const browserAllowed = (nav) => {
+    const uad = nav && nav.userAgentData;
+    if (!uad || uad.mobile !== false || !Array.isArray(uad.brands)) {
+      return false;
+    }
+    return uad.brands.some((b) => b && (b.brand === "Google Chrome" || b.brand === "Microsoft Edge"));
+  };
+  // Pure: the selection table. in: { override, site, hasGpu, hasGL2, browserOk, probe: {ok, reason} | null }.
+  // Returns { exec: "vrend" | "webgpu" | "proto" | "none", why }.
+  const selectExec = (i) => {
+    if (i.hasGL2 === false) {
+      return { exec: "none", why: "no WebGL2" };
+    }
+    const o = typeof i.override === "string" ? i.override.toLowerCase() : "";
+    if (o === "proto") {
+      return { exec: "proto", why: "?exec=proto" };
+    }
+    if (o === "vrend") {
+      return { exec: "vrend", why: "?exec=vrend" };
+    }
+    if (o === "webgpu") {
+      return i.hasGpu ? { exec: "webgpu", why: "?exec=webgpu" } : { exec: "vrend", why: "?exec=webgpu, but no navigator.gpu" };
+    }
+    const site = normExec(i.site) || "vrend";
+    if (site === "vrend") {
+      return { exec: "vrend", why: "site default vrend" };
+    }
+    if (!i.hasGpu) {
+      return { exec: "vrend", why: "site " + site + ", but no navigator.gpu" };
+    }
+    if (site === "auto" && !i.browserOk) {
+      return { exec: "vrend", why: "site auto, but this browser is not Chrome/Edge on a desktop (D1)" };
+    }
+    if (!i.probe || !i.probe.ok) {
+      return { exec: "vrend", why: "site " + site + ", but the adapter check failed: " + (i.probe ? i.probe.reason : "not run") };
+    }
+    return { exec: "webgpu", why: "site " + site + ", browser and adapter pass" };
+  };
+  globalThis.rvGpuSelect = { selectExec, checkAdapter, probeAdapter, browserAllowed, normExec, MIN_LIMITS, MIN_FEATURES };
 
   // ---- TGSI text -> GLSL ES 3.00, for the few instructions the stub's shaders have (MOV, ADD, MUL, MAD,
   // DP4); everything else is refused, loudly. vrend's translator (vrend_shader.c) is what replaces this.
@@ -159,11 +264,11 @@
     const r = ex.ring;
     let changed = false;
     const done = ex.pending.length ? ex.pending[0].serial - 1 : ex.processed;
-    if ((Atomics.load(w32, (r + H_DONE) >> 2) >>> 0) !== (done >>> 0)) {
-      Atomics.store(w32, (r + H_DONE) >> 2, done | 0);
+    if ((Atomics.load(w32, ix32(r + H_DONE)) >>> 0) !== (done >>> 0)) {
+      Atomics.store(w32, ix32(r + H_DONE), done | 0);
       changed = true;
     }
-    if (w32[(r + H_VERSION) >> 2] >= 2) {
+    if (w32[ix32(r + H_VERSION)] >= 2) {
       const first = new Map();	// ctx -> its first pending serial
       for (const p of ex.pending) {
         if (!first.has(p.ctx)) {
@@ -175,7 +280,7 @@
           continue;
         }
         const d = first.has(ctx) ? first.get(ctx) - 1 : last;
-        const at = (r + H_CTX_DONE + 4 * ctx) >> 2;
+        const at = ix32(r + H_CTX_DONE + 4 * ctx);
         if ((Atomics.load(w32, at) >>> 0) !== (d >>> 0)) {
           Atomics.store(w32, at, d | 0);
           changed = true;
@@ -183,7 +288,7 @@
       }
     }
     if (changed) {
-      Atomics.notify(w32, (r + H_DONE) >> 2);
+      Atomics.notify(w32, ix32(r + H_DONE));
     }
   };
 
@@ -207,8 +312,8 @@
       this.onPresent = null;
       this.sharedReads = true;	// getBufferSubData takes a view over the shared memory (if not: through a copy)
       const w32 = new Int32Array(memory.buffer);
-      Atomics.store(w32, (ring + H_CAPS_LEN) >> 2, 0);	// (no caps yet: vrend's go here)
-      Atomics.store(w32, (ring + H_EXEC_STATE) >> 2, 1);
+      Atomics.store(w32, ix32(ring + H_CAPS_LEN), 0);	// (no caps yet: vrend's go here)
+      Atomics.store(w32, ix32(ring + H_EXEC_STATE), 1);
     }
     key(handle) {
       return this.ctx + ":" + handle;
@@ -232,15 +337,15 @@
     turn() {
       const w32 = new Int32Array(this.memory.buffer);
       const r = this.ring;
-      Atomics.add(w32, (r + H_EXEC_HEARTBEAT) >> 2, 1);
-      if (w32[(r + H_MAGIC) >> 2] !== RING_MAGIC) {
+      Atomics.add(w32, ix32(r + H_EXEC_HEARTBEAT), 1);
+      if (w32[ix32(r + H_MAGIC)] !== RING_MAGIC) {
         return;
       }
-      const size = w32[(r + H_DATA_SIZE) >> 2], data = r + w32[(r + H_DATA_OFF) >> 2];
+      const size = w32[ix32(r + H_DATA_SIZE)], data = r + w32[ix32(r + H_DATA_OFF)];
       const t0 = performance.now();
       let n = 0;
       for (;;) {
-        const head = Atomics.load(w32, (r + H_HEAD) >> 2) >>> 0, tail = Atomics.load(w32, (r + H_TAIL) >> 2) >>> 0;
+        const head = Atomics.load(w32, ix32(r + H_HEAD)) >>> 0, tail = Atomics.load(w32, ix32(r + H_TAIL)) >>> 0;
         if (head === tail) {
           break;
         }
@@ -249,10 +354,10 @@
         if (size - at < 16) {
           used = size - at;	// (too little room even for a PAD's header: the producer starts again at 0)
         } else {
-          const p = (data + at) >> 2;
+          const p = ix32(data + at);
           const op = w32[p], ctx = w32[p + 1], serial = w32[p + 2] >>> 0, bytes = w32[p + 3] >>> 0;
           // (version 2: payloads padded to 16 bytes; version 1: to 8)
-          used = w32[(r + H_VERSION) >> 2] >= 2 ? 16 + ((bytes + 15) & ~15) : 16 + ((bytes + 7) & ~7);
+          used = w32[ix32(r + H_VERSION)] >= 2 ? 16 + ((bytes + 15) & ~15) : 16 + ((bytes + 7) & ~7);
           if (op !== OP_PAD) {
             try {
               this.record(op, ctx, serial, p + 4, bytes, w32);
@@ -267,7 +372,7 @@
             n++;
           }
         }
-        Atomics.store(w32, (r + H_TAIL) >> 2, (tail + used) | 0);
+        Atomics.store(w32, ix32(r + H_TAIL), (tail + used) | 0);
       }
       if (n) {
         const dt = performance.now() - t0;
@@ -676,17 +781,17 @@
       const w32 = new Int32Array(memory.buffer);
       if (r) {
         this.error("virgl_renderer_init failed: " + r);
-        Atomics.store(w32, (ring + H_EXEC_STATE) >> 2, 3);
+        Atomics.store(w32, ix32(ring + H_EXEC_STATE), 3);
         return;
       }
       // The caps where gpuserver said (PROTOCOL.md: caps, capsSize), then ready.
       const n = M._rvg_caps();
       if (caps && caps.at && n <= caps.size) {
         new Uint8Array(memory.buffer, caps.at, n).set(M.HEAPU8.subarray(M._rvg_buffer(0), M._rvg_buffer(0) + n));
-        Atomics.store(w32, (ring + H_CAPS_LEN) >> 2, n);
+        Atomics.store(w32, ix32(ring + H_CAPS_LEN), n);
       }
       this.capsLen = n;
-      Atomics.store(w32, (ring + H_EXEC_STATE) >> 2, 1);
+      Atomics.store(w32, ix32(ring + H_EXEC_STATE), 1);
     }
     error(e) {
       const t = String(e && e.message || e);
@@ -867,7 +972,7 @@
       const frame = m.frame;
       const done = () => {
         frame.close();
-        Atomics.store(new Int32Array(this.memory.buffer), m.ready >> 2, m.seq | 0);
+        Atomics.store(new Int32Array(this.memory.buffer), ix32(m.ready), m.seq | 0);
         this.stats.vdecFrames = (this.stats.vdecFrames || 0) + 1;
       };
       // (records already in the ring first: the guest's draws from this surface's last picture were sent before)
@@ -1066,12 +1171,19 @@
   // a readback is in flight), for readbacks that finish between doorbells and for the heartbeat.
   const run = (ex) => {
     const w32 = new Int32Array(ex.memory.buffer);
-    const bell = (ex.ring + H_DOORBELL) >> 2;
+    const bell = ix32(ex.ring + H_DOORBELL);
     const wait = () => {
       const seen = Atomics.load(w32, bell);
       ex.turn();
       // (1 ms while a readback is in flight: its fence is only polled on turns)
-      const r = Atomics.waitAsync(w32, bell, seen, ex.pending.some((p) => p.kind === "get") ? 1 : 50);
+      const timeout = ex.pending.some((p) => p.kind === "get") ? 1 : 50;
+      if (typeof Atomics.waitAsync !== "function") {
+        // (Firefox before 145 has no Atomics.waitAsync: look again after the timeout, as the heartbeat does anyway;
+        // a doorbell then waits up to `timeout` ms. Chrome and current Firefox never come here.)
+        setTimeout(wait, timeout);
+        return;
+      }
+      const r = Atomics.waitAsync(w32, bell, seen, timeout);
       (r.async ? r.value : Promise.resolve()).then(wait);
     };
     wait();
@@ -1098,16 +1210,16 @@
       if (t.address + t.header + t.slots * t.slotSize > w32.byteLength) {
         return;
       }
-      const done = Atomics.load(w32, (ex.ring + H_DONE) >> 2);
+      const done = Atomics.load(w32, ix32(ex.ring + H_DONE));
       for (let i = 0; i < t.slots; i++) {
         const at = t.address + t.header + i * t.slotSize;
-        const seq = Atomics.load(w32, at >> 2);
-        if ((seq & 1) || !w32[(at + S_ID) >> 2] || w32[(at + S_FORMAT) >> 2] !== 2) {
+        const seq = Atomics.load(w32, ix32(at));
+        if ((seq & 1) || !w32[ix32(at + S_ID)] || w32[ix32(at + S_FORMAT)] !== 2) {
           continue;
         }
-        const present = w32[(at + S_PRESENT) >> 2] >>> 0, res = w32[(at + S_BUFFER_LO) >> 2] >>> 0;
-        const pid = w32[(at + S_BUFFER_HI) >> 2] >>> 0, serial = w32[(at + S_GPU_SERIAL) >> 2];
-        if (Atomics.load(w32, at >> 2) !== seq || (t.gpuPid && pid !== t.gpuPid) || watch.sent.get(i) === present
+        const present = w32[ix32(at + S_PRESENT)] >>> 0, res = w32[ix32(at + S_BUFFER_LO)] >>> 0;
+        const pid = w32[ix32(at + S_BUFFER_HI)] >>> 0, serial = w32[ix32(at + S_GPU_SERIAL)];
+        if (Atomics.load(w32, ix32(at)) !== seq || (t.gpuPid && pid !== t.gpuPid) || watch.sent.get(i) === present
             || ((done - serial) | 0) < 0) {
           continue;
         }
@@ -1247,13 +1359,38 @@
                   exec: null, renderer: "" };
   const imported = new Map();	// res -> { texture, w, h } in display.js's context (worker mode)
   let ex = null, worker = null, started = null;
+  let vdecPortHeld = null;	// the video decoder's port, for a Worker that is not there yet (rvGpu.vdecPort)
   const grabbing = new Map();	// res -> the present a grab was asked for
   let lastTable = null;
   const scriptSrc = document.currentScript ? document.currentScript.src : "gpu-exec.js";
 
+  // A one-line note over the bottom edge of the page, outside the machine's display (the look of dev.html's
+  // #netbanner, Catppuccin Mocha); also in stats.notice and through rvGpu.onNotice, for a page that shows it its own way.
+  const notice = (text) => {
+    stats.notice = text;
+    if (rvGpu.onNotice) {
+      rvGpu.onNotice(text);
+      return;
+    }
+    try {
+      const el = document.createElement("div");
+      el.id = "gpunotice";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.textContent = text;
+      el.style.cssText = "position:fixed;left:50%;bottom:36px;transform:translateX(-50%);z-index:40000;max-width:min(92vw,90ch);"
+        + "box-sizing:border-box;padding:5px 12px;border-radius:6px;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;"
+        + "border-left:3px solid #f38ba8;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
+        + "pointer-events:none;opacity:.94";
+      document.body.appendChild(el);
+    } catch (error) {
+    }
+  };
+
   const rvGpu = window.rvGpu = {
     stats,
     onPresent: null,
+    onNotice: null,
     // Resource `res`'s texture in display.js's context, for a window's present `present` (stage B). On the
     // main thread it is the resource's own texture (present: whatever is asked); from a Worker it is the last
     // bitmap imported, and a newer one is asked for (it arrives a turn later; `present` says which it is).
@@ -1278,7 +1415,7 @@
       if (!started || !started.memory) {
         return null;
       }
-      return Atomics.load(new Int32Array(started.memory.buffer), (started.ring + H_DONE) >> 2) >>> 0;
+      return Atomics.load(new Int32Array(started.memory.buffer), ix32(started.ring + H_DONE)) >>> 0;
     },
     shown(serial) {
       if (ex) {
@@ -1288,9 +1425,19 @@
       }
     },
     // The video decoder's Worker wants frames drawn into guest surfaces (tools/www/vdec.js): its port goes to the
-    // executor's Worker. Only vrend's executor draws them; false otherwise (the guest's players then copy).
+    // executor's Worker. Both Workers draw them (vrend's with WebGL, rvgpu-worker.js's with WebGPU: VK-14); false
+    // when there is none (the guest's players then copy). A WebGPU executor that waits for the first GPU program
+    // (VK-15, stats.lazy) has no Worker yet: the port is kept and goes to the Worker when it starts; the same
+    // when the WebGPU Worker finds no device and vrend takes its place (the Worker hands the port back).
     vdecPort(port) {
-      if (mode !== "worker" || !worker || stats.exec_kind !== "vrend") {
+      if (stats.lazy === "waiting" && !worker) {
+        if (vdecPortHeld) {
+          return false;
+        }
+        vdecPortHeld = port;
+        return true;
+      }
+      if (mode !== "worker" || !worker || (stats.exec_kind !== "vrend" && stats.exec_kind !== "webgpu")) {
         return false;
       }
       worker.postMessage({ type: "vdec-port", port }, [port]);
@@ -1307,9 +1454,11 @@
     // Execute the ring at `ring` in `memory` (the machine's shared WebAssembly.Memory); gl: display.js's context.
     start(memory, ring, gl, pid = 0, exec = execParam || "proto", caps = null) {
       // ?exec=webgpu without WebGPU in this browser: vrend (WebGL2) on the same ring
-      if (exec === "webgpu" && !navigator.gpu) {
-        console.log("gpu-exec: no WebGPU here (navigator.gpu): vrend instead");
-        stats.fallback = "no navigator.gpu";
+      // (rvgpu.wasm is linked with JSPI: a browser with WebGPU but without JSPI cannot run it)
+      const jspi = typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function";
+      if (exec === "webgpu" && (!navigator.gpu || !jspi)) {
+        console.log("gpu-exec: no " + (navigator.gpu ? "JSPI (WebAssembly.Suspending)" : "WebGPU (navigator.gpu)") + " here: vrend instead");
+        stats.fallback = navigator.gpu ? "no JSPI" : "no navigator.gpu";
         exec = "vrend";
       }
       stats.exec_kind = exec;
@@ -1328,7 +1477,22 @@
           stats.exec_kind = kind;
           const w = new Worker(kind === "webgpu" ? scriptSrc.replace(/[^/]*$/, "") + "rvgpu-worker.js" : scriptSrc);
           w.onmessage = onWorker;
+          // A WebGPU Worker that dies before it said "ready" (rvgpu.wasm did not load or compile, a script error):
+          // vrend takes the ring in its place, as when it finds no device.
+          w.onerror = (event) => {
+            if (kind === "webgpu" && w === worker && stats.readyKind !== "webgpu" && !stats.deviceLost) {
+              const why = "the WebGPU Worker failed: " + (event && event.message || "error");
+              console.log("gpu-exec: " + why + ": vrend instead");
+              stats.fallback = why;
+              w.terminate();
+              worker = spawn("vrend");
+            }
+          };
           w.postMessage({ type: "start", memory, ring, exec: kind, caps, base: scriptSrc.replace(/[^/]*$/, "") });
+          if (vdecPortHeld) {
+            w.postMessage({ type: "vdec-port", port: vdecPortHeld }, [vdecPortHeld]);
+            vdecPortHeld = null;
+          }
           if (lastTable) {
             w.postMessage({ type: "table", address: lastTable.address, slots: lastTable.slots,
                             slotSize: lastTable.slotSize, header: lastTable.header, gpuPid: pid });
@@ -1338,10 +1502,39 @@
           }
           return w;
         };
+        // The WebGPU device is lost mid-session (the GPU reset, the tab's device was destroyed, the driver crashed):
+        // this executor can do nothing more. The ring says so (exec_state 2), and gpuserver then takes the ready
+        // file away and writes rvgpu-0.none: programs started from now on draw in software at once. Programs that
+        // are running keep their dead executor until the page is reloaded (their contexts lived in that device);
+        // the notice says so. (rvgpu-worker.js logs "WebGPU device lost: REASON MESSAGE"; a later Worker may send
+        // {type: "device-lost", reason, message} instead: both are taken.)
+        const deviceLost = (text) => {
+          if (stats.deviceLost || stats.exec_kind !== "webgpu") {
+            return;
+          }
+          stats.deviceLost = text;
+          console.log("gpu-exec: " + text + ": new programs draw in software");
+          try {
+            Atomics.store(new Int32Array(memory.buffer), ix32(ring + H_EXEC_STATE), 2);
+          } catch (error) {
+          }
+          if (worker) {
+            worker.terminate();
+          }
+          notice("GPU lost (" + text.replace(/^WebGPU device lost:\s*/, "") + "). New programs draw in software; "
+                 + "programs that are open keep the lost GPU until you reload this page.");
+        };
         const onWorker = (event) => {
           const m = event.data;
+          if (m.type === "device-lost") {
+            deviceLost("WebGPU device lost: " + (m.reason || "") + " " + (m.message || ""));
+            return;
+          }
           if (m.type === "log") {
             console.log(m.text);
+            if (/^WebGPU device lost:/.test(m.text)) {
+              deviceLost(m.text);
+            }
             // (the first 40 kept, they say what went wrong first; then the last 30)
             if (!stats.vrendFirst || stats.vrendFirst.length < 40) {
               (stats.vrendFirst = stats.vrendFirst || []).push(m.text);
@@ -1357,10 +1550,17 @@
             console.log("gpu-exec: the WebGPU Worker found no device (" + (m.errors || []).join("; ") + "): vrend instead");
             stats.fallback = (m.errors || []).join("; ") || "no WebGPU device";
             worker.terminate();
+            vdecPortHeld = m.vdecPort || vdecPortHeld;	// (the video decoder's port, handed back: vrend draws its frames)
             worker = spawn("vrend");
             return;
           }
           if (m.type === "ready") {
+            stats.readyKind = m.exec || stats.exec_kind;
+            if (stats.lazyWantAt) {
+              // (VK-15: from the first program's connection to the executor's caps: fetch + compile + start)
+              stats.lazyDelayMs = Math.round(performance.now() - stats.lazyWantAt);
+              console.log("gpu-exec: the executor was started by the first program and took " + stats.lazyDelayMs + " ms to answer");
+            }
             stats.workerRenderer = m.renderer;
             stats.capsLen = m.capsLen;
             stats.startErrors = m.errors || [];
@@ -1375,7 +1575,7 @@
             // when the executor's heartbeat stops, since the Worker then cannot say anything itself)
             let beat = -1, still = 0, said = 0;
             setInterval(() => {
-              const b = Atomics.load(new Int32Array(memory.buffer), (ring + 72) >> 2);
+              const b = Atomics.load(new Int32Array(memory.buffer), ix32(ring + 72));
               const t = performance.now();
               if (b !== beat) {
                 beat = b;
@@ -1461,6 +1661,33 @@
     },
   };
 
+  // The choice, made once per page (the first announcement of the ring asks, the others share the answer): ?exec= wins and
+  // needs nothing else; otherwise rv-site.json's gpu_exec, and the adapter probe only when that says webgpu or auto.
+  let chosen = null;
+  const chooseExec = (gl) => chosen || (chosen = (async () => {
+    const override = execParam ? execParam.toLowerCase() : "";
+    const decided = override === "vrend" || override === "webgpu" || override === "proto";
+    let site = null, probe = null;
+    if (!decided) {
+      try {
+        const answer = await fetch("rv-site.json", { cache: "no-store", signal: AbortSignal.timeout(3000) });
+        site = answer.ok ? (await answer.json()).gpu_exec : null;
+      } catch (error) {
+        // (no file, no answer: vrend)
+      }
+      if (override === "auto") {
+        site = "auto";
+      }
+      if (normExec(site) === "webgpu" || normExec(site) === "auto") {
+        probe = await probeAdapter(navigator.gpu);
+      }
+    }
+    const choice = selectExec({ override, site, hasGpu: !!navigator.gpu, hasGL2: !!gl, browserOk: browserAllowed(navigator), probe });
+    stats.select = choice;
+    console.log("gpu-exec: " + choice.exec + " (" + choice.why + ")");
+    return choice;
+  })());
+
   // gpuserver's announcement (PROTOCOL.md): start on the machine's memory, in display.js's context.
   const gpuChannel = window.rvChannel("rv-gpu");
   // (Asked again every 2 s until a ring is taken: gpuserver answers a "gpu?" at once.)
@@ -1472,6 +1699,31 @@
     if (mode === "off" || !m || m.type !== "gpu" || (m.version !== 1 && m.version !== 2) || started || !os || !os.memory || !d || !d.gl) {
       return;
     }
-    rvGpu.start(os.memory, m.ring, d.gl, m.pid, execParam || "vrend", m.caps ? { at: m.caps, size: m.capsSize } : null);
+    chooseExec(d.gl).then((choice) => {
+      if (started || choice.exec === "none") {
+        return;
+      }
+      // The executor is chosen once (chooseExec: ?exec=, rv-site.json gpu_exec, the probe), then:
+      // VK-15: the WebGPU executor (rvgpu.wasm, 16 MB of wasm to fetch and compile, and its code in the tab's 4 GiB of
+      // compiled wasm) is started when the first program connects to gpuserver, not at boot. gpuserver (`lazy` in its
+      // announcement; an older one does not say it) is told by exec_state 4 that an executor is promised, and answers
+      // with `want` on the first connection. ?rvgpu=eager starts it at once as before; without navigator.gpu the
+      // fallback to vrend starts at once (that is not deferred).
+      // (VK-13: "the WebGPU executor" is the one the selection chose, not only ?exec=webgpu.)
+      if (!m.want && m.lazy && choice.exec === "webgpu" && navigator.gpu && params.get("rvgpu") !== "eager") {
+        if (!stats.lazy) {
+          stats.lazy = "waiting";
+          console.log("gpu-exec: the WebGPU executor waits for the first GPU program (?rvgpu=eager: at boot)");
+        }
+        Atomics.store(new Int32Array(os.memory.buffer), ix32(m.ring + 76), 4);	// exec_state 4: promised, not started
+        return;
+      }
+      if (stats.lazy === "waiting") {
+        stats.lazy = "started";
+        stats.lazyWantAt = performance.now();
+        console.log("gpu-exec: the first GPU program has connected: starting the WebGPU executor");
+      }
+      rvGpu.start(os.memory, m.ring, d.gl, m.pid, choice.exec, m.caps ? { at: m.caps, size: m.capsSize } : null);
+    });
   };
 })();

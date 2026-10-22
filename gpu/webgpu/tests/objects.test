@@ -1,0 +1,41 @@
+#!/bin/bash
+# T1's object tests (mesa/src/webgpu/tests/objects.c) through wgvk as an ICD, and the binding remap a
+# pipeline layout gives the shader compiler (WGVK_DEBUG=remap) against the numbering in INTERFACES.md 4.2.
+mkdir -p $B/tests
+cc -O1 -g -Wall -I$TREE/include -o $B/tests/objects $WT/gpu/webgpu/mesa/src/webgpu/tests/objects.c -lvulkan || {
+	echo "FAIL objects: build"; exit 1; }
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD WGVK_DEBUG=remap,caps timeout 120 $B/tests/objects \
+	2> $B/tests/objects.err; s=$?
+grep "^wgvk: remap:" $B/tests/objects.err | sed 's/^wgvk: remap: //' | head -9 > $B/tests/objects.remap
+# set 0: UBO 0 -> 0, dynamic SSBO 1 -> 1, combined[2] 3 -> textures 2,3 samplers 4,5, sampler 5 -> 6
+# (binding 4 has no descriptors); set 1: sampled[3] 0 -> 0..2, inline block 2 -> 3; driver group 2
+cat > $B/tests/objects.remap-want <<'EOF'
+6 entries, driver group 2, push constants 128 (immediates up to IMM)
+set 0 binding 0 type 6 count 1 -> group 0 binding 0 sampler 0 flags 0
+set 0 binding 1 type 9 count 1 -> group 0 binding 1 sampler 1 flags 1
+set 0 binding 3 type 1 count 2 -> group 0 binding 2 sampler 4 flags 0
+set 0 binding 5 type 0 count 1 -> group 0 binding 6 sampler 6 flags 0
+set 1 binding 0 type 2 count 3 -> group 1 binding 0 sampler 0 flags 0
+set 1 binding 2 type 1000138000 count 1 -> group 1 binding 3 sampler 3 flags 0
+EOF
+sed -i "s/(immediates up to [0-9]*)/(immediates up to IMM)/" $B/tests/objects.remap
+if diff $B/tests/objects.remap-want $B/tests/objects.remap > $B/tests/objects.remap-diff; then
+	echo "ok objects-remap: pipeline layout of 2 sets numbered as INTERFACES.md 4.2 says"
+else
+	echo "FAIL objects-remap: $(head -3 $B/tests/objects.remap-diff | tr '\n' ' ')"; s=1
+fi
+if grep -q "WebGPU validation error\|WebGPU error\|device lost" $B/tests/objects.err; then
+	echo "FAIL objects-webgpu: $(grep -m1 "WebGPU" $B/tests/objects.err)"; s=1
+else
+	echo "ok objects-webgpu: no WebGPU validation errors"
+fi
+# bind groups from descriptor sets (wgvk's insides: the Vulkan API reaches them through T2's pipelines)
+bash $WT/gpu/webgpu/build/native.sh src/webgpu/vulkan/wgvk-objects-internal > $B/tests/objects-internal.build 2>&1 ||
+	{ echo "FAIL objects-internal: build"; s=1; }
+VK_DRIVER_FILES=$LVP_ICD timeout 120 $B/native/src/webgpu/vulkan/wgvk-objects-internal 2> $B/tests/objects-internal.err || s=1
+if grep -q "WebGPU validation error\|WebGPU error" $B/tests/objects-internal.err; then
+	echo "FAIL objects-internal-webgpu: $(grep -m1 "WebGPU" $B/tests/objects-internal.err)"; s=1
+fi
+caps=$(grep -m1 "^wgvk: caps:" $B/tests/objects.err | sed 's/^wgvk: caps: //')
+[ -n "$caps" ] && echo "ok objects-caps: the device's compile caps: $caps" || { echo "FAIL objects-caps: none printed"; s=1; }
+exit $s

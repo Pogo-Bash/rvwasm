@@ -1,0 +1,2 @@
+# Dawn (webgpu.h): native build ($W/dawn-native, Vulkan backend) and emdawnwebgpu ($W/emdawnwebgpu) from one checkout
+c943ea32b614ff53e4fe410fc8f4968b6b8fe46d https://dawn.googlesource.com/dawn

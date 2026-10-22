@@ -1,0 +1,22 @@
+#!/bin/bash
+# wgvk loads as an ICD and vulkaninfo lists it; its features, extensions and limits against the P4 oracle.
+mkdir -p $B/tests
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 120 vulkaninfo --summary > $B/tests/vulkaninfo.txt 2>&1
+name=$(grep -m1 "deviceName *= wgvk" $B/tests/vulkaninfo.txt | sed 's/.*= //')
+if [ -n "$name" ]; then echo "ok icd: vulkaninfo lists \"$name\""; else echo "FAIL icd: no wgvk device (see $B/tests/vulkaninfo.txt)"; exit 1; fi
+# The device type is a GPU's (or CPU's: Dawn reports the VM's lavapipe adapter as one), never OTHER: vkcube and the loader
+# rank devices by it (VK-09). WGVK_DEVICE_TYPE overrides it.
+dt=$(grep -m1 "deviceType *=" $B/tests/vulkaninfo.txt | sed 's/.*= //')
+case $dt in
+	PHYSICAL_DEVICE_TYPE_DISCRETE_GPU|PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU|PHYSICAL_DEVICE_TYPE_CPU) echo "ok icd: deviceType $dt" ;;
+	*) echo "FAIL icd: deviceType \"$dt\" (OTHER ranks below a CPU device)"; exit 1 ;;
+esac
+for want in discrete:DISCRETE_GPU integrated:INTEGRATED_GPU cpu:CPU other:OTHER; do
+	got=$(WGVK_DEVICE_TYPE=${want%%:*} VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 120 vulkaninfo --summary 2>&1 | grep -m1 "deviceType *=" | sed 's/.*= //')
+	if [ "$got" = "PHYSICAL_DEVICE_TYPE_${want#*:}" ]; then echo "ok icd: WGVK_DEVICE_TYPE=${want%%:*} gives $got"; else echo "FAIL icd: WGVK_DEVICE_TYPE=${want%%:*} gave \"$got\""; exit 1; fi
+done
+(cd $B/tests && rm -f VP_VULKANINFO_*.json && VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 120 vulkaninfo --json > /dev/null 2>&1)
+# Not yet (owner): the swapchain extensions (T7, WSI).
+python3 $WT/gpu/webgpu/profiles/check-profile.py --allow VK_KHR_swapchain,VK_KHR_swapchain_mutable_format,VK_KHR_incremental_present \
+	--limits $WT/gpu/webgpu/profiles/wgvk-limits.txt \
+	$WT/gpu/webgpu/profiles/p4-lavapipe.json $B/tests/VP_VULKANINFO_*.json

@@ -1,0 +1,17 @@
+#!/bin/sh
+# KPackage's installer for a "kns://KNSRC/PROVIDER/ID" dependency (a Global Theme that needs a colour scheme, an icon theme ...):
+# libKF6Package runs `knshandler URL` from KPACKAGE_DEP_RESOLVERS_PATH (nqs-run sets it to this directory). The native build has no
+# KDE Frameworks "frameworkintegration" (where the handler is made: a source nobody has fetched), so this runs Debian's own, which
+# is in the Debian root: it downloads the entry and installs it into ~/.local/share (the home disk, the same files as the native
+# programs' HOME). Inside the chroot (where the launcher runs the programs) it is called directly with a clean environment (the nqs
+# variables, LD_LIBRARY_PATH above all, would send a riscv64 program into wasm libraries); natively, `debian` enters the root.
+# No $(...) in this file: the machine's shell cannot fork without exec.
+H=/usr/lib/riscv64-linux-gnu/libexec/kf6/kpackagehandlers/knshandler
+if [ -x $H ]; then
+	exec /usr/bin/env -i HOME=/root USER=root LANG=C.UTF-8 PATH=/usr/local/bin:/usr/bin:/bin $H "$@"
+fi
+if [ -x /debian$H ] && [ -x /bin/debian ]; then
+	exec /bin/debian $H "$@"
+fi
+echo "knshandler: no Debian system with frameworkintegration here" >&2
+exit 1

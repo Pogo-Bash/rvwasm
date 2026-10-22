@@ -1,0 +1,24 @@
+== gpu-nm qtquick-vulkan ==
+program:  qtquick-vulkan
+stamp:    vk-27 6bbe7e719fea mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3869 ms
+ring:     submitted 2232, done 2232, heartbeat 4331
+jspi waits:5 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+presents: 502 (stage B frames from the executor), last 640x480, 8 PNGs
+boot:     884 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 285216768 (pid 181), caps at 289413120
+frames:   499 in 25 reports of es2gears; last 20 frames in 2.0 seconds = 9.9 FPS
+windows:  slot 0 "gpu-matrix qtquick" 640x480: 502 looks, present 502
+vulkan:   Virtio-GPU Venus (wgvk (WebGPU: device))
+probe:    8 of 8 window PNGs are drawn (not flat); 8 different pictures; last gpu-res6-8.png 640x480: 1309 colours, the commonest 60.9%
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (2232 submits)
+  ok   frames > 0 (499)
+  ok   Qt's RHI on Vulkan, on venus (Virtio-GPU Venus (wgvk (WebGPU: device)))
+  ok   window drawn (slot 0 "gpu-matrix qtquick" 640x480: 502 looks, present 502)
+  ok   pixel probe (a drawn window, not a flat colour) (8/8)
+  ok   the picture moves (animated: more than one different PNG) (8 different)
+  ok   frames reported by the app > 0 (25 reports)
+PASS
+MATRIX_RESULT {"app":"qtquick-vulkan","stamp":"vk-27 6bbe7e719fea mesa 35b085c4c0 dawn c943ea32b6","submits":2232,"presents":502,"frames":499,"fps":9.9,"pictures":8,"pass":true,"failed":[]}

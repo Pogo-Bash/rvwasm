@@ -1,0 +1,11 @@
+#version 450
+#extension GL_EXT_shader_image_load_formatted : require
+// legal-check: options -image-format 0=R8G8B8A8_UNORM -image-format 1=R32_UINT
+// storage images without a format qualifier: the formats come from the key (slot 0 = binding 0)
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform writeonly image2D dst;
+layout(set = 0, binding = 1) uniform readonly uimage2D src;
+void main() {
+   ivec2 p = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y + 8u * gl_WorkGroupID.z);
+   imageStore(dst, p, vec4(imageLoad(src, p).x & 255u) / 255.0);
+}

@@ -1,0 +1,8 @@
+#!/bin/bash
+# rvgpu's ring consumer (rvgpu.c) natively against a ring laid out as gpuserver does (ring-test.c).
+set -e
+mkdir -p $B/tests
+S=$WT/gpu/webgpu/mesa/src/webgpu
+cc -O1 -g -Wall -I$S/rvgpu -I$W/dawn/include -I$W/dawn-native/gen/include -o $B/tests/ring-test \
+	$S/tests/ring-test.c $S/rvgpu/rvgpu.c $S/rvgpu/rvgpu_native.c -L$W/dawn-run -Wl,-rpath,$W/dawn-run -lwebgpu_dawn
+$B/tests/ring-test

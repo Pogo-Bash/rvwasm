@@ -1,0 +1,9 @@
+# The desktop's defaults (tools/x/xdg, on XDG_CONFIG_DIRS after /etc/xdg): web addresses opened by a program in the machine go to the
+# person's own browser as a new tab (hostopen/: rv-host-open, which asks first), not to one of Debian's emulated browsers. KDE programs
+# (KIO::OpenUrlJob: Konsole's Ctrl+click, Dolphin, Okular, KNewStuff's "Open the homepage"), native and emulated alike, GTK programs and
+# xdg-open read this file; the user's own ~/.config/mimeapps.list comes before it. Firefox and Chromium still start from the menu.
+# (text/html: KIO asks the page's type when a URL has no scheme handler; a local .html file given to rv-host-open opens in the machine's browser.)
+[Default Applications]
+x-scheme-handler/http=rv-host-open.desktop
+x-scheme-handler/https=rv-host-open.desktop
+text/html=rv-host-open.desktop

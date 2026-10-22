@@ -16,7 +16,6 @@
 #   docker compose --profile public up -d      the public site: Caddy on 80/443 with a Let's Encrypt certificate for
 #                                              $RV_DOMAIN (docs/deploy.md); the relay is then in RV_NET_MODE=allowlist
 #                                              (the default) and RV_ORIGINS must say https://$RV_DOMAIN
-#   docker compose --profile blender up        Puter's Blender on :8040 (blenderweb/)
 #   docker compose --profile build run --rm build [STEP...]          build from source (docker/build.sh)
 #   docker compose --profile build run --rm build-debian STEP...     the Debian roots and disks (privileged)
 
@@ -71,7 +70,8 @@ services:
     <<: *run
     user: rv
     command: ["python3", "/opt/rvwasm/serve.py", "--dist", "/dist", "--port", "8000",
-              "--net-port", "${RV_NET_PORT:-8081}", "--disk", "${RV_DISK-release}", "--dns", "10.0.5.1"]
+              "--net-port", "${RV_NET_PORT:-8081}", "--disk", "${RV_DISK-release}", "--dns", "10.0.5.1",
+              "--gpu-exec", "${RV_GPU_EXEC:-vrend}"]
     depends_on:
       fetch:
         condition: service_completed_successfully
@@ -143,13 +143,10 @@ services:
       RV_ALT_DOMAINS: ${RV_ALT_DOMAINS:-}
       RV_WWW_DOMAIN: ${RV_WWW_DOMAIN:-www.localhost}
       RV_DISK: ${RV_DISK-release}
-      # Blender's address as the page is told it (rv-site.json "blender"; empty: the page has no Blender) and the
-      # pages that may frame it; docs/deploy.md "Blender"
-      RV_BLENDER_URL: ${RV_BLENDER_URL:-}
-      RV_BLENDER_ANCESTORS: ${RV_BLENDER_ANCESTORS:-https://${RV_DOMAIN:-localhost}}
+      # The GPU executor switch (rv-site.json "gpu_exec": vrend, webgpu or auto); docs/deploy.md "GPU executor switch"
+      RV_GPU_EXEC: ${RV_GPU_EXEC:-vrend}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./blender-web:/blender:ro
       - ${RV_DIST:-./dist}:/dist:ro
       - ./site:/site:ro
       - caddy-data:/data
@@ -158,19 +155,6 @@ services:
     ports:
       - "${RV_PUBLIC_HTTP_PORT:-80}:80"
       - "${RV_PUBLIC_HTTPS_PORT:-443}:443"
-
-  blender:
-    image: rvwasm-blender:latest
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.run
-      target: blender
-    profiles: [blender]
-    volumes:
-      - blender:/data
-    ports:
-      - "127.0.0.1:${RV_BLENDER_PORT:-8040}:8040"
-    restart: unless-stopped
 
   build:
     <<: *build
@@ -182,7 +166,6 @@ services:
 
 volumes:
   work:
-  blender:
   caddy-data:
   caddy-config:
   caddy-logs:

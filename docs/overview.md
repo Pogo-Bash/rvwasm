@@ -51,7 +51,7 @@ connect the programs to the page: windows, the GPU, sound, video.
  ├─ GPU executor ....... runs GPU commands on WebGL2 or WebGPU
  ├─ Video decoder ...... WebCodecs, the computer's hardware decoder
  ├─ Audio player ....... an AudioWorklet
- └─ Network ............ a WebSocket to the relay
+ └─ Network ............ a WebSocket to rvRelay
         │  one shared block of memory between the page and the machine
  linux-wasm kernel (Linux compiled to wasm64, no MMU, every task a Web Worker)
  ├─ devices: keyboard, pointer, framebuffer, sound card, disks, network
@@ -148,7 +148,7 @@ system disk (`debian` on the console).
 - **The release disk** already has everything the desktop needs: KDE Plasma, Konsole, Dolphin, Kate,
   System Settings, Firefox ESR, Chromium, PulseAudio, ALSA's tools, ksystemstats, mpv, the video driver, and
   the native plasmashell in `/opt/nq`.
-- `apt-get install` works (through the network relay), so anything else in Debian's riscv64 archive can be added.
+- `apt-get install` works (through rvRelay), so anything else in Debian's riscv64 archive can be added.
 
 Logs inside the machine: `/root/autostart.log` (the desktop), `/root/wlserver.log` (the window server),
 `/root/sound.log` (the sound server).
@@ -280,13 +280,13 @@ not a way to run untrusted JavaScript.
 
 ## The network
 
-The machine has real networking. Its network card sends Ethernet frames over a WebSocket to a **relay**, which
+The machine has real networking. Its network card sends Ethernet frames over a WebSocket to **rvRelay**, which
 puts them on a TAP device and translates addresses out to the internet.
 
-- `tools/net-relay.py` is the relay. It only accepts the page's own origin.
-- In the release, the relay runs in its own container (`NET_ADMIN` and `/dev/net/tun` in that container only),
+- `tools/net-relay.py` is rvRelay. It only accepts the page's own origin.
+- In the release, rvRelay runs in its own container (`NET_ADMIN` and `/dev/net/tun` in that container only),
   on 127.0.0.1.
-- The relay you run is yours: you are responsible for the traffic that leaves your machine through it.
+- The rvRelay you run is yours: you are responsible for the traffic that leaves your machine through it.
 - `?net=off` turns networking off.
 
 ---
@@ -295,9 +295,6 @@ puts them on a TAP device and translates addresses out to the internet.
 
 - **hostopen:** `rv-host-open URL` (or a link opened from a program) asks the page to open it in a real browser
   tab.
-- **Blender with the GPU:** `blender-gpu` opens Puter's WebAssembly build of Blender (WebGPU) as a window of the
-  desktop, reading and saving the machine's files. This is temporary, until Debian's own Blender can draw
-  through our GPU path.
 
 ---
 
@@ -322,8 +319,8 @@ docker compose up
 Open **http://localhost:8080/**, click the page once (for sound). The desktop comes up by itself. The
 terminal under the screen is the machine's console and is usable at once.
 
-Ports: the page on `RV_HTTP_PORT` (8080), the relay on `RV_NET_PORT` (8081), both on 127.0.0.1 only. The page
-finds the relay itself. `docker compose down` stops both.
+Ports: the page on `RV_HTTP_PORT` (8080), rvRelay on `RV_NET_PORT` (8081), both on 127.0.0.1 only. The page
+finds rvRelay itself. `docker compose down` stops both.
 
 `docker compose up` serves what is in `./dist`. Build it with `docker/release.sh`, or set `RV_RELEASE_URL` to a
 release archive and the first `up` downloads it.
@@ -410,7 +407,6 @@ from nothing (LLVM, the Debian roots, Qt and KDE) is described in `docs/docker.m
 | `gpu/` | gpuserver, vrend for the page, the WebGPU path, the video decoder (`gpu/vdec`) |
 | `hostnode/` | running JavaScript programs as processes of the machine |
 | `hostopen/` | opening links on the host |
-| `blenderweb/` | Blender on the host's GPU as a desktop window |
 | `tools/www/` | the web page |
 | `tools/x/desktop` | starting the desktop and programs |
 | `tools/patch-runtime.py` | our changes to linux-wasm's runtime |
@@ -431,6 +427,5 @@ rvwasm stands on a lot of other people's work:
 - **KDE**: Plasma, the Frameworks, and the applications; **Qt**.
 - **Mesa** and **virglrenderer**: the OpenGL and Vulkan paths.
 - **PulseAudio**, **mpv**, **libva**, **BusyBox**, **musl**, **LLVM/clang**.
-- **Puter's blender-wasm**, used for the GPU Blender window.
 
 The licences of rvwasm and of everything it contains: `LICENSE.md`, `THIRD-PARTY.md`.

@@ -30,8 +30,20 @@ url() {
 	libxml2) echo https://download.gnome.org/sources/libxml2/2.12/libxml2-2.12.7.tar.xz ;;
 	libxkbfile) echo https://www.x.org/releases/individual/lib/libxkbfile-1.1.3.tar.xz ;;
 	kirigami-addons) echo https://download.kde.org/stable/kirigami-addons/kirigami-addons-1.7.0.tar.xz ;;
+	# the compression libraries KArchive needs for .tar.xz / .tar.bz2 / .tar.zst (shared builds: shared/build-kf-shared.sh xz bzip2 zstd; sums below)
+	xz) echo https://github.com/tukaani-project/xz/releases/download/v5.6.4/xz-5.6.4.tar.xz ;;
+	zstd) echo https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz ;;
+	bzip2) echo https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz ;;
 	qcoro) echo https://github.com/qcoro/qcoro/archive/refs/tags/v0.11.0.tar.gz ;;
 	*) echo https://download.kde.org/stable/plasma/$PL/$1-$PL.tar.xz ;;
+	esac
+}
+# sha256 of the tarballs that have one recorded here (checked after a download and again when the file is already there)
+sha() {
+	case $1 in
+	xz-5.6.4.tar.xz) echo 829ccfe79d769748f7557e7a4429a64d06858e27e1e362e25d01ab7b931d9c95 ;;
+	zstd-1.5.6.tar.gz) echo 8c29e06cf42aacc1eafc4077ae2ec6c6fcb96a626157e0593d5e82a34fd403c1 ;;
+	bzip2-1.0.8.tar.gz) echo ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269 ;;
 	esac
 }
 mkdir -p $NQ_SRC/dl
@@ -40,6 +52,12 @@ for n in ${*:-dbus $kf $pl}; do
 	u=$(url $n)
 	f=$NQ_SRC/dl/$(basename $u)
 	[ -s $f ] || curl -sfL -o $f $u || { echo "fetch-kde: $n: $u not found"; continue; }
+	want=$(sha $(basename $u))
+	if [ -n "$want" ] && [ "$(sha256sum $f | cut -d' ' -f1)" != "$want" ]; then
+		echo "fetch-kde: $n: $f does not match its recorded sha256; removed" >&2
+		rm -f $f
+		continue
+	fi
 	mkdir -p $NQ_SRC/$n && tar xf $f -C $NQ_SRC/$n --strip-components=1
 	echo "fetch-kde: $n"
 done

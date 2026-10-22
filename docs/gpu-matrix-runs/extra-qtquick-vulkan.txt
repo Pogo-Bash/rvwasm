@@ -1,0 +1,17 @@
+== gpu-nm qtquick ==
+program:  qtquick
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 4021 ms
+ring:     submitted 6, done 6, heartbeat 35
+jspi waits:4 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+boot:     912 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 285216768 (pid 181), caps at 289413120
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (6 submits)
+  FAIL window drawn (no window with a present)
+  FAIL pixel probe (a drawn window, not a flat colour) (no window PNG)
+  FAIL frames reported by the app > 0 (no 'N frames in S seconds' line)
+FAIL
+MATRIX_RESULT {"app":"qtquick","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":6,"presents":0,"pass":false,"failed":["window drawn (no window with a present)","pixel probe (a drawn window, not a flat colour) (no window PNG)","frames reported by the app > 0 (no 'N frames in S seconds' line)"]}
+exit=1

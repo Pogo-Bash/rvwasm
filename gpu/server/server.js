@@ -24,7 +24,7 @@
 (function (gs) {
   "use strict";
 
-  const { sys0, sys1, sys2, sys3, sys4, sys6, SYS, alloc, dv, u8, i32, path, P0, S, log, env, writeMem } = gs;
+  const { sys0, sys1, sys2, sys3, sys4, sys6, SYS, alloc, dv, u8, i32, ix32, roundUp, path, P0, S, log, env, writeMem } = gs;
   const AF_UNIX = 1, SOCK_STREAM = 1, SOCK_NONBLOCK = 0o4000, SOCK_CLOEXEC = 0o2000000;
   const O_RDWR = 2, O_CREAT = 0o100, O_EXCL = 0o200, O_CLOEXEC = 0o2000000;
   const AT_FDCWD = -100;
@@ -94,7 +94,7 @@
   const EXPORT_SIZE = 32;	// dev, ino_lo, ino_hi, res, ctx, 3 spare
 
   const block = alloc(HEADER + DATA_SIZE + CAPS_SIZE + 16 + EXPORT_SIZE * EXPORTS_CAP + 8 * MAX_SYNCS + 4096);
-  const ring = (block + 4095) & ~4095;
+  const ring = roundUp(block, 4096);
   const data = ring + HEADER;
   const caps = data + DATA_SIZE;
   const exportsAt = caps + CAPS_SIZE;	// generation (4), cap (4), 8 spare, then {dev, ino_lo, ino_hi, res}
@@ -113,8 +113,8 @@
     v.setUint32(ring + R.EXPORTS_CAP, EXPORTS_CAP, true);
     v.setUint32(exportsAt + 4, EXPORTS_CAP, true);
   }
-  const word = (offset) => Atomics.load(i32(), (ring + offset) >> 2) >>> 0;
-  const setWord = (offset, value) => Atomics.store(i32(), (ring + offset) >> 2, value | 0);
+  const word = (offset) => Atomics.load(i32(), ix32(ring + offset)) >>> 0;
+  const setWord = (offset, value) => Atomics.store(i32(), ix32(ring + offset), value | 0);
 
   let head = 0;		// bytes written (mod 2^32)
   let serial = 0;	// of the last record
@@ -163,8 +163,8 @@
   const doorbell = () => {
     if (doorbellDue) {
       doorbellDue = false;
-      Atomics.add(i32(), (ring + R.DOORBELL) >> 2, 1);
-      Atomics.notify(i32(), (ring + R.DOORBELL) >> 2);
+      Atomics.add(i32(), ix32(ring + R.DOORBELL), 1);
+      Atomics.notify(i32(), ix32(ring + R.DOORBELL));
     }
   };
   // Serial comparison that survives wrapping.
@@ -179,8 +179,13 @@
     if (yes) {
       const fd = sys4(SYS.openat, AT_FDCWD, path(readyPath(), P0), O_RDWR | O_CREAT | O_CLOEXEC | 0o1000, 0o644);
       if (fd >= 0) {
-        gs.writeAll(fd, JSON.stringify({ pid, ring, exports: exportsAt, exportsCap: EXPORTS_CAP, features: ["fence", "import", "vdec"],
-          vdec: vdec.ring }) + "\n");
+        // "venus": this executor has Vulkan (an executor that waits to be started, exec_state 4, is the WebGPU one, which has
+        // vkr). `desktop wayland` points the Vulkan loader at the venus driver only then (tools/x/desktop, vulkan_use).
+        const features = ["fence", "import", "vdec"];
+        if (deferred || word(R.VCAPS_LEN) > 0) {
+          features.push("venus");
+        }
+        gs.writeAll(fd, JSON.stringify({ pid, ring, exports: exportsAt, exportsCap: EXPORTS_CAP, features, vdec: vdec.ring }) + "\n");
         sys1(SYS.close, fd);
       }
     } else {
@@ -204,18 +209,44 @@
       sys3(SYS.unlinkat, AT_FDCWD, path(nonePath(), P0), 0);
     }
   };
-  const startedAt = performance.now();
+  let startedAt = performance.now();
   let execSeen = 0, execBeat = -1, execBeatAt = performance.now(), execGone = false;
+  // exec_state 4 (VK-15): the page has an executor it starts only when a program connects (the WebGPU one: a 16 MB
+  // module to compile). Until it is asked, it is promised (the ready file is there), and the first connection asks:
+  // `want` in the announcement. A program that connects meanwhile waits for the caps like before, but for longer.
+  let deferred = false, wanted = false;
+  const capsWait = () => (deferred ? 30000 : 10000);
   const execReady = () => !execGone && word(R.EXEC_STATE) === 1 && word(R.CAPS_LEN) > 0;
   // (venus: an executor with vkr, which wrote the venus capset; it may have no virgl caps)
   const venusReady = () => !execGone && word(R.EXEC_STATE) === 1 && word(R.VCAPS_LEN) > 0;
   const execCheck = (t) => {
     const state = word(R.EXEC_STATE);
+    if (state === 4 && !execSeen) {
+      if (!deferred) {
+        deferred = true;
+        log("gpuserver: the page's executor starts when the first program connects (exec_state 4)");
+        setReady(true);
+        if (noneSaid) {
+          setNone(false);
+        }
+      }
+      if (!wanted && clients.size > 0) {
+        wanted = true;
+        startedAt = t;	// (the 10 s of waiting for an executor to answer count from now)
+        log("gpuserver: a program has connected: asking the page to start its executor");
+        announce();
+      }
+      execBeatAt = t;
+      return;
+    }
     if (state === 2 || state === 3) {
       if (!execGone) {
         log("gpuserver: the executor says " + (state === 2 ? "its context is lost" : "it failed")
             + " (error " + word(R.EXEC_ERROR) + "): no more GPU here");
         setReady(false);
+        // (programs started from now on take software at once, rather than wait for a ready file that will not come:
+        // tools/x/desktop rvgpu_use. The page's WebGPU device lost mid-session is this, gpu-exec.js deviceLost.)
+        setNone(true);
       }
       execGone = true;
       return;
@@ -240,6 +271,7 @@
       log("gpuserver: the executor has not moved for 2 s: gone");
       execGone = true;
       setReady(false);
+      setNone(true);
     }
   };
 
@@ -258,14 +290,14 @@
     v.setUint32(at + 8, Math.floor(ino / 0x100000000), true);
     v.setUint32(at + 16, ctx, true);
     v.setUint32(at + 12, res, true);	// (last: a reader takes an entry whose res is not 0)
-    Atomics.add(i32(), exportsAt >> 2, 1);
+    Atomics.add(i32(), ix32(exportsAt), 1);
     return i;
   };
   const exportRemove = (i) => {
     if (i >= 0) {
       exportSlots[i] = 0;
       dv().setUint32(exportsAt + 16 + EXPORT_SIZE * i + 12, 0, true);
-      Atomics.add(i32(), exportsAt >> 2, 1);
+      Atomics.add(i32(), ix32(exportsAt), 1);
     }
   };
 
@@ -386,7 +418,7 @@
     let s;
     while (!(s = ring32(op, ctx, list, false))) {
       doorbell();
-      Atomics.wait(i32(), (ring + R.TAIL) >> 2, word(R.TAIL), 5);
+      Atomics.wait(i32(), ix32(ring + R.TAIL), word(R.TAIL), 5);
       if (execGone) {
         break;
       }
@@ -417,7 +449,7 @@
     let s;
     while (!(s = ring32(OP.RES_UNREF, client.ctx, [res], false))) {
       doorbell();
-      Atomics.wait(i32(), (ring + R.TAIL) >> 2, word(R.TAIL), 5);
+      Atomics.wait(i32(), ix32(ring + R.TAIL), word(R.TAIL), 5);
       if (execGone) {
         break;
       }
@@ -462,7 +494,7 @@
   const syncPending = new Array(MAX_SYNCS).fill(0n);	// the largest value a submitted batch will write
   const syncAddr = (id) => syncsAt + 8 * id;
   const syncGet = (id) => {
-    const w = i32(), at = syncAddr(id) >> 2;
+    const w = i32(), at = ix32(syncAddr(id));
     for (;;) {
       const hi = Atomics.load(w, at + 1) >>> 0, lo = Atomics.load(w, at) >>> 0;
       if ((Atomics.load(w, at + 1) >>> 0) === hi) {
@@ -471,7 +503,7 @@
     }
   };
   const syncSet = (id, v) => {
-    const w = i32(), at = syncAddr(id) >> 2;
+    const w = i32(), at = ix32(syncAddr(id));
     Atomics.store(w, at, Number(v & 0xffffffffn) | 0);
     Atomics.store(w, at + 1, Number(v >> 32n) | 0);
   };
@@ -620,7 +652,7 @@
     if (client.created) {
       while (!ring32(OP.CTX_DESTROY, client.ctx, [], false) && !execGone) {
         doorbell();
-        Atomics.wait(i32(), (ring + R.TAIL) >> 2, word(R.TAIL), 5);
+        Atomics.wait(i32(), ix32(ring + R.TAIL), word(R.TAIL), 5);
       }
     }
     freeCtx.push({ ctx: client.ctx, serial });
@@ -712,7 +744,7 @@
     case V.GET_CAPSET: {
       if (!venusReady()) {
         // (an executor without vkr says so with virgl caps alone: no venus here)
-        if (execGone || execReady() || performance.now() - client.since > 10000) {
+        if (execGone || execReady() || performance.now() - client.since > capsWait()) {
           return reply(client, V.GET_CAPSET, [0]);
         }
         return false;
@@ -839,7 +871,7 @@
     case V.GET_CAPS:
     case V.GET_CAPS2:
       if (!execReady()) {
-        if (execGone || performance.now() - client.since > 10000) {
+        if (execGone || performance.now() - client.since > capsWait()) {
           disconnect(client, "no executor to answer for caps");
           return "gone";
         }
@@ -1052,9 +1084,40 @@
     return true;
   };
 
-  // RESOURCE_CREATE_BLOB of a venus client: the pages, then the record, then the reply (the record is in
-  // the ring before the client can use the blob, so the page knows it first).
+  // RESOURCE_CREATE_BLOB of a venus client: the pages, then the record, then the reply once the executor has
+  // TAKEN the record (its tail is past it), not merely once it is in the ring. Importing a VkDeviceMemory
+  // blob writes the memory's bytes so far into these pages (wgvk_memory_set_guest_window); a client that had
+  // them already would lose what it wrote meanwhile. VK-25: venus maps its fence feedback buffer and at once
+  // writes VK_NOT_READY (1) into the fence's slot; the import came a little later and put back the zeros
+  // the memory started with, and 0 is VK_SUCCESS: the first fence of a process was signalled before its
+  // work ran. (virtio-gpu does the same: the host has the blob before the guest gets it.) The executor
+  // moves its tail only after a record's handler returned, so this needs nothing new from it.
   const venusBlob = (client, arg) => {
+    const pend = client.blobPending;
+    if (pend) {
+      if (!reached(word(R.TAIL), pend.end)) {
+        if (execGone) {
+          disconnect(client, "the executor is gone");
+          return "gone";
+        }
+        if (!client.wait) {
+          client.wait = performance.now();
+          stats.blobWaits = (stats.blobWaits || 0) + 1;
+        }
+        return false;
+      }
+      client.blobPending = null;
+      if (client.wait) {
+        stats.blobWaitMs = (stats.blobWaitMs || 0) + performance.now() - client.wait;
+        client.wait = null;
+      }
+      if (!reply(client, V.RESOURCE_CREATE_BLOB, [pend.res])) {
+        return "gone";
+      }
+      const ok = sendFd(client, pend.b.fd);
+      sent(pend.b);
+      return ok ? true : "gone";
+    }
     const size = arg(2) + arg(3) * 0x100000000;
     const b = backing(size);
     if (b.error) {
@@ -1073,12 +1136,8 @@
     resources.set(res, { res, ctx: client.ctx, size, address: b.address, backing: b, holders: new Set([client]),
       info: [0, 0, 0, size, 1, 1, 1, 0], exportSlot: exportAdd(res, client.ctx, b.dev, b.ino) });
     client.resources.add(res);
-    if (!reply(client, V.RESOURCE_CREATE_BLOB, [res])) {
-      return "gone";
-    }
-    const ok = sendFd(client, b.fd);
-    sent(b);
-    return ok ? true : "gone";
+    client.blobPending = { res, b, end: head };
+    return venusBlob(client, arg);
   };
 
   // SUBMIT_CMD2 -> VN_SUBMIT: {n, then per batch {cmd_off, cmd_size, sync_off, sync_count, ring_idx, flags}
@@ -1224,7 +1283,7 @@
   const announce = () => {
     if (announcer) {
       announcer.postMessage({ type: "gpu", version: 2, pid, ring, ringSize: HEADER + DATA_SIZE, caps, capsSize: CAPS_SIZE,
-        exports: exportsAt, exportsCap: EXPORTS_CAP, socket: socketPath, vdec: vdec.ring });
+        exports: exportsAt, exportsCap: EXPORTS_CAP, socket: socketPath, vdec: vdec.ring, lazy: 1, want: wanted });
     }
   };
 
@@ -1240,7 +1299,7 @@
     if (waiting) {
       doorbell();
       const done = word(R.DONE);
-      Atomics.wait(i32(), (ring + R.DONE) >> 2, done | 0, 1);
+      Atomics.wait(i32(), ix32(ring + R.DONE), done | 0, 1);
     }
     const n = sys6(SYS.epoll_pwait, epfd, events, MAX_EVENTS, waiting ? 0 : TURN_MS, 0, 0);
     if (n < 0 && n !== -EINTR) {
@@ -1304,9 +1363,11 @@
       log("stats: " + (stats.records / dt).toFixed(0) + " records/s, " + (stats.bytes / dt / 1024).toFixed(0) + " KiB/s, "
           + (stats.submits / dt).toFixed(1) + " submits/s, " + stats.waits + " waits, "
           + (stats.waits ? (stats.waitMs / stats.waits).toFixed(2) : "0") + " ms each, " + clients.size + " clients, "
-          + resources.size + " resources");
+          + resources.size + " resources"
+          + (stats.blobWaits ? ", " + stats.blobWaits + " blob replies held for the executor, "
+             + (stats.blobWaitMs / stats.blobWaits).toFixed(2) + " ms each" : ""));
       lastStats = t;
-      stats.records = stats.bytes = stats.submits = stats.waits = stats.waitMs = 0;
+      stats.records = stats.bytes = stats.submits = stats.waits = stats.waitMs = stats.blobWaits = stats.blobWaitMs = 0;
     }
   };
 

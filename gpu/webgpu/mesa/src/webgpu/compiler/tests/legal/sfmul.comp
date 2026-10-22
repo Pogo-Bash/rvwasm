@@ -1,0 +1,36 @@
+#version 450
+// soft-fp64's 64x64 -> 128 multiply and jamming shift (from Mesa's float64.glsl), on 32-bit integers
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer In { uint a[]; };
+layout(set = 0, binding = 1) buffer Out { uint o[]; };
+void add64(uint a0, uint a1, uint b0, uint b1, out uint z0, out uint z1)
+{
+   uint t = a1 + b1;
+   z1 = t;
+   z0 = a0 + b0 + uint(t < a1);
+}
+void mul64to128(uint a0, uint a1, uint b0, uint b1, out uint z0p, out uint z1p, out uint z2p, out uint z3p)
+{
+   uint z0 = 0u, z1 = 0u, z2 = 0u, z3 = 0u, more1 = 0u, more2 = 0u;
+   umulExtended(a1, b1, z2, z3);
+   umulExtended(a1, b0, z1, more2);
+   add64(z1, more2, 0u, z2, z1, z2);
+   umulExtended(a0, b0, z0, more1);
+   add64(z0, more1, 0u, z1, z0, z1);
+   umulExtended(a0, b1, more1, more2);
+   add64(more1, more2, 0u, z2, more1, z2);
+   add64(z0, z1, 0u, more1, z0, z1);
+   z3p = z3; z2p = z2; z1p = z1; z0p = z0;
+}
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   uint x = i * 2654435761u + 7u;
+   uint a0 = (x & 0xfffffu) | 0x100000u, a1 = x * 747796405u + 2891336453u;
+   uint b0 = (x * 1103515245u) >> 1, b1 = x ^ 0xdeadbeefu;
+   if (i == 0u) { a0 = 0x00180000u; a1 = 0u; b0 = 0x7ae147aeu; b1 = 0x147ae000u; }
+   uint z0, z1, z2, z3;
+   mul64to128(a0, a1, b0, b1, z0, z1, z2, z3);
+   add64(z0, z1, a0, a1, z0, z1);
+   z2 |= uint(z3 != 0u);
+   o[4u * i] = z0; o[4u * i + 1u] = z1; o[4u * i + 2u] = z2; o[4u * i + 3u] = z3;
+}

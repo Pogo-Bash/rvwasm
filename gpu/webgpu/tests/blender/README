@@ -1,0 +1,22 @@
+Blender 4.3.2 on zink on wgvk (Dawn native) in the VM's arm64 chroot (milestone 2 bring-up, T2).
+Not a check.sh test (minutes per run); in the VM:
+
+  cp chroot-wgvk.sh ~/wt/; cp blender-run.sh imgdiff.py passes.py passdiff.py pix.py ~/rvwasm/webgpu/out/t2/
+  bash ~/wt/chroot-wgvk.sh wgvk-main 'bash /out/t2/blender-run.sh eevee TAG'     # -> out/t2/TAG-eevee
+  bash ~/wt/chroot-wgvk.sh lvp-main  'bash /out/t2/blender-run.sh eevee ref'
+  bash ~/wt/chroot-wgvk.sh lvp "blender -b --factory-startup --python /out/t2/imgdiff.py -- A.png B.png 8"
+
+Drivers: lvp = the chroot's lavapipe (Mesa 25.0.7); wgvk = wgvk on Dawn on that lavapipe (which blends no
+SNORM formats, so Dawn gives no texture-formats-tier1 and EEVEE's R16F/RG16/RG11B10/RGB10A2 storage images
+fail); lvp-main / wgvk-main = the integration build's lavapipe (Mesa main, LLVM 20 copied in), which gives
+tier1 + tier2 like browsers do. Modes: workbench, eevee (SAMPLES=n), passes (each EEVEE render pass to an
+EXR; passdiff.py compares two directories), ui (screenshot after UI_WAIT s).
+
+Through vfront (VK-12): the guest's Mesa 25.0.7 virgl driver (GALLIUM_DRIVER=virpipe) over a vtest socket to
+vfront-vtest on wgvk on Dawn, which is the GL path the page ships. In the VM (needs a vfront-vtest build, VFRONT_BUILD=NAME):
+
+  VFRONT_BUILD=vk-03 bash ~/wt/vk-12/gpu/webgpu/tests/blender/blender-vfront-check.sh      # Workbench vs lavapipe, PASS/FAIL
+  VFRONT_BUILD=vk-03 bash blender-vfront.sh MODE TAG [lvp]                                 # any mode; output ~/rvwasm/gpu-t6/blender/TAG-MODE
+
+blender-vfront.sh runs the server through vfront/scripts/main-run.sh with a memory watchdog (MAXRSS_MB, default 5000;
+the wgvk server leaks about 6 MB per piglit test, so a long EEVEE run must be watched) and reports the server's peak RSS.

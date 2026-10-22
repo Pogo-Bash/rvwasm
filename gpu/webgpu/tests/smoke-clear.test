@@ -1,0 +1,6 @@
+#!/bin/bash
+# The clear smoke test through wgvk as an ICD (smoke-clear.c). Run by gpu/webgpu/build/check.sh.
+set -e
+mkdir -p $B/tests
+cc -O1 -g -Wall -I$TREE/include -o $B/tests/smoke-clear $WT/gpu/webgpu/mesa/src/webgpu/tests/smoke-clear.c -lvulkan
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 120 $B/tests/smoke-clear wgvk

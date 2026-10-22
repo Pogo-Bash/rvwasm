@@ -1,0 +1,9 @@
+until:420:window.rvDisplay && rvDisplay.windows().length>=2
+wait:15
+sh:debian "perl -v" | grep -i "built for"
+sh:grep -l "(native)" /opt/nq-shared/share/applications/*.desktop | wc -l
+sh:ls /opt/nq-shared/share/applications | wc -l
+sh:cat /debian/root/.cache/rv-ksycoca-nqs
+sh:grep -c "native" /debian/root/.cache/rv-ksycoca-menu
+sh:ls /opt/nq-shared/share/applications | head -3
+quit

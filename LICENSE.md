@@ -21,9 +21,6 @@ Where a file carries an `SPDX-License-Identifier` line, that line governs the fi
 |---|---|---|
 | `rv/`, `wlserver/*.js`, `wlserver/*.md`, `gpu/` (except what is listed below), `hostnode/`, `hostopen/`, `probes/`, `tests/`, `docker/`, `docker-compose.yml`, `site/`, `docs/*.md` and `docs/usability-audit-2026-10-10/`, `results/`, and `tools/` (except what is listed below) | GPL-2.0-or-later | rvwasm's own code and writing |
 | `gpu/vdec/` (the video decoder driver) | MIT (its file headers) | own code |
-| `blenderweb/` (except `blenderweb/www/`) | GPL-2.0-or-later | own code; it fetches and runs Puter's Blender build, which is separate (below) |
-| `blenderweb/www/main.js` | GPL-2.0 (its header; Puter's README says 2 or later) | Puter's blender-wasm demo, changed |
-| `blenderweb/www/index.html` | GPL-2.0-or-later (its own header says so) | the page that starts Puter's Blender |
 | `patches/kernel-*.diff`, `docs/upstream/patches/kernel/` | GPL-2.0-only | patches to the Linux kernel as built by linux-wasm; the new files carry `GPL-2.0-only` headers |
 | `patches/linux-wasm-runtime.diff`, `patches/linux-wasm-script.diff`, `docs/upstream/patches/runtime/`, `tools/patch-runtime.py`, `tools/www/dev.html` | GPL-2.0-only | derived from Joel Severin's linux-wasm (`runtime/` and `linux-wasm.sh`), which is `GPL-2.0-only` |
 | `patches/musl-wasm64.diff`, `docs/upstream/patches/musl/` | MIT | patches to musl libc |

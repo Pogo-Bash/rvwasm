@@ -345,12 +345,21 @@ struct rv_cpu {
 
 	/* Target of faulting accesses, so a fault needs no unwinding. */
 	uint8_t scratch[16];
+	/* What translated code's xlat function leaves for the caller's translation cache (jit.c: gen_xlat_fn()). */
+	uint64_t xlat[3];
 };
 
 /* interp.c */
 void rv_run(struct rv_cpu *cpu);
 void rv_interp_block(struct rv_cpu *cpu);
 void rv_interp_steps(struct rv_cpu *cpu, uint64_t count);
+
+/* jitcache.c: translations kept outside the process, found by a key made from what they were made from */
+#define RV_JC_KEY	16
+void rv_jc_key(const void *data, size_t len, uint8_t key[RV_JC_KEY]);
+int rv_jc_on(void);
+long rv_jc_get(const uint8_t key[RV_JC_KEY], void *buf, size_t cap);
+long rv_jc_put(const uint8_t key[RV_JC_KEY], const void *rec, size_t len);
 
 /* jit.c */
 int rv_jit_init(struct rv_cpu *cpu);
@@ -364,6 +373,7 @@ void rv_jit_count_fp(struct rv_cpu *cpu, uint32_t insn);
 void rv_jit_free(struct rv_cpu *cpu);
 void rv_jit_after_fork(void);
 void rv_undo_note(struct rv_cpu *cpu, uint64_t addr, uint64_t len);
+void rv_jit_note_jalr(struct rv_cpu *cpu, uint64_t pc, uint64_t target);
 
 /* bitmanip.c: Zba, Zbb, Zbs */
 enum {

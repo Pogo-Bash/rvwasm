@@ -2692,36 +2692,63 @@ static uint64_t sys_sockopt(struct rv_cpu *cpu, int get, int fd, int level, int 
 }
 
 /*
- * epoll. struct epoll_event is 16 bytes with its 64 bits of data aligned on
- * every 64-bit Linux except x86-64, where it is packed into 12: this would
- * need translating there.
+ * epoll. The guest's struct epoll_event is 16 bytes with its 64 bits of data
+ * aligned, as on every 64-bit Linux except x86-64, where the host's is packed
+ * into 12: there (the native build on a PC, for testing) the events are
+ * translated through a copy.
  */
-_Static_assert(sizeof(struct epoll_event) == 16, "struct epoll_event is not laid out as on riscv64");
+struct rv_epoll_event {
+	uint32_t events;
+	uint32_t pad;
+	uint64_t data;
+};
+#define EPOLL_SAME_LAYOUT (sizeof(struct epoll_event) == sizeof(struct rv_epoll_event))
+#define EPOLL_MAX_EVENTS 256
 
 static uint64_t sys_epoll_ctl(struct rv_cpu *cpu, int epfd, int op, int fd, uint64_t addr)
 {
-	struct epoll_event *event = NULL;
+	struct epoll_event host, *event = NULL;
 
-	if (op != EPOLL_CTL_DEL && !(event = rv_user_ptr(cpu, addr, sizeof(*event), RV_PROT_READ)))
-		return neg(RV_EFAULT);
+	if (op != EPOLL_CTL_DEL) {
+		const struct rv_epoll_event *g = rv_user_ptr(cpu, addr, sizeof(*g), RV_PROT_READ);
+
+		if (!g)
+			return neg(RV_EFAULT);
+		memset(&host, 0, sizeof(host));
+		host.events = g->events;
+		host.data.u64 = g->data;
+		event = &host;
+	}
 	return ret_errno(epoll_ctl(epfd, op, fd, event));
 }
 
 static uint64_t sys_epoll_pwait(struct rv_cpu *cpu, int epfd, uint64_t addr, int max, int timeout, uint64_t mask_addr)
 {
-	struct epoll_event *events = max > 0 ? rv_user_ptr(cpu, addr, (uint64_t)max * sizeof(*events), RV_PROT_WRITE) : NULL;
+	struct rv_epoll_event *events;
+	struct epoll_event host[EPOLL_SAME_LAYOUT ? 1 : EPOLL_MAX_EVENTS], *out;
 	sigset_t set;
 	uint64_t mask;
 	int ret;
 
 	if (max <= 0)
 		return neg(RV_EINVAL);
+	if (!EPOLL_SAME_LAYOUT && max > EPOLL_MAX_EVENTS)
+		max = EPOLL_MAX_EVENTS;
+	events = rv_user_ptr(cpu, addr, (uint64_t)max * sizeof(*events), RV_PROT_WRITE);
 	if (!events || (mask_addr && get_sigset(cpu, mask_addr, &mask, &set)))
 		return neg(RV_EFAULT);
 
-	ret = epoll_pwait(epfd, events, max, timeout, mask_addr ? &set : NULL);
+	out = EPOLL_SAME_LAYOUT ? (struct epoll_event *)(void *)events : host;
+	ret = epoll_pwait(epfd, out, max, timeout, mask_addr ? &set : NULL);
 	if (ret < 0 && errno == EINTR && mask_addr)
 		rv_signal_temp_mask(cpu, mask);
+	if (!EPOLL_SAME_LAYOUT) {
+		for (int i = 0; i < ret; i++) {
+			events[i].events = host[i].events;
+			events[i].pad = 0;
+			events[i].data = host[i].data.u64;
+		}
+	}
 	return ret_errno(ret);
 }
 

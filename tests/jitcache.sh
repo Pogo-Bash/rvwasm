@@ -72,7 +72,7 @@ def read(path):
         return rows
     for line in open(path, errors="replace"):
         p = line.split()
-        if len(p) == 12 and p[0] == "R":
+        if len(p) >= 12 and p[0] == "R":
             rows.append(dict(pid=p[1], file=p[2], off=p[3], base=p[4], insns=int(p[5]), blocks=int(p[6]), hash=p[7],
                              fixed=p[8] == "1", made=int(p[9]), compiled=int(p[10]), size=int(p[11])))
     return rows

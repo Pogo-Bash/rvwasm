@@ -8,3 +8,8 @@
 build/
 *.o
 /dist/
+# gpu/webgpu/build holds build scripts (tracked), not output
+!/gpu/webgpu/build/
+
+# Node test bed dependencies (gpu/webgpu/tests/dawn-node: npm ci)
+node_modules/

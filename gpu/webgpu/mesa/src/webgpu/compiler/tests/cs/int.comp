@@ -1,0 +1,44 @@
+#version 450
+// Integer edge semantics: signed/unsigned division and remainder, bit scans, bitfields, wide multiplies, carries.
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 1) buffer O { uint o[]; };
+layout(set = 0, binding = 2) buffer I { uint inp[]; };
+layout(set = 0, binding = 3) buffer O2 { uint o2[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint ua = inp[i], ub = inp[(i * 7u + 3u) % 1024u];
+	int a = int(ua), b = int(ub);
+	uint base = i * 16u;
+	bool ok = b != 0 && !(a == int(0x80000000u) && b == -1);
+	o[base + 0] = uint(ok ? a / b : 0);
+	o[base + 1] = uint(ok && a >= 0 && b > 0 ? a % b : 0);
+	o[base + 2] = ub != 0u ? ua / ub : 0u;
+	o[base + 3] = ub != 0u ? ua % ub : 0u;
+	o[base + 4] = uint(findMSB(a));
+	o[base + 5] = uint(findMSB(ua));
+	o[base + 6] = uint(findLSB(ua));
+	o[base + 7] = uint(bitCount(ua));
+	o[base + 8] = bitfieldReverse(ua);
+	o[base + 9] = bitfieldExtract(ua, int(ub & 15u), int((ub >> 4) & 15u));
+	o[base + 10] = uint(bitfieldExtract(a, int(ub & 15u), int((ub >> 4) & 15u)));
+	o[base + 11] = bitfieldInsert(ua, ub, int(i & 15u), int((i >> 4) & 15u));
+	uint hi, lo;
+	umulExtended(ua, ub, hi, lo);
+	o[base + 12] = hi;
+	o[base + 13] = lo;
+	int ihi, ilo;
+	imulExtended(a, b, ihi, ilo);
+	o[base + 14] = uint(ihi);
+	uint carry;
+	o[base + 15] = uaddCarry(ua, ub, carry) + carry * 7u;
+	o2[base + 0] = uint(a >> (ub & 31u)) ^ (ua << (ub & 31u)) ^ (ua >> ((ub >> 5) & 31u));
+	o2[base + 1] = uint(abs(a)) + uint(sign(a)) * 3u;
+	o2[base + 2] = uint(min(a, b)) + uint(max(a, b)) * 5u + min(ua, ub) * 9u;
+	o2[base + 3] = uint(clamp(a, -1000, 1000));
+	uint borrow;
+	o2[base + 4] = usubBorrow(ua, ub, borrow) ^ borrow;
+	o2[base + 5] = uint(-a) + ~ua;
+	o2[base + 6] = uint(a < b) | uint(ua < ub) << 1 | uint(a >= b) << 2 | uint(ua == ub) << 3;
+	o2[base + 7] = (ua * 2654435761u) + uint(a * -7);
+}

@@ -1,0 +1,22 @@
+== gpu-nm qtquick ==
+program:  qtquick
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3979 ms
+ring:     submitted 1514, done 1514, heartbeat 1382
+jspi waits:677 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+boot:     895 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 218107904 (pid 181), caps at 222304256
+frames:   183 in 9 reports of es2gears; last 20 frames in 2.0 seconds = 10.0 FPS
+windows:  slot 0 "gpu-matrix qtquick" 640x480: 201 looks, present 201
+gl:       RENDERER: virgl (zink Vulkan 1.1(wgvk (WebGPU: device) (MESA_LLVMPIPE))) VERSION: 4.3 (Compatibility Profile) Mesa 25.0.7-2+deb13u1
+probe:    4 of 4 window PNGs are drawn (not flat); 4 different pictures; last 0-4.png 640x480: 1255 colours, the commonest 61.6%
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (1514 submits)
+  ok   frames > 0 (183)
+  ok   window drawn (slot 0 "gpu-matrix qtquick" 640x480: 201 looks, present 201)
+  ok   pixel probe (a drawn window, not a flat colour) (4/4)
+  ok   the picture moves (animated: more than one different PNG) (4 different)
+  ok   frames reported by the app > 0 (9 reports)
+PASS
+MATRIX_RESULT {"app":"qtquick","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":1514,"presents":0,"frames":183,"fps":10,"pictures":4,"pass":true,"failed":[]}

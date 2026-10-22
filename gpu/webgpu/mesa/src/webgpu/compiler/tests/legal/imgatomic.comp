@@ -1,0 +1,12 @@
+#version 450
+// r32 images used atomically (EEVEE's shadow atlas): storage buffers with a header
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, r32ui) uniform uimage2DArray atlas;
+layout(set = 0, binding = 1, r32i) uniform iimage2D minmax;
+void main() {
+   ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+   imageAtomicMin(atlas, ivec3(p, 1), uint(p.x * 3 + p.y));
+   imageAtomicMax(minmax, p / 4, p.x - p.y);
+   uint old = imageAtomicCompSwap(atlas, ivec3(p, 0), 0u, 7u);
+   imageStore(atlas, ivec3(p, 2), uvec4(old + imageLoad(atlas, ivec3(p, 1)).x + uint(imageSize(atlas).z)));
+}

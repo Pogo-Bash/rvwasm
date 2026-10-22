@@ -47,7 +47,16 @@ for f in "$S"/tools/www/*; do
 	[ ! -f "$WWW/$f" ] || cp -L "$WWW/$f" "$OUT/www/$f"
 done
 # The GPU executors: vrend (gpu/vrend/build.sh) and rvgpu (gpu/webgpu/build/wasm.sh, ?exec=webgpu).
-want vrend rvgpu rvgpu-worker.js
+want vrend rvgpu rvgpu-worker.js dl
+# rvgpu only from a stamped, clean build (gpu/webgpu/build/wasm.sh writes the stamp; tools/rvgpu-gate.sh checks it):
+# an unstamped or dirty rvgpu.wasm has no known source and is not packed. RV_RVGPU=skip leaves the WebGPU executor out.
+if [ "${RV_RVGPU-}" = skip ]; then
+	rm -rf "$OUT/www/rvgpu" "$OUT/www/rvgpu-worker.js"
+	echo "pack-www: RV_RVGPU=skip: no WebGPU executor in $OUT" >&2
+elif [ -e "$OUT/www/rvgpu/rvgpu.wasm" ]; then
+	"$S/tools/rvgpu-gate.sh" "$OUT/www/rvgpu/rvgpu.wasm" ||
+		{ echo "pack-www: $WWW/rvgpu/rvgpu.wasm is not a stamped, clean build (rebuild: gpu/webgpu/build/wasm.sh on a committed tree; or RV_RVGPU=skip)" >&2; exit 1; }
+fi
 for image in ${RV_IMAGES-}; do
 	need "initramfs-$image-$LW_VARIANT.cpio.gz"
 done

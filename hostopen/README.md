@@ -14,7 +14,7 @@ be opened there, in a tab of the person's own browser:
                                      the launchers; --uninstall undoes it
     rv-host-open --off / --on        everything opens in the machine again / on the host (the default)
     Alt-Shift-O, or "Page to host"   (the page, while the window server runs) the page of the Firefox or
-                                     Chromium window in front, opened on the host
+                                     Chromium window in front, offered to the host (asks first, like every address)
 
 ## Files the other way: rv-host-save
 
@@ -25,8 +25,8 @@ be opened there, in a tab of the person's own browser:
 The machine's side (`boot.js --save FILE`) reads the file into its own memory and says where on the
 channel, with a mark as below; the page copies it out of its machine's memory and hands it to the
 browser as a download: at once if the person clicked on the screen in the last three seconds (choosing
-the menu entry is such a click), otherwise shown in the screen's top right corner, "Save to this
-computer: NAME", to be clicked. The other way round, files dropped on the screen, or picked with the
+the menu entry is such a click), otherwise asked for in the same box as an address ("Save **NAME** (size)
+to this computer?", Save / Cancel; the box is described below). The other way round, files dropped on the screen, or picked with the
 bar's "Files to machine", go into ~/Downloads in the machine (wlserver/README.md).
 
 ## How an address gets out
@@ -56,20 +56,32 @@ It needs no window server: it works under X (Plasma, IceWM) as under
   refused: a guest program is not to run script in the page's origin, read
   the host's files or start the host's programs. Checked in `boot.js` (to say
   why at once) and again in the page (which is what opens it).
-- A tab opens only after the person acted. Browsers block `window.open`
-  unless the page has a "user activation" (a click or a key on it in the last
-  few seconds, five in Chrome). If the person clicked on the screen in the
-  last three seconds (most likely the link in a guest program that led here)
-  and the browser still counts that click, the address is opened at once.
-  Otherwise the page shows it in the screen's top right corner, "Open on this
-  computer: **example.com**/watch...", as a link the person clicks, with a
-  close button; the host's name is shown as the browser has it (an
-  international name in its ASCII form, so look-alike letters show). Several
-  waiting: the newest is shown, with how many more; they are forgotten after
-  two minutes. A key press alone never opens a tab at once: a program in the
-  machine could otherwise open tabs while the person types.
+- **Nothing opens without the person's answer** (owner, 2026-10-14). Every address is shown in a box of the
+  page's own, outside the machine's screen (a fixed box at the top of the page, over the bar's row, in the
+  landing page's and the top bar's look: Catppuccin Mocha, JetBrains Mono): "Open **example.com**/watch... in a
+  new tab?", the whole address under it with the host in colour (the host as the browser has it: an
+  international name in its ASCII form, so look-alike letters show), and Open / Cancel. The click on Open is
+  the user activation the browser wants for a new tab. (Until then a click on the screen in the last three
+  seconds opened the tab at once; that shortcut is gone for addresses, and Page to host asks too.) Several
+  waiting: the newest is shown first, with "N waiting"; they are forgotten after two minutes. Enter opens and
+  Escape cancels while the box has the keyboard (click it, or Tab to it); it never takes the keys by itself,
+  so a program in the machine cannot have the person's typing open a tab.
 - The new tab has no opener (it cannot reach the page) and, from the link, no
   referrer.
+
+## The default browser (owner, 2026-10-14)
+
+Web links opened inside the machine, by any program (KDE's, native or emulated: Konsole's Ctrl+click,
+KIO's OpenUrlJob in Dolphin and Okular, KNewStuff's "Open the homepage"; xdg-open, kde-open, $BROWSER), go to the
+person's own browser as a new tab, after the box above, not to Debian's emulated browsers (which one KDE
+picked used to depend on how its cache happened to be built: firefox-esr, chromium or luakit).
+`tools/x/xdg` (the desktop's system defaults, on XDG_CONFIG_DIRS and XDG_DATA_DIRS after Debian's, and so after the user's own
+~/.config) has `config/mimeapps.list` (`x-scheme-handler/http`, `x-scheme-handler/https` and `text/html` ->
+`rv-host-open.desktop`) and `data/applications/rv-host-open.desktop`; the desktop script makes KDE's cache again once
+(stamp `~/.cache/rv-ksycoca-xdg`) so that a home from before has it. A local file (`file:///x.html`, a path)
+is not for the host, which cannot read it: `rv-host-open` hands it to the machine's own browser. Firefox ESR and
+Chromium start from the menu as before. A person's own choice (`~/.config/mimeapps.list`, "Open with ... always")
+wins over these defaults; `rv-host-open --install` writes it again, `--uninstall` removes it.
 
 ## Firefox and Chromium in the machine
 
@@ -81,8 +93,7 @@ is:
   server runs): the page presses Ctrl-L and Ctrl-C in the window in front
   (Firefox, Chromium, Falkon, Konqueror, Epiphany, Midori by app id), takes
   the address from the clipboard bridge, presses Escape, and opens the
-  address on the host (at once: the key or the click that asked is the user
-  activation). Costs: the address is left on the guest's and the host's
+  address to the host's box (Open / Cancel, like every address). Costs: the address is left on the guest's and the host's
   clipboard, and the address bar keeps the keyboard. It needs the window
   server (under X there is no clipboard bridge).
   Seen in the browser: the bar's button with Firefox in front opened
@@ -102,7 +113,7 @@ is:
 
 ## Guest servers at localhost
 
-`tools/guest-port.py` (run in the build VM, next to the network relay) makes
+`tools/guest-port.py` (run in the build VM, next to rvRelay) makes
 a server in the machine, `python3 -m http.server 8080` say, reachable from
 the host's browser at `http://localhost:8080/`: it listens on the VM's
 127.0.0.1 and passes connections to the machine (10.0.5.N), and Lima forwards

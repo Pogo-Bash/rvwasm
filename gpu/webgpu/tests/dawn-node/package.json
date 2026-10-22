@@ -1,0 +1,11 @@
+{
+  "name": "rvgpu-dawn-node",
+  "private": true,
+  "description": "VK-02: Dawn's Node bindings (dawn.node) as a browserless WebGPU for the rvgpu executor. Node 26 is needed for JSPI (rvgpu.wasm), Node 22 has none.",
+  "dependencies": {
+    "webgpu": "0.6.2"
+  },
+  "devDependencies": {
+    "node": "26.11.1"
+  }
+}

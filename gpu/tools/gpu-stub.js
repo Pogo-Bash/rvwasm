@@ -9,7 +9,12 @@
 //   GPU_STUB_CAPS=FILE               other caps (made like the page's vrend's: GPU_STUB_CAPS_RAW=1 not to)
 //   GPU_STUB_LAG=MS                  complete records only this long after they came (a slow executor)
 //   GPU_STUB_DIE=S                   stop moving after S seconds (the executor gone)
+//   GPU_STUB_LOST=S                  after S seconds say what the page says when the WebGPU device is lost (VK-13,
+//                                    gpu-exec.js deviceLost): exec_state 2; gpuserver then removes rvgpu-0.ready and
+//                                    writes rvgpu-0.none, and programs started after that draw in software
 "use strict";
+// (An address of the machine's memory as the index of its 32-bit word: exact for addresses past 2 and 4 GiB, which `>> 2` is not.)
+const ix32 = (a) => Math.floor(a / 4);
 
 const fs = require("fs");
 const path = require("path");
@@ -34,6 +39,7 @@ module.exports = (os, opts) => {
   }
   const lag = Number(process.env.GPU_STUB_LAG || 0);
   const dieAfter = Number(process.env.GPU_STUB_DIE || 0);
+  const lostAfter = Number(process.env.GPU_STUB_LOST || 0);
   const t0 = Date.now();
 
   const R = { CTX_DONE: 1024, HEAD: 24, DOORBELL: 28, SUBMITTED: 32, TAIL: 64, DONE: 68, EXEC_HEARTBEAT: 72, EXEC_STATE: 76, CAPS_LEN: 84 };
@@ -61,7 +67,7 @@ module.exports = (os, opts) => {
     dataOff = v.getUint32(ring + 20, true);
     new Uint8Array(os.memory.buffer).set(capsData, m.caps);
     v.setUint32(ring + R.CAPS_LEN, capsData.length, true);
-    Atomics.store(new Int32Array(os.memory.buffer), (ring + R.EXEC_STATE) >> 2, 1);
+    Atomics.store(new Int32Array(os.memory.buffer), ix32(ring + R.EXEC_STATE), 1);
     console.error("gpu-stub: ring at " + ring + " (pid " + m.pid + "), " + capsData.length + " bytes of caps given");
   };
 
@@ -90,11 +96,15 @@ module.exports = (os, opts) => {
     if (dieAfter && Date.now() - t0 > dieAfter * 1000) {
       return;
     }
+    if (lostAfter && Date.now() - t0 > lostAfter * 1000) {
+      Atomics.store(new Int32Array(os.memory.buffer), ix32(ring + R.EXEC_STATE), 2);
+      return;
+    }
     const w = new Int32Array(os.memory.buffer);
     const v = new DataView(os.memory.buffer);
-    Atomics.add(w, (ring + R.EXEC_HEARTBEAT) >> 2, 1);
-    const head = Atomics.load(w, (ring + R.HEAD) >> 2) >>> 0;
-    let tail = Atomics.load(w, (ring + R.TAIL) >> 2) >>> 0;
+    Atomics.add(w, ix32(ring + R.EXEC_HEARTBEAT), 1);
+    const head = Atomics.load(w, ix32(ring + R.HEAD)) >>> 0;
+    let tail = Atomics.load(w, ix32(ring + R.TAIL)) >>> 0;
     while (tail !== head) {
       const at = ring + dataOff + (tail % dataSize);
       const op = v.getUint32(at, true), ctx = v.getUint32(at + 4, true), serial = v.getUint32(at + 8, true);
@@ -136,19 +146,19 @@ module.exports = (os, opts) => {
       }
       tail = (tail + 16 + ((bytes + 15) & ~15)) >>> 0;
     }
-    Atomics.store(w, (ring + R.TAIL) >> 2, tail | 0);
+    Atomics.store(w, ix32(ring + R.TAIL), tail | 0);
     // In order: the context's done word, then the global one, then wake whoever waits on the global one.
     let done = -1;
     while (pending.length && Date.now() - pending[0][0] >= lag) {
       const [, serial, ctx] = pending.shift();
       if (ctx > 0 && ctx < 256) {
-        Atomics.store(w, (ring + R.CTX_DONE + 4 * ctx) >> 2, serial | 0);
+        Atomics.store(w, ix32(ring + R.CTX_DONE + 4 * ctx), serial | 0);
       }
       done = serial;
     }
     if (done >= 0) {
-      Atomics.store(w, (ring + R.DONE) >> 2, done | 0);
-      Atomics.notify(w, (ring + R.DONE) >> 2);
+      Atomics.store(w, ix32(ring + R.DONE), done | 0);
+      Atomics.notify(w, ix32(ring + R.DONE));
     }
   };
   const timer = setInterval(turn, 1);

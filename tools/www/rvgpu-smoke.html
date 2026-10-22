@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rvgpu smoke</title>
+<!-- ?test=clear (default) or ?test=draw (T2: a scene with depth, textures, instancing and a compute pass,
+     checked at sample pixels; tests/smoke-draw.c).
+     The page Worker (rvgpu-worker.js) clears an image through wgvk (Vulkan on WebGPU, in rvgpu.wasm) and shows
+     it on the canvas below. Needs cross-origin isolation (COOP/COEP) for rvgpu.wasm's shared memory.
+     window.rvgpuSmoke holds the Worker's result for drivers (gpu/webgpu/build/smoke-browser.js). -->
+<style>
+  body { background: #222; color: #ddd; font: 14px monospace; margin: 16px; }
+  canvas { width: 256px; height: 256px; image-rendering: pixelated; border: 1px solid #555; display: block; }
+  pre { white-space: pre-wrap; }
+</style>
+<canvas id="c" width="64" height="64"></canvas>
+<pre id="out">starting...</pre>
+<script>
+  const out = document.getElementById("out");
+  const say = (t) => { out.textContent += "\n" + t; };
+  const canvas = document.getElementById("c").transferControlToOffscreen();
+  const base = location.href.replace(/[^/]*$/, "");
+  const worker = new Worker("rvgpu-worker.js");
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "log") { say(m.text); return; }
+    if (m.type === "smoke") {
+      window.rvgpuSmoke = m;
+      say((m.ok ? "ok" : "FAIL") + " " + JSON.stringify(m, null, 1));
+    }
+  };
+  worker.onerror = (e) => { window.rvgpuSmoke = { ok: false, msg: "worker error: " + e.message }; say(window.rvgpuSmoke.msg); };
+  out.textContent = "crossOriginIsolated=" + self.crossOriginIsolated;
+  const test = new URLSearchParams(location.search).get("test") || "clear";
+  worker.postMessage({ type: "smoke", canvas, base, test, color: [0.25, 0.5, 0.75, 1] }, [canvas]);
+</script>

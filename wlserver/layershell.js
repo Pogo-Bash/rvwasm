@@ -199,6 +199,39 @@
   };
   ws.layerArrange = arrange;
 
+  // The part of a layer surface that is the panel. plasmashell's surface is larger than its panel: a floating panel has a gap of
+  // transparent pixels around it (and room for its shadow), and the surface keeps its size when the panel is flush with the screen's
+  // edge. What plasmashell says is the panel is its input region (it masks the rest, so that a click in the gap goes to the window
+  // under it): the box of the region's added rectangles within the surface, [x, y, w, h] in surface pixels; null when there is
+  // no region, or none that is inside the surface (the surface is all of it). The page cuts windows' frames only by this, so a
+  // title bar next to the transparent gap is not eaten by it (display.js holesAbove).
+  ws.layerVisible = (surface) => {
+    if (!surface.layer || !surface.input) {
+      return null;
+    }
+    const [w, h] = ws.size(surface);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const r of surface.input) {
+      if (r[0] === 1) {
+        x0 = Math.min(x0, r[1]);
+        y0 = Math.min(y0, r[2]);
+        x1 = Math.max(x1, r[1] + r[3]);
+        y1 = Math.max(y1, r[2] + r[4]);
+      }
+    }
+    x0 = Math.max(0, x0);
+    y0 = Math.max(0, y0);
+    x1 = Math.min(w, x1);
+    y1 = Math.min(h, y1);
+    const box = x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : null;
+    const said = box ? box.join(",") : "";
+    if (surface.layer.saidVisible !== said) {
+      surface.layer.saidVisible = said;
+      log("layershell: " + (surface.layer.namespace || "a surface") + " (" + w + "x" + h + ") has its input region at " + (said || "(none inside it)"));
+    }
+    return box;
+  };
+
   // The screen changed: the layer surfaces are arranged on it before the windows are fitted to what they leave.
   const shellOutputChanged = ws.outputChanged;
   ws.outputChanged = () => {

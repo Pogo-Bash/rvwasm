@@ -1,0 +1,4 @@
+draw plain count 12
+view 2
+vb 0 stride 8 rate vertex data floats
+attr 0 binding 0 format R32G32_FLOAT offset 0

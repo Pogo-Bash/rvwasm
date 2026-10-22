@@ -7,7 +7,7 @@
 **A Linux desktop that runs inside a browser tab.** rvwasm boots Debian (riscv64) with KDE Plasma in Chrome:
 Konsole, Dolphin, Kate, System Settings, Firefox, Chromium, `apt-get install`, sound, GPU drawing and hardware
 video decoding. Nothing is streamed from a server: the machine runs on the visitor's own computer, inside the
-page. The server only hands out the files and, optionally, a restricted network relay.
+page. The server only hands out the files and, optionally, rvRelay (a restricted network relay).
 
 ## How it was made
 
@@ -39,7 +39,7 @@ Claude ships in the release, and it is not free software (unlike everything list
  ├─ GPU executor ... runs the machine's OpenGL on WebGL2 / WebGPU
  ├─ video decoder .. WebCodecs (the computer's hardware decoder)
  ├─ audio player ... AudioWorklet
- └─ network ........ WebSocket to the relay
+ └─ network ........ WebSocket to rvRelay
         │  one block of shared WebAssembly memory
  Linux kernel compiled to WebAssembly (linux-wasm; no MMU, every task a Web Worker)
         │
@@ -66,7 +66,7 @@ More detail on every part: [docs/overview.md](docs/overview.md).
 
 ## Setup with Docker
 
-Requirements on the server: Linux with Docker and Compose v2, and `/dev/net/tun` for the relay.
+Requirements on the server: Linux with Docker and Compose v2, and `/dev/net/tun` for rvRelay.
 
 ```
 git clone <this repository> rvwasm && cd rvwasm
@@ -82,7 +82,7 @@ docker compose up -d
   your domain and point the domain's A record at the server (`docker compose --profile public up -d`). The
   project's own public instance runs at **https://plasmaontheweb.com/**. Details, including switching domains and
   updating the files: [docs/deploy.md](docs/deploy.md).
-- Ports: the page on 8080 and the relay on 8081 behind Caddy (443). Open 80 and 443 in the server's firewall
+- Ports: the page on 8080 and rvRelay on 8081 behind Caddy (443). Open 80 and 443 in the server's firewall
   (and, on Oracle Cloud, in the instance's security list).
 
 Click the page once after it loads (browsers only allow sound after a click). The desktop starts by itself;
@@ -93,10 +93,10 @@ engines see; `/desktop` is the machine and is not indexed. Other switches: `?mem
 
 ## Network and DNS limitations
 
-The machine reaches the internet only through the relay, and the public relay is **restricted on purpose**, so
+The machine reaches the internet only through rvRelay, and the public rvRelay is **restricted on purpose**, so
 a public demo cannot be used for spam, scanning or anything else under the operator's name:
 
-- **DNS answers only for allowlisted domains.** The relay's own DNS server resolves those names and nothing
+- **DNS answers only for allowlisted domains.** rvRelay's own DNS server resolves those names and nothing
   else; other DNS servers are blocked.
 - **Connections only go to addresses those names resolved to, on ports 80 and 443.** Hard-coded IP addresses,
   other ports (mail, SSH, games) and private networks are dropped.
@@ -109,7 +109,7 @@ a public demo cannot be used for spam, scanning or anything else under the opera
 
 What that means for visitors: `apt-get install`, `pip install`, `npm install` and `git clone` from GitHub work;
 general web browsing from inside the machine does not, unless the operator adds the sites. A self-hosted
-relay can be opened up further; whoever runs a relay is responsible for the traffic that leaves through it.
+relay can be opened up further; whoever runs an rvRelay is responsible for the traffic that leaves through it.
 
 ## Recommended specs (for visitors)
 
@@ -128,7 +128,7 @@ helps far more than many slow ones.
 Low-power laptops and Chromebooks boot it, but programs under emulation (Firefox, Chromium, compiles) will be
 slow there.
 
-**For the server:** it only serves static files and the relay: 2 cores, 4 GB RAM and about 15 GB of disk are
+**For the server:** it only serves static files and rvRelay: 2 cores, 4 GB RAM and about 15 GB of disk are
 enough. Bandwidth is the real cost: each new visitor downloads the parts of the disk they use (hundreds of MB
 to a few GB). Serve the disk pieces directly, not through a CDN that limits large files.
 
@@ -170,12 +170,11 @@ by any of them.
 - [FFmpeg](https://ffmpeg.org/): the reference decoder and test-clip maker for the video driver's tests (not in the release).
 - [Firefox](https://www.mozilla.org/firefox/): the web browser that runs in the machine.
 - [Chromium](https://www.chromium.org/) and [RevyOS](https://github.com/revyos): Chromium for riscv64 is RevyOS's rebuild of Debian's package.
-- [Blender](https://www.blender.org/) and [Puter's blender-wasm](https://github.com/HeyPuter/blender-wasm): Blender in a window; `blenderweb/www/main.js` is derived from Puter's demo.
 
 **The server**
 
 - [Caddy](https://caddyserver.com/): HTTPS and static files.
-- [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html) and [nftables](https://netfilter.org/projects/nftables/): the relay's allowlisted DNS and firewall.
+- [dnsmasq](https://thekelleys.org.uk/dnsmasq/doc.html) and [nftables](https://netfilter.org/projects/nftables/): rvRelay's allowlisted DNS and firewall.
 - [Docker](https://www.docker.com/) and [Let's Encrypt](https://letsencrypt.org/): packaging and certificates.
 - [QEMU](https://www.qemu.org/): the baseline the emulator is benchmarked against.
 

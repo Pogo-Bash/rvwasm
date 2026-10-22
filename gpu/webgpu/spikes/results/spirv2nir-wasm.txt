@@ -1,0 +1,10 @@
+Spike S4 (2026-10-10): Mesa 25.0.7's spirv_to_nir + a driver-style NIR optimisation loop + nir_lower_int64 +
+out-of-SSA, over the same 177 Blender SPIR-V modules. Same Mesa objects, built natively (gcc -O3, arm64 VM) and with
+Emscripten 6.0.11 (-O2, pthreads), run in the VM's Node 24.
+  native: modules ok 177 failed 0, 118172 NIR instructions, 214.4 / 210.8 ms total, 1.21 / 1.19 ms per module
+  wasm:   modules ok 177 failed 0, 118172 NIR instructions, 324.6 / 330.3 ms total, 1.83 / 1.87 ms per module
+  => wasm/native 1.55x. spirv2nir.wasm (NIR + spirv_to_nir + util) is 4.5 MB.
+Mesa's meson refuses an Emscripten cross build ("ld.wasm does not support shared libraries"); the objects were made
+by replaying the native build's compile_commands.json with emcc (emcompile.py), with one source patch:
+src/util/detect_os.h takes __EMSCRIPTEN__ as Linux (as gpu-host did for virglrenderer). 314 of 315 objects compiled
+(os_file_notify.c needs sys/eventfd.h; not needed).

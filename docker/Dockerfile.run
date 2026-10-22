@@ -10,16 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 iproute
 	&& rm -rf /var/lib/apt/lists/* \
 	&& useradd --system --create-home --shell /usr/sbin/nologin rv
 
-# Puter's Blender (blenderweb/, optional: docker compose --profile blender up).
-FROM base AS blender
-RUN apt-get update && apt-get install -y --no-install-recommends zstd \
-	&& rm -rf /var/lib/apt/lists/*
-COPY blenderweb/ /opt/rvwasm/blenderweb/
-RUN mkdir -p /data && chown rv:rv /data
-USER rv
-EXPOSE 8040
-CMD ["sh", "-c", "[ -e /data/blender-web/SOURCE.txt ] || /opt/rvwasm/blenderweb/fetch-release.sh /data/blender-web; exec python3 /opt/rvwasm/blenderweb/serve.py --bind 0.0.0.0 --port 8040 --release /data/blender-web"]
-
 FROM base AS run
 # (the relay's firewall and DNS server: docker/net-allowlist.sh, docker/dnsmasq-conf.sh)
 RUN apt-get update && apt-get install -y --no-install-recommends nftables dnsmasq-base procps \

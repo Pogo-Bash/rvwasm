@@ -1,0 +1,86 @@
+#!/bin/bash
+# nq-clang with -shared meaning a shared library: a dylink.0 side module (wasm-ld -shared) for the in-process
+# dynamic linker of tests/wasmdyn (docs/wasm-dynamic-linking.md). Everything else (compiles, executables) is
+# nq-clang's, unchanged. Installed beside it as nqs-clang++ for C++.
+#
+# What a shared library here is linked with, and not:
+#  - NOT linked: musl, libc++, libc++abi, libnqcrt. They are the C library's (ld-wasm exports them); the
+#    library's undefined symbols are imports that the dynamic linker binds.
+#  - linked in: dlcrt.o (the per-module TLS helpers the dynamic linker calls), libunwind.a (Unwind-wasm.o only,
+#    for the module's own __wasm_lpad_context), compiler-rt builtins (hidden, per module).
+#  - __wasm_call_ctors is exported; then tablify.py --dynsym (exports into the table + a symbol section).
+here=$(cd "$(dirname "$0")" && pwd)
+NQS_TREE=$(cd "$here/.." && pwd)
+NQ_TREE=$(cd "$NQS_TREE/.." && pwd)
+: "${NQ_SYSROOT:=$HOME/rvwasm/nativeqt/sysroot-shared}"
+: "${NQ_LLVM:=$HOME/rvwasm/linux-wasm/workspace/install/llvm/bin}"
+export NQ_SYSROOT NQ_LLVM
+cxx=0
+case "$0" in *++) cxx=1 ;; esac
+real=$NQ_TREE/bin/nq-clang; [ $cxx = 1 ] && real=$NQ_TREE/bin/nq-clang++
+
+shared=0 link=1 dyn=0
+L=$NQ_SYSROOT/usr/lib
+for a in "$@"; do
+	case "$a" in
+	-shared) shared=1 ;;
+	-c|-S|-E|-M|-MM|-fsyntax-only) link=0 ;;
+	*.so|*.so.[0-9]*) dyn=1 ;;
+	-l*) [ -e "$L/lib${a#-l}.so" ] && dyn=1 ;;
+	esac
+done
+# A program that names a shared library is a dynamically linked one (dylink.0 main module, NEEDED libraries,
+# no C library of its own: ld-wasm's). One that names none is linked statically by nq-clang, as before: that
+# keeps the build systems' link tests honest (an undefined symbol fails them there).
+if [ $link = 0 ] || [ $# -eq 0 ] || { [ $shared = 0 ] && [ $dyn = 0 ]; }; then
+	exec "$real" "$@"
+fi
+
+args=(--target=wasm64-unknown-unknown --sysroot="$NQ_SYSROOT"
+	-D__linux__ -D__unix__ -D__unix -D__USING_WASM_EXCEPTIONS__
+	-Xclang -target-feature -Xclang +atomics -Xclang -target-feature -Xclang +bulk-memory
+	-Xclang -target-feature -Xclang +mutable-globals -Xclang -target-feature -Xclang +sign-ext
+	-fPIC -pthread -fwasm-exceptions -mllvm -wasm-enable-sjlj)
+out=()
+o=a.out
+prev=
+for a in "$@"; do
+	case "$a" in
+	-shared|-rdynamic|-Wl,--no-undefined|-Wl,-z,defs|-Wl,--as-needed|-Wl,--no-as-needed) ;;
+	-Wl,--start-group|-Wl,--end-group|-Wl,-soname,*|-Wl,--version-script*|-Wl,-O1|-Wl,--enable-new-dtags|-Wl,-rpath*|-Wl,-rpath-link*) ;;
+	*) out+=("$a") ;;
+	esac
+	[ "$prev" = -o ] && o=$a
+	prev=$a
+done
+# A static library's own dependencies ($L/nq-deps/NAME, as nq-clang does): they stay inside this library.
+deps=()
+scan=()
+for a in "${out[@]}"; do
+	case "$a" in
+	@*) [ -f "${a#@}" ] && scan+=($(tr -d "'\"" < "${a#@}")) ;;
+	*) scan+=("$a") ;;
+	esac
+done
+for a in "${scan[@]}"; do
+	n=
+	case "$a" in
+	-l*) n=${a#-l} ;;
+	*/lib*.a) n=${a##*/lib}; n=${n%.a} ;;
+	esac
+	[ -n "$n" ] && [ -f "$L/nq-deps/$n" ] && deps+=($(cat "$L/nq-deps/$n"))
+done
+dlcrt=$NQS_TREE/dlcrt.o
+[ $dlcrt -nt $NQS_TREE/dlcrt.S ] || "$NQ_LLVM/clang" "${args[@]}" -c "$NQS_TREE/dlcrt.S" -o "$dlcrt" || exit
+if [ $shared = 1 ]; then
+	mode=(-Wl,-shared -Wl,--export-if-defined=__wasm_call_ctors)
+else
+	mode=(-Wl,-pie -Wl,--import-memory -Wl,--import-table -Wl,--export-if-defined=__main_argc_argv -Wl,--export-if-defined=__main_void
+		-Wl,--export=__wasm_call_ctors -Wl,--export=__wasm_apply_data_relocs)
+fi
+"$NQ_LLVM/clang" "${args[@]}" -nostdlib -L"$L" "${out[@]}" "${deps[@]}" "$dlcrt" "$L/libunwind.a" \
+	"$NQ_LLVM/../lib/clang/18/lib/libclang_rt.builtins-wasm64.a" \
+	-Wl,-mwasm64 -Wl,--experimental-pic "${mode[@]}" -Wl,--shared-memory -Wl,--max-memory=17179869184 -Wl,--no-entry \
+	-Wl,--error-limit=0 \
+	2> >(grep -v -E 'creating shared libraries|signature mismatch|^>>> defined as|^$' >&2) || exit
+python3 "$NQS_TREE/tablify.py" --dynsym "$o" > /dev/null || exit

@@ -1,0 +1,11 @@
+# a vertex shader (no GS) writing gl_ViewportIndex and gl_Layer per instance (ARB_shader_viewport_layer_array,
+# the instanced layered/multi-viewport style), 3 viewports, a 2-layer pass with layer 1 compared
+draw indexed16 count 12 instances 6
+topology triangles
+vb 0 stride 8 rate vertex data floats
+attr 0 binding 0 format R32G32_FLOAT offset 0
+layer 1
+viewport 0 0 0 64 64 0 1
+viewport 1 4 30 56 -26 0 1
+viewport 2 20 10 30 30 0.5 1
+scissor 2 22 12 20 40

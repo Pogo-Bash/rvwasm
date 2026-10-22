@@ -1,0 +1,9 @@
+#version 450
+// 128 bytes of push constants (more than the 64 bytes of immediates), read at dynamic offsets too
+layout(local_size_x = 64) in;
+layout(push_constant) uniform PC { vec4 a[8]; } pc;
+layout(set = 0, binding = 0) buffer Out { vec4 o[]; };
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   o[i] = pc.a[i & 7u] + pc.a[3];
+}

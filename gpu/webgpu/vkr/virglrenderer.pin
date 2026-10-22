@@ -1,0 +1,3 @@
+# virglrenderer (src/venus = vkr) and the venus protocol it is built against. build/vkr-tree.sh reads these.
+c8e3fc3bd2f367d92fb1027061fe51afeec5136e https://gitlab.freedesktop.org/virgl/virglrenderer.git main 2026-10-08
+ca19b6358d7cc491bc3e4de76f04c6700876a8fa https://gitlab.freedesktop.org/virgl/venus-protocol.git v1.1.3

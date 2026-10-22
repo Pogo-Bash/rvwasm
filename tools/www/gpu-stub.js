@@ -18,6 +18,8 @@
 // page to measure the latency to the screen. frameWords: four words, [frame ready, its resource, its
 // gpu_serial, frame the page drew] (stage A: the frame is in wlshm; resource and serial unused).
 "use strict";
+// (An address of the machine's memory as the index of its 32-bit word: exact for addresses past 2 and 4 GiB, which `>> 2` is not.)
+const ix32 = (a) => Math.floor(a / 4), ix64 = (a) => Math.floor(a / 8);
 
 const H_MAGIC = 0, H_VERSION = 4, H_PID = 8, H_DATA_SIZE = 16, H_DATA_OFF = 20, H_HEAD = 24, H_DOORBELL = 28,
       H_SUBMITTED = 32, H_TAIL = 64, H_DONE = 68;
@@ -73,14 +75,14 @@ const put = (op, words, completion) => {
   const bytes = words.length * 4;
   const need = 16 + ((bytes + 15) & ~15);
   for (;;) {
-    const head = Atomics.load(w32, (ring + H_HEAD) >> 2) >>> 0, tail = Atomics.load(w32, (ring + H_TAIL) >> 2) >>> 0;
+    const head = Atomics.load(w32, ix32(ring + H_HEAD)) >>> 0, tail = Atomics.load(w32, ix32(ring + H_TAIL)) >>> 0;
     let at = head % size, skip = 0;
     if (at + need > size) {
       skip = size - at;
     }
     if ((head - tail) + skip + need <= size) {
       if (skip) {
-        const q = (data + at) >> 2;
+        const q = ix32(data + at);
         w32[q] = OP_PAD;
         w32[q + 1] = 0;
         w32[q + 2] = 0;
@@ -89,7 +91,7 @@ const put = (op, words, completion) => {
       if (skip) {
         at = 0;
       }
-      const p = (data + at) >> 2;
+      const p = ix32(data + at);
       serial++;
       w32[p] = op;
       w32[p + 1] = CTX;
@@ -99,24 +101,24 @@ const put = (op, words, completion) => {
         w32[p + 4 + i] = words[i];
       }
       if (completion) {
-        Atomics.store(w32, (ring + H_SUBMITTED) >> 2, serial);
+        Atomics.store(w32, ix32(ring + H_SUBMITTED), serial);
       }
-      Atomics.store(w32, (ring + H_HEAD) >> 2, (head + skip + need) | 0);
-      Atomics.add(w32, (ring + H_DOORBELL) >> 2, 1);
-      Atomics.notify(w32, (ring + H_DOORBELL) >> 2);
+      Atomics.store(w32, ix32(ring + H_HEAD), (head + skip + need) | 0);
+      Atomics.add(w32, ix32(ring + H_DOORBELL), 1);
+      Atomics.notify(w32, ix32(ring + H_DOORBELL));
       return serial;
     }
-    Atomics.wait(w32, (ring + H_TAIL) >> 2, tail | 0, 5);
+    Atomics.wait(w32, ix32(ring + H_TAIL), tail | 0, 5);
   }
 };
 
 const waitDone = (s) => {
   for (;;) {
-    const done = Atomics.load(w32, (ring + H_DONE) >> 2) >>> 0;
+    const done = Atomics.load(w32, ix32(ring + H_DONE)) >>> 0;
     if (done >= s) {
       return;
     }
-    Atomics.wait(w32, (ring + H_DONE) >> 2, done | 0, 100);
+    Atomics.wait(w32, ix32(ring + H_DONE), done | 0, 100);
   }
 };
 
@@ -130,12 +132,12 @@ self.onmessage = (event) => {
 
   // The ring's header, as gpuserver makes it.
   size = 4 << 20;
-  w32[(ring + H_VERSION) >> 2] = 2;
-  w32[(ring + H_PID) >> 2] = m.pid;
-  w32[(ring + H_DATA_SIZE) >> 2] = size;
-  w32[(ring + H_DATA_OFF) >> 2] = 2048;
+  w32[ix32(ring + H_VERSION)] = 2;
+  w32[ix32(ring + H_PID)] = m.pid;
+  w32[ix32(ring + H_DATA_SIZE)] = size;
+  w32[ix32(ring + H_DATA_OFF)] = 2048;
   data = ring + 2048;
-  Atomics.store(w32, (ring + H_MAGIC) >> 2, 0x50475652);
+  Atomics.store(w32, ix32(ring + H_MAGIC), 0x50475652);
 
   put(OP_CTX_CREATE, textWords("gpu-stub"));
   // Resources (ids are gpuserver's, global): 1, 2 the colour buffers; 3 the vertex buffer (x, y, r, g, b).
@@ -205,7 +207,7 @@ self.onmessage = (event) => {
         fbits(x), fbits(y), 0, fbits(1));
       words.push(cmd0(CCMD_DRAW_VBO, 0, 12), 0, 3, PRIM_TRIANGLES, 0, 1, 0, 0, 0, 0, 0, 2, 0);
     }
-    f64[(m.times >> 3) + (frame % 64)] = performance.timeOrigin + performance.now();
+    f64[(ix64(m.times)) + (frame % 64)] = performance.timeOrigin + performance.now();
     const submitted = put(OP_SUBMIT, words, true);
     if (m.readback) {
       // Stage A: the frame back into its backing, then into the window's own buffer, then the page uploads it.

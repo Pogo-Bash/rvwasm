@@ -1,0 +1,23 @@
+== gpu-nm chromium ==
+program:  chromium
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3880 ms
+ring:     submitted 1961, done 1961, heartbeat 2445
+jspi waits:990 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+presents: 949 (stage B frames from the executor), last 1004x748, 8 PNGs
+boot:     779 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 251662336 (pid 182), caps at 255858688
+frames:   915 in 49 reports of es2gears; last 20 frames in 2.0 seconds = 9.8 FPS
+windows:  slot 0 "gpu-matrix chromium - Chromium" 1004x748: 954 looks, present 955
+gl:       renderer' should be created through the zygote.
+probe:    8 of 8 window PNGs are drawn (not flat); 8 different pictures; last gpu-res44-7.png 1004x748: 467 colours, the commonest 54.2%
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (1961 submits)
+  ok   frames > 0 (915)
+  ok   window drawn (slot 0 "gpu-matrix chromium - Chromium" 1004x748: 954 looks, present 955)
+  ok   pixel probe (a drawn window, not a flat colour) (8/8)
+  ok   the picture moves (animated: more than one different PNG) (8 different)
+  ok   frames reported by the app > 0 (49 reports)
+PASS
+MATRIX_RESULT {"app":"chromium","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":1961,"presents":949,"frames":915,"fps":9.8,"pictures":8,"pass":true,"failed":[]}

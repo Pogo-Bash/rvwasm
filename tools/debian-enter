@@ -94,10 +94,56 @@ if [ ! -e $D/proc/self ]; then
 	ln -s /proc/self/fd/2 $D/dev/stderr
 fi
 
+# The native perl (branch nativeperl, docs/native-perl.md): a static wasm perl 5.40.1 with the XS modules debconf and dpkg need built
+# in, which replaces Debian's emulated riscv64 perl at /usr/bin/perl, so that deb-systemd-helper, the debconf tools and the other
+# #!/usr/bin/perl scripts of a package's maintainer scripts start in milliseconds, not seconds (an apt-get install of ten packages:
+# 86-96 s -> 17 s). It is on the nqs disk, /opt/nq-shared/perl, which /init mounts (and binds into the Debian root) with the native
+# apps (?dl=1): on wherever that disk is mounted, nothing to do where it is not. Off: RV_NATIVE_PERL=0 in the environment of `debian`,
+# or native_perl=0 on the kernel's command line (and RV_NATIVE_PERL=0 in one command's environment sends that command, and what it
+# starts, to Debian's perl). In memory only: binds at /run/native/perl (where its @INC says it is) and over /usr/bin/perl; Debian's
+# perl stays at /run/native/perl-rv: the native perl has no fork (the kernel has none), so a program whose text uses fork is handed
+# to it by the native perl itself (RV_PERL_FALLBACK), and dpkg-preconfigure, which forks, is replaced by a version without fork
+# (perl/overrides, bound only if the original is the file it was made from).
+# RV_NATIVE_PERL=1 / native_perl=1 also take a perl at /usr/lib/nativeperl (the machine's own file system: tests).
+read -r cmdline < /proc/cmdline
+NP=
+if [ -x /opt/nq-shared/perl/bin/perl ]; then NP=/opt/nq-shared/perl; NATIVE_PERL=1
+else NATIVE_PERL=; [ -x /usr/lib/nativeperl/bin/perl ] && NP=/usr/lib/nativeperl; fi
+for arg in $cmdline; do
+	case $arg in
+	native_perl=1) [ -n "$NP" ] && NATIVE_PERL=1 ;;
+	native_perl=0) NATIVE_PERL=0 ;;
+	esac
+done
+[ -n "${RV_NATIVE_PERL-}" ] && NATIVE_PERL=$RV_NATIVE_PERL
+PERLENV=
+case $NATIVE_PERL in
+1|force)
+	if [ -n "$NP" ] && [ -x $D/usr/bin/perl ]; then
+		if [ ! -e $D/run/native/perl/bin/perl ]; then
+			mkdir -p $D/run/native/perl
+			mount -o bind $NP $D/run/native/perl
+			touch $D/run/native/perl-rv
+			mount -o bind $D/usr/bin/perl $D/run/native/perl-rv
+			mount -o bind $NP/bin/perl $D/usr/bin/perl
+			for o in dpkg-preconfigure; do
+				f=$D/usr/sbin/$o
+				if [ -f $NP/overrides/$o ] && [ -f $f ] && [ -f $NP/overrides/$o.sha256 ]; then
+					sha256sum $f > /tmp/np-sum.$$ 2> /dev/null
+					read -r have rest < /tmp/np-sum.$$
+					read -r want < $NP/overrides/$o.sha256
+					rm -f /tmp/np-sum.$$
+					[ "$have" = "$want" ] && mount -o bind $NP/overrides/$o $f
+				fi
+			done
+		fi
+		PERLENV="RV_NATIVE_PERL=$NATIVE_PERL RV_PERL_FALLBACK=/run/native/perl-rv"
+	fi ;;
+esac
+
 set -- "$@"
 # The time zone of the person at the page (tz=ZONE on the kernel's command line), if Debian knows it.
 ZONE=
-read -r cmdline < /proc/cmdline
 for arg in $cmdline; do
 	case $arg in
 	tz=*) [ -e "$D/usr/share/zoneinfo/${arg#tz=}" ] && ZONE="TZ=${arg#tz=}" ;;
@@ -110,7 +156,7 @@ MOZILLA="MOZ_DISABLE_CONTENT_SANDBOX=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_SOC
 # Web addresses go to the host's browser (hostopen above): $BROWSER for the programs that ask it
 # (sensible-browser, Python's webbrowser, git), the PATH for those that run xdg-open and the like.
 HOSTOPEN="BROWSER=/run/hostopen/bin/rv-host-open"
-ENV="$MOZILLA $ZONE $HOSTOPEN HOME=/root SHELL=/bin/bash USER=root LOGNAME=root TERM=${TERM:-xterm} LANG=C.UTF-8 PATH=/run/hostopen/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games"
+ENV="$PERLENV $MOZILLA $ZONE $HOSTOPEN HOME=/root SHELL=/bin/bash USER=root LOGNAME=root TERM=${TERM:-xterm} LANG=C.UTF-8 PATH=/run/hostopen/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games"
 if [ $# -eq 0 ]; then
 	exec chroot $D /usr/bin/env -i $ENV /bin/bash -l
 fi

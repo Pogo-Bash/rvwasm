@@ -1,0 +1,51 @@
+#version 450
+// 20 storage buffers in one stage: over WebGPU's per-stage limit (the M4 Max: 10; Dawn on lavapipe: 16),
+// the excess reached through the buffer heap (driver bindings 902, 910+)
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer B0 { uint v[]; } b0;
+layout(set = 0, binding = 1) buffer B1 { uint v[]; } b1;
+layout(set = 0, binding = 2) buffer B2 { uint v[]; } b2;
+layout(set = 0, binding = 3) buffer B3 { uint v[]; } b3;
+layout(set = 0, binding = 4) buffer B4 { uint v[]; } b4;
+layout(set = 0, binding = 5) buffer B5 { uint v[]; } b5;
+layout(set = 0, binding = 6) buffer B6 { uint v[]; } b6;
+layout(set = 0, binding = 7) buffer B7 { uint v[]; } b7;
+layout(set = 0, binding = 8) buffer B8 { uint v[]; } b8;
+layout(set = 0, binding = 9) buffer B9 { uint v[]; } b9;
+layout(set = 0, binding = 10) buffer B10 { uint v[]; } b10;
+layout(set = 0, binding = 11) buffer B11 { uint v[]; } b11;
+layout(set = 0, binding = 12) buffer B12 { uint v[]; } b12;
+layout(set = 0, binding = 13) buffer B13 { uint v[]; } b13;
+layout(set = 0, binding = 14) buffer B14 { uint v[]; } b14;
+layout(set = 0, binding = 15) buffer B15 { uint v[]; } b15;
+layout(set = 0, binding = 16) buffer B16 { uint v[]; } b16;
+layout(set = 0, binding = 17) buffer B17 { uint v[]; } b17;
+layout(set = 0, binding = 18) buffer B18 { uint v[]; } b18;
+layout(set = 0, binding = 19) buffer B19 { uint v[]; } b19;
+layout(set = 0, binding = 20) buffer Out { uint v[]; } o;
+void main() {
+	uint i = gl_GlobalInvocationID.x;
+	uint s = 0u;
+	s += b0.v[i] * 1u;
+	s += b1.v[i] * 2u;
+	s += b2.v[i] * 3u;
+	s += b3.v[i] * 4u;
+	s += b4.v[i] * 5u;
+	s += b5.v[i] * 6u;
+	s += b6.v[i] * 7u;
+	s += b7.v[i] * 8u;
+	s += b8.v[i] * 9u;
+	s += b9.v[i] * 10u;
+	s += b10.v[i] * 11u;
+	s += b11.v[i] * 12u;
+	s += b12.v[i] * 13u;
+	s += b13.v[i] * 14u;
+	s += b14.v[i] * 15u;
+	s += b15.v[i] * 16u;
+	s += b16.v[i] * 17u;
+	s += b17.v[i] * 18u;
+	s += b18.v[i] * 19u;
+	s += b19.v[i] * 20u;
+	o.v[i] = s;
+	b19.v[i + 64u] = s ^ 0x55u;	/* a write through the heap */
+}

@@ -1,0 +1,21 @@
+# EEVEE's shadow rendering pipeline (vertex + geometry + fragment shader from Blender 4.3): the fragment
+# shader writes no colour, it atomicMin()s depth into the shadow atlas (an r32ui image used atomically).
+# Data: resource 0 and view 0 everywhere, identity model and view matrices, atlas tiles all page 0.
+draw plain count 24 instances 2
+topology triangles
+vb 0 stride 12 rate vertex data floats
+attr 0 binding 0 format R32G32B32_FLOAT offset 0
+# drw_resource_id (resource << 6 | view) per instance: 0
+buf 1 10 0 0 i:0 i:0 i:0 i:0
+# model matrices (resource 0)
+buf 1 10 4 0 id4 id4
+# view infos
+buf 1 10 2 0 i:0
+# view 0: view matrix, inverse, projection, inverse
+buf 1 1 0 0 id4 id4 id4 id4
+# atlas tile lookup: all page 0, layer 0
+buf 1 14 0 0 i:0
+ubo 0 4 1 0
+spirv vert spv-eevee-p4/dump60
+spirv geom spv-eevee-p4/dump61
+spirv frag spv-eevee-p4/dump62

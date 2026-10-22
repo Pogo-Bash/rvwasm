@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 	if (!env_jit || strcmp(env_jit, "0"))
 #else
 	(void)env_jit;
-	if (getenv("RV_JIT_DUMP") || getenv("RV_JIT_FAKE"))
+	if (getenv("RV_JIT_DUMP") || getenv("RV_JIT_FAKE") || getenv("RV_JIT_EMU"))
 #endif
 		if (rv_jit_init(&cpu))
 			fprintf(stderr, "rv: cannot set up the JIT, interpreting\n");

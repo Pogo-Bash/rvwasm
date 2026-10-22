@@ -1,0 +1,9 @@
+#version 450
+// push constants that fit the immediates, read at a dynamic offset
+layout(local_size_x = 64) in;
+layout(push_constant) uniform PC { uint a[12]; } pc;
+layout(set = 0, binding = 0) buffer Out { uint o[]; };
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   o[i] = pc.a[i % 12u] * 3u + pc.a[1];
+}

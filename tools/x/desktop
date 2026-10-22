@@ -40,6 +40,12 @@
 #                           nativeqt), /run/nq/plasmashell, /opt/nq/plasmashell or
 #                           $NQ_PLASMASHELL, when that is there and PLASMA_NATIVE is
 #                           not 0; else Debian's.
+#   desktop wayland nqs-run PROGRAM [ARGS]
+#                           a native program (kcalc, konsole, dolphin, systemsettings, kate, kwrite, okular, gwenview, ark)
+#                           on the shared libraries of the nqs disk, as a client of the window server (also while
+#                           `desktop wayland plasma-native` runs). The page gives the machine that disk (/opt/nq-shared)
+#                           unless it has ?dl=0 (or is Firefox without ?dl=1); the menu's entries for these programs are
+#                           the native ones then.
 #   desktop x11 PROGRAM...  PROGRAM as an X program of the window server: each
 #                           of its windows a window in the page (rootless
 #                           Xwayland, started when the first X program
@@ -106,6 +112,38 @@ sound_start() {
 }
 sound_start
 
+# Passwords. Chromium and KDE would each ask for the KDE Wallet here (Chromium picks it because the session is KDE), and
+# the Wallet's first-use dialog (KNewWalletDialog, KWallet 6: no kwalletrc key chooses its type) has "Use GPG encryption"
+# selected while the machine has no GPG keys, so "Next" ends in "no keys suitable for encryption". So, at every start
+# (the boot image's script, so the disks stay as they are):
+#   - Chromium takes its basic password store: Debian's /usr/bin/chromium sources /etc/chromium.d/* before it starts
+#     Chromium, whatever started it (menu, Konsole, xdg-open), and a later --password-store wins (`desktop wayland chromium`
+#     below gives the same flag);
+#   - the Wallet is off by default, in a kwalletrc of the system's (/etc/xdg: KConfig reads it under the person's own
+#     ~/.config/kwalletrc, so the Wallet page of System Settings still turns it on): every open is then refused by
+#     kwalletd ([Wallet] Enabled=false: open, openAsync, and with them the Secret Service and portal), and programs
+#     that offer to remember a password ask again instead. Only when nothing of the system's is there yet.
+# RV_WALLET_DEFAULTS=0 leaves both alone.
+wallet_defaults() {
+	[ "${RV_WALLET_DEFAULTS:-1}" = 0 ] && return
+	if [ -d /etc/chromium.d ] && ! grep -qs -e 'password-store=basic' /etc/chromium.d/zz-rvwasm-password-store; then
+		cat > /etc/chromium.d/zz-rvwasm-password-store 2> /dev/null <<-'END'
+		# rvwasm (tools/x/desktop): no KDE Wallet for Chromium here (see wallet_defaults there).
+		export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --password-store=basic"
+		END
+	fi
+	if [ ! -e /etc/xdg/kwalletrc ] && [ -d /etc/xdg ]; then
+		cat > /etc/xdg/kwalletrc 2> /dev/null <<-'END'
+		# rvwasm (tools/x/desktop): the KDE Wallet is off until a person turns it on in System Settings (their own
+		# ~/.config/kwalletrc wins over this file). See wallet_defaults there.
+		[Wallet]
+		Enabled=false
+		END
+	fi
+	return 0
+}
+wallet_defaults
+
 # KDE and Qt without a graphics processor: Qt Quick draws in software, Qt does
 # not look for OpenGL, and the window manager does not composite (which it
 # can only do with OpenGL).
@@ -129,6 +167,39 @@ kde_environment() {
 			export XAPPLRESDIR=/run/wlserver/xdg/app-defaults
 		fi
 	fi
+	# The native programs on the shared libraries (the nqs disk: /init mounts it on /opt/nq-shared and bind-mounts it here when the
+	# kernel's command line says rvdl=1, which dev.html says unless ?dl=0, and in Firefox): their desktop files are in its
+	# share/applications under the IDs of the emulated programs they replace (org.kde.konsole.desktop, systemsettings.desktop, ...:
+	# nativeqt/shared/nqs/mkdesktop.py), and that share comes BEFORE Debian's in XDG_DATA_DIRS, so the menu, the panel's pinned
+	# launchers, "Open with" and KRunner start the native program and show one entry for it. `desktop wayland nqs-run konsole`
+	# finds nqs-run on the PATH (after Debian's, which stays: git and the rest are what the emulated programs saw). Only where the
+	# disk is: with ?dl=0 there is no /opt/nq-shared, and nothing here changes.
+	nqs_build=
+	if [ -d /opt/nq-shared/share/applications ]; then
+		export XDG_DATA_DIRS="/opt/nq-shared/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+		export PATH="$PATH:/opt/nq-shared/bin"
+		# The disk is built reproducibly (every time stamp fixed), so a new nqs disk with more launchers looks unchanged to
+		# KService, and a home disk's menu cache from an older one keeps showing only what that one had. Its info.txt names the
+		# build: when that changes, the cache is made again (below, with the menu's).
+		nqs_build=$(cksum < /opt/nq-shared/share/nqs/info.txt 2> /dev/null)
+		if [ -n "$nqs_build" ] && [ "$(cat "$HOME/.cache/rv-ksycoca-nqs" 2> /dev/null)" != "$nqs_build" ]; then
+			rm -f "$HOME/.cache/rv-ksycoca-menu"
+		fi
+	elif [ -s "$HOME/.cache/rv-ksycoca-nqs" ]; then
+		# A cache made with the native programs' entries (they shadow the emulated ones' IDs and start nqs-run), and now the page
+		# has no nqs disk (?dl=0, Firefox): made again without them, or the menu would start programs that are not there.
+		rm -f "$HOME/.cache/rv-ksycoca-menu"
+	fi
+	# The desktop's system defaults (tools/x/xdg: mimeapps.list sends web addresses to rv-host-open, which asks the person and opens a tab of
+	# their own browser, rv-host-open.desktop is the entry it names) change what the cache holds, but the image's files carry a fixed old date,
+	# so a cache made before them does not look out of date to KService: made again once, with the menu's below (the stamp is written with it).
+	xdg_stamp=xdg-off
+	if [ -f /run/wlserver/xdg/config/mimeapps.list ] && [ "${RV_DESKTOP_DEFAULTS:-1}" != 0 ]; then
+		xdg_stamp=xdg-hostlinks1
+	fi
+	if [ "$(cat "$HOME/.cache/rv-ksycoca-xdg" 2> /dev/null)" != "$xdg_stamp" ]; then
+		rm -f "$HOME/.cache/rv-ksycoca-menu"
+	fi
 	# A default profile of the user's own (konsolerc names one) that says nothing about it: off too.
 	profile=$(kreadconfig6 --file konsolerc --group "Desktop Entry" --key DefaultProfile 2> /dev/null)
 	if [ "${RV_DESKTOP_DEFAULTS:-1}" != 0 ] && [ -n "$profile" ] && [ -f "$HOME/.local/share/konsole/$profile" ] &&
@@ -149,11 +220,37 @@ kde_environment() {
 	if [ -n "$XDG_MENU_PREFIX" ] && [ "$(cat "$HOME/.cache/rv-ksycoca-menu" 2> /dev/null)" != "$XDG_MENU_PREFIX" ] &&
 		command -v kbuildsycoca6 > /dev/null; then
 		mkdir -p "$HOME/.cache"
-		kbuildsycoca6 --noincremental > /dev/null 2>&1 && echo "$XDG_MENU_PREFIX" > "$HOME/.cache/rv-ksycoca-menu"
+		kbuildsycoca6 --noincremental > /dev/null 2>&1 && echo "$XDG_MENU_PREFIX" > "$HOME/.cache/rv-ksycoca-menu" &&
+			echo "$xdg_stamp" > "$HOME/.cache/rv-ksycoca-xdg" &&
+			{ if [ -n "$nqs_build" ]; then echo "$nqs_build" > "$HOME/.cache/rv-ksycoca-nqs"; else rm -f "$HOME/.cache/rv-ksycoca-nqs"; fi; }
 	fi
 	# The system bus, which parts of the desktop ask about power, networks and the like.
 	mkdir -p /run/dbus
+	# NetworkManager's stand-in (nativeqt/shared/extra/nqnetworkmanager, on the nqs disk): the one Wi-Fi network "rvRelay" is the page's network relay,
+	# for plasma-nm's applet. The bus must let it own the name, before the bus starts (and a bus already running is told to read its configuration again).
+	nq_nm=/opt/nq-shared/usr/lib/libexec/nq-networkmanager
+	nq_nm_policy=/etc/dbus-1/system.d/nq-networkmanager.conf
+	if [ -x $nq_nm ] && [ "${NQ_NETWORKMANAGER:-1}" != 0 ] && [ ! -e $nq_nm_policy ]; then
+		mkdir -p /etc/dbus-1/system.d
+		cat > $nq_nm_policy << 'POLICY'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy user="root">
+    <allow own="org.freedesktop.NetworkManager"/>
+    <allow send_destination="org.freedesktop.NetworkManager"/>
+  </policy>
+  <policy context="default">
+    <allow send_destination="org.freedesktop.NetworkManager"/>
+  </policy>
+</busconfig>
+POLICY
+		[ -e /run/dbus/pid ] && dbus-send --system --type=method_call --dest=org.freedesktop.DBus / org.freedesktop.DBus.ReloadConfig > /dev/null 2>&1
+	fi
 	[ -e /run/dbus/pid ] || dbus-daemon --system --fork 2> /dev/null
+	if [ -x $nq_nm ] && [ "${NQ_NETWORKMANAGER:-1}" != 0 ] && ! kill -0 "$(cat /run/nq-networkmanager.pid 2> /dev/null)" 2> /dev/null; then
+		$nq_nm > /tmp/nq-networkmanager.log 2>&1 &
+		echo $! > /run/nq-networkmanager.pid
+	fi
 }
 
 if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
@@ -165,6 +262,12 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 		shell=plasma
 		# What a Plasma session's startup gives plasmashell (startplasma: KDE_FULL_SESSION, KDE_SESSION_VERSION).
 		export KDE_FULL_SESSION=true KDE_SESSION_VERSION=6
+		# The language the shell and its widgets see: the machine's own is "C", which Qt names "C", and widgets that pick their texts by the
+		# first two letters of Qt.locale().name (the weather widgets of a Global Theme: "Language not supported") get nothing. Only Debian's
+		# C.utf8 is installed, so programs that read the variable through glibc fall back to it as before; Qt reads the name itself.
+		case "${LANG:-C}" in
+		C | C.* | POSIX) export LANG=en_US.UTF-8 ;;
+		esac
 		# The native plasmashell (a WebAssembly program, branch nativeqt) when there is one, else Debian's
 		# riscv64 one. Its Qt is static, without the KDE platform theme that tells Debian's which controls
 		# style and fonts to use, and is kept off the GPU path (Qt Quick in software, no virgl): what
@@ -173,6 +276,8 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 		# the release image's: tools/build-debian-image.sh release-root), each with its share/ beside it.
 		if [ -z "$NQ_PLASMASHELL" ]; then
 			NQ_PLASMASHELL=/run/nq/plasmashell
+			# (the nqs disk's, with the widgets that are newer than the release image's: nativeqt/run/relink-bulk.sh; only where that disk is mounted)
+			[ -x "$NQ_PLASMASHELL" ] || NQ_PLASMASHELL=/opt/nq-shared/plasma/plasmashell
 			[ -x "$NQ_PLASMASHELL" ] || NQ_PLASMASHELL=/opt/nq/plasmashell
 		fi
 		if [ -x "$NQ_PLASMASHELL" ] && [ "$PLASMA_NATIVE" != 0 ]; then
@@ -180,7 +285,8 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 			# (and the QML packages it brings that Debian's disk has not: plasma-native-get, /run/nq/share)
 			nq_share=$(dirname "$NQ_PLASMASHELL")/share
 			[ -d "$nq_share" ] && export XDG_DATA_DIRS=$nq_share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
-			set -- env -u GALLIUM_DRIVER -u VTEST_SOCKET_NAME -u RV_VIRTGPU QT_QUICK_BACKEND=software \
+			# (its messages, the QML errors of widgets above all, to /root/plasmashell.log: they went to the console, where they scroll away)
+			set -- sh -c '[ -w /root ] && exec "$@" 2> /root/plasmashell.log; exec "$@"' plasmashell env -u GALLIUM_DRIVER -u VTEST_SOCKET_NAME -u RV_VIRTGPU QT_QUICK_BACKEND=software \
 				QT_QUICK_CONTROLS_STYLE=org.kde.desktop QT_QPA_FONTDIR=/usr/share/fonts/truetype/dejavu \
 				"$NQ_PLASMASHELL" --no-respawn "$@"
 		else
@@ -214,7 +320,7 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 			--disable-site-isolation-trials \
 			--disable-features=AudioServiceOutOfProcess,OptimizationGuideOnDeviceModel,OnDeviceModelService \
 			--disable-extensions --disable-component-update --no-first-run --disable-background-networking \
-			--disable-breakpad --disable-crash-reporter --disable-sync "$@"
+			--disable-breakpad --disable-crash-reporter --disable-sync --password-store=basic "$@"
 		;;
 	esac
 	# A program on the session's bus (the one the server was started with, see below), or with a session bus
@@ -236,7 +342,8 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 	# are programs pointed at it: a program sent there with nothing to draw it would be stopped by Mesa.
 	# What they get is OpenGL ES 3.0 and OpenGL 2.1 (what virgl makes of WebGL2): Qt Quick, GTK 4, SDL and
 	# GL ES programs are fine with that; programs that need OpenGL 3.2 or newer are not: Blender (4.3
-	# core) and what RVGPU_SOFTWARE names (program names, separated by spaces) stay on llvmpipe (run below).
+	# core) stays on llvmpipe unless the executor is the WebGPU one, and what RVGPU_SOFTWARE names (program
+	# names, separated by spaces) always does (run below).
 	#   RVGPU=0   software for everything (llvmpipe; Qt Quick's own software renderer)
 	#   RVGPU=1   wait up to 10 s for the executor, and say so if there is none
 	#   (unset)   use it when it is there, waiting at most 4 s for it on the server's first start
@@ -279,6 +386,52 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 		elif [ "$RVGPU" = 1 ]; then
 			echo "desktop: no GPU (no executor answered: see /root/rvgpu.log); drawing in software" >&2
 		fi
+	}
+	# Vulkan. The loader (the disk's libvulkan1) is told which driver to ask by its ICD file:
+	#   venus  (virtio_icd.json) the page's executor, over the same socket as the GL (VN_DEBUG=vtest, VTEST_SOCKET_NAME):
+	#          when the executor has Vulkan, which the GPU server says in its ready file ("venus": the WebGPU executor;
+	#          the page's vrend has none). It is the only driver then. wgvk reports a GPU device type (VK-09), so a program
+	#          that chooses a device by its type (vkcube) would take it even with lavapipe listed, but the loader starts
+	#          EVERY listed driver on every Vulkan program, and lavapipe's start is about 4 s in this machine
+	#          (vulkaninfo --summary 12.0 s with both, 7.8 s with venus alone). RV_VK_BOTH=1 lists lavapipe as well
+	#          (venus first), for anyone who wants to pick the CPU device.
+	#   lvp    lavapipe, software: everywhere else (RVGPU=0, no executor, an executor without Vulkan).
+	# (A program sent to venus on an executor without Vulkan is not left hanging either: the GPU server answers its capset
+	# request with "none" at once and the loader goes on to the next driver, gpu/server/server.js GET_CAPSET.)
+	# The files are the disk's (mesa-vulkan-drivers) where it has them, else the ones that came with the GPU server
+	# (/run/rvgpu/venus, gpu/tools/venus-stage.sh), which also brings vulkaninfo and vkcube (last in the PATH, so
+	# the disk's own win). Nothing is done where the person sets VK_DRIVER_FILES or VK_ICD_FILENAMES, or where there are no
+	# ICD files at all; the GPU device (RVGPU_DRM=1) is another path, with no venus here.
+	# Qt finds the loader by name, and Qt 6.8's Wayland platform asks for the unversioned one ("vulkan": libvulkan.so,
+	# the -dev package's link, which the disk does not have), never libvulkan.so.1: QSG_RHI_BACKEND=vulkan then has no
+	# instance and Qt dereferences the missing one (QVulkanInstance::isValid on NULL, a SIGSEGV of Qt's own: VK-27).
+	# QT_VULKAN_LIB is the first name Qt tries.
+	vulkan_use() {
+		[ -n "$QT_VULKAN_LIB" ] || export QT_VULKAN_LIB=libvulkan.so.1
+		[ -z "$VK_DRIVER_FILES" ] && [ -z "$VK_ICD_FILENAMES" ] || return 0
+		icd() {
+			for f in /usr/share/vulkan/icd.d/$1_icd*.json /etc/vulkan/icd.d/$1_icd*.json /run/rvgpu/venus/$1_icd.json; do
+				[ -f "$f" ] && { echo "$f"; return; }
+			done
+		}
+		files=
+		if [ "$RVGPU" != 0 ] && [ -z "$RV_VIRTGPU" ] && [ -f /run/rvgpu/boot.js ] && grep -q '"venus"' "$XDG_RUNTIME_DIR/rvgpu-0.ready" 2> /dev/null; then
+			files=$(icd virtio)
+		fi
+		if [ -n "$files" ]; then
+			export VN_DEBUG=${VN_DEBUG:-vtest}
+			export VTEST_SOCKET_NAME="$XDG_RUNTIME_DIR/rvgpu-0"
+			# (not "$files:$lvp" by default: see above; RV_VK_BOTH=1 asks for it)
+			if [ "$RV_VK_BOTH" = 1 ]; then
+				lvp=$(icd lvp)
+				[ -z "$lvp" ] || files="$files:$lvp"
+			fi
+		else
+			files=$(icd lvp)
+		fi
+		[ -n "$files" ] || return 0
+		export VK_DRIVER_FILES=$files
+		[ -d /run/rvgpu/venus ] && export PATH="$PATH:/run/rvgpu/venus"
 	}
 	# X programs (wayland-x): Xwayland on display :1, rootful, as one window of the server, with twm in it
 	# to put the X windows in their places. A second `desktop wayland-x PROGRAM` while it runs joins it.
@@ -328,7 +481,15 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 		return $status
 	}
 	run() {
-		case " blender ${RVGPU_SOFTWARE} " in
+		vulkan_use
+		# Blender (4.3 core, GL 4.3) draws on the GPU only where the executor is the WebGPU one (the ready file says
+		# "venus": vfront on zink on wgvk gives GL 4.3 and 16 SSBOs); with vrend (GL 2.1/ES 3.0) it stays on
+		# llvmpipe with the rest of RVGPU_SOFTWARE. RV_BLENDER_SOFT=1 keeps it on llvmpipe in either case.
+		soft=" blender ${RVGPU_SOFTWARE} "
+		if [ "$RV_BLENDER_SOFT" != 1 ] && [ "$RVGPU" != 0 ] && grep -q '"venus"' "$XDG_RUNTIME_DIR/rvgpu-0.ready" 2> /dev/null; then
+			soft=" ${RVGPU_SOFTWARE} "
+		fi
+		case "$soft" in
 		*" ${1##*/} "*)
 			unset GALLIUM_DRIVER VTEST_SOCKET_NAME RV_VIRTGPU
 			export QT_QUICK_BACKEND=software
@@ -451,8 +612,30 @@ if [ "$1" = wayland ] || [ "$1" = wayland-x ] || [ "$1" = x11 ]; then
 			client "$@" --replace > /root/plasmashell-replace.log 2>&1
 		) &
 	fi
-	run "$@"
-	status=$?
+	# plasmashell is supervised (J11): about 1 cold boot in 12 loses it silently a moment after it starts (no process,
+	# empty log, no exit status; the script's wait never returned and the desktop stayed a wallpaper). It is started
+	# directly in the background and polled with kill -0 (a wait that does not wake cannot hang this); if it is gone
+	# within 120 s it is started again, up to 3 times, each restart logged to /root/desktop-status.log.
+	# RV_PLASMA_SUPERVISE=0 turns this off.
+	if [ "$shell" = plasma ] && [ "$mode" = wayland ] && [ "${RV_PLASMA_SUPERVISE:-1}" != 0 ] && [ -n "$DBUS_SESSION_BUS_ADDRESS" ] && { [ "$1" = sh ] || [ "$1" = env ]; }; then
+		tries=0
+		while :; do
+			echo "desktop: plasmashell start $tries" >> /root/desktop-status.log
+			"$@" &
+			spid=$!
+			t0=$(date +%s)
+			while kill -0 $spid 2> /dev/null; do sleep 2; done
+			wait $spid
+			status=$?
+			age=$(($(date +%s) - t0))
+			echo "desktop: plasmashell gone after ${age}s status $status" >> /root/desktop-status.log
+			[ $age -lt 120 ] && [ $tries -lt 3 ] || break
+			tries=$((tries + 1))
+		done
+	else
+		run "$@"
+		status=$?
+	fi
 	# The program may have left windows behind it (Kate goes into the background, so does a second instance that
 	# handed its work to the first): the server stays until the last client has gone.
 	touch "$XDG_RUNTIME_DIR/wlserver.done"

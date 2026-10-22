@@ -61,6 +61,8 @@ cp "$W/build-probes$X/hello" "$W/stage/bin/wasm-hello"
 cp "$W/build-probes$X/mmap_probe" "$W/build-probes$X/clone_probe" "$W/build-probes$X/fp_probe" \
 	"$W/build-probes$X/spawn_sig_probe" "$W/build-probes$X/shm_probe" "$W/build-probes$X/sched_bench" "$W/stage/bin/"
 cp "$RVW/rv" "$W/stage/bin/rv"
+# The page lets only this program use its store of translated code (tools/patch-runtime.py, 29): its SHA-256.
+sha256sum "$RVW/rv" | cut -c1-64 > "$W/www/rv.sha256"
 # Native wasm CoreMark, if it has been built (tools/build-coremark.sh).
 if [ -x "$W/build-probes/coremark-wasm" ]; then
 	cp "$W/build-probes/coremark-wasm" "$W/stage/bin/coremark-wasm"
@@ -116,20 +118,35 @@ else
 	echo "stage: no libva headers in $VA_INC: no VA-API driver (guest players decode in software)"
 fi
 cp "$S/gpu/tools/dmabuf-test.py" "$W/stage/usr/lib/rvgpu/bin/dmabuf-test"
+cp "$S/gpu/tools/stageb-trace.py" "$W/stage/usr/lib/rvgpu/bin/stageb-trace"	# (VK-09: a GPU window's frames, python3 /run/rvgpu/bin/stageb-trace 8 vkcube)
 for b in es2gears_wayland eglgears_wayland eglinfo es2_info peglgears; do
 	[ -e "$W/gpuguest/x/usr/bin/$b.riscv64-linux-gnu" ] && cp "$W/gpuguest/x/usr/bin/$b.riscv64-linux-gnu" "$W/stage/usr/lib/rvgpu/bin/$b"
 done
 chmod 755 "$W/stage/usr/lib/rvgpu/bin/"*
+# The GPU app matrix's guest script and its two pages (VK-17): bash /run/rvgpu/matrix/gpu-matrix-guest.sh all (docs/gpu-matrix.md). Its qml, GTK 4
+# and glmark2 come as m.tgz from the build VM (gpu/tools/matrix-bundle.sh), fetched in the machine into /tmp/matrix.
+mkdir -p "$W/stage/usr/lib/rvgpu/matrix"
+cp "$S/gpu/tools/gpu-matrix-guest.sh" "$S/gpu/tools/matrix/spin.qml" "$S/gpu/tools/matrix/anim.html" "$W/stage/usr/lib/rvgpu/matrix/"
+# Vulkan without a setup script (VK-08a): Debian's riscv64 venus driver (the page's executor answers it), lavapipe (what
+# vulkaninfo falls to where it has no Vulkan), vulkaninfo, vkcube and T5's vkr-bench, as /run/rvgpu/venus in Debian with
+# the ICD files that name them; `desktop wayland vulkaninfo` points the loader at them (tools/x/desktop, vulkan_use).
+# From the debs in $W/gpuguest (gpu/native-vtest.sh), the benchmark from $W/webgpu/out/t5/guest. RV_STAGE_LVP=0 leaves
+# lavapipe (a 10 MB library) out. All of it goes once the disk has mesa-vulkan-drivers and vulkan-tools (VK-08b).
+rm -rf "$W/stage/usr/lib/rvgpu/venus"
+if ls "$W"/gpuguest/mesa-vulkan-drivers_*_riscv64.deb "$W"/gpuguest/vulkan-tools_*_riscv64.deb > /dev/null 2>&1; then
+	VT=$(mktemp -d)
+	for d in "$W"/gpuguest/mesa-vulkan-drivers_*_riscv64.deb "$W"/gpuguest/vulkan-tools_*_riscv64.deb; do dpkg -x "$d" "$VT/root"; done
+	VF=("$VT/root/usr/lib/riscv64-linux-gnu/libvulkan_virtio.so" "$VT/root/usr/bin/vulkaninfo" "$VT/root/usr/bin/vkcube")
+	[ "${RV_STAGE_LVP:-1}" = 0 ] || VF+=("$VT/root/usr/lib/riscv64-linux-gnu/libvulkan_lvp.so")
+	for f in vkr-bench-rv64 add.spv; do [ -e "$W/webgpu/out/t5/guest/$f" ] && VF+=("$W/webgpu/out/t5/guest/$f"); done
+	"$S/gpu/tools/venus-stage.sh" "$W/stage/usr/lib/rvgpu/venus" "${VF[@]}"
+	rm -rf "$VT"
+else
+	echo "stage: no mesa-vulkan-drivers and vulkan-tools debs in $W/gpuguest: no Vulkan through venus (gpu/native-vtest.sh)"
+fi
 # hostopen (hostopen/): web addresses from the machine to the browser it runs in; Debian finds it as /run/hostopen.
 mkdir -p "$W/stage/usr/lib/hostopen"
 cp -r "$S/hostopen/." "$W/stage/usr/lib/hostopen/"
-# blender-gpu (blenderweb/guest/): Blender on the host's GPU as a window of the desktop; with the window server,
-# whose client it is: /run/wlserver/blenderweb. (The page's side is tools/www/blenderweb.js; Blender itself is
-# served by blenderweb/serve.py.)
-mkdir -p "$W/stage/usr/lib/wlserver/blenderweb"
-cp -r "$S/blenderweb/guest/." "$W/stage/usr/lib/wlserver/blenderweb/"
-chmod 755 "$W/stage/usr/lib/wlserver/blenderweb/blender-gpu"
-
 # The first riscv64 program rv ran: no libc, only write and exit (tests/hello-nolibc.c).
 if [ ! -x "$W/guest/hello" ]; then
 	mkdir -p "$W/guest"
@@ -153,7 +170,7 @@ fi
 cp "$S/tools/initramfs-init" "$W/stage/init"
 chmod 755 "$W/stage/init"
 
-cp "$S/tests/smoke.sh" "$S/tests/bench.sh" "$S/tests/debian.sh" "$S/tests/procmem.sh" "$S/tests/plasma-time.sh" "$S/tests/devtools.sh" "$S/tests/jitcache.sh" "$S/tests/selfmod.sh" "$S/tests/fp.sh" "$S/tests/js/jsbench.js" "$W/stage/rv/"
+cp "$S/tests/smoke.sh" "$S/tests/bench.sh" "$S/tests/debian.sh" "$S/tests/procmem.sh" "$S/tests/plasma-time.sh" "$S/tests/devtools.sh" "$S/tests/jitcache.sh" "$S/tests/jitcache-warm.sh" "$S/tests/jitlaunch.sh" "$S/tests/appstart.sh" "$S/tests/selfmod.sh" "$S/tests/fp.sh" "$S/tests/js/jsbench.js" "$W/stage/rv/"
 cp "$S/tools/debian-enter" "$W/stage/bin/debian"
 # Name servers: the ones this machine uses (the guest reaches them through the relay's address translation).
 mkdir -p "$W/stage/etc"
@@ -221,12 +238,17 @@ fi
 chmod 755 "$W"/stage/bin/* "$W"/stage/rv/* "$H/hostnode"
 
 # The dev page and our changes to the JS runtime.
-cp "$S/tools/www/dev.html" "$S/tools/www/disk-worker.js" "$S/tools/www/watchdog.js" "$S/tools/www/display.js" "$S/tools/www/chrome.css" "$S/tools/www/panel.css" "$S/tools/www/plasma.js" "$S/tools/www/splash.js" "$S/tools/www/breeze.css" "$S/tools/www/hostopen.js" "$S/tools/www/hostopen.css" "$S/tools/www/blenderweb.js" "$S/tools/www/background.js" "$S/tools/www/audio.js" "$S/tools/www/audio-worklet.js" "$W/www/"
+cp "$S/tools/www/dev.html" "$S/tools/www/jitcache.js" "$S/tools/www/disk-worker.js" "$S/tools/www/watchdog.js" "$S/tools/www/display.js" "$S/tools/www/chrome.css" "$S/tools/www/panel.css" "$S/tools/www/plasma.js" "$S/tools/www/splash.js" "$S/tools/www/breeze.css" "$S/tools/www/hostopen.js" "$S/tools/www/hostopen.css" "$S/tools/www/background.js" "$S/tools/www/audio.js" "$S/tools/www/audio-worklet.js" "$S/tools/www/probe.html" "$W/www/"
 # The page's GPU executor (gpu-exec.js) and virglrenderer built to wasm for it (gpu/vrend/build.sh puts it in
 # $GPUHOST/out (~/gpuhost/out in the build VM); without it the executor cannot start and GPU programs are not offered one).
 cp "$S/tools/www/gpu-exec.js" "$W/www/"
 # The video decoder for guest players (docs/video-decode.md): page glue and its Worker.
 cp "$S/tools/www/vdec.js" "$S/tools/www/vdec-worker.js" "$W/www/"
+# The library manifest and the libraries it names (tools/dl-manifest.py --out $RVWASM_WORK/dl), for ?dl=1.
+if [ -e "${RVWASM_WORK:-$HOME/rvwasm}/dl/libs.json" ]; then
+	rm -rf "$W/www/dl"
+	cp -RL "${RVWASM_WORK:-$HOME/rvwasm}/dl" "$W/www/dl"
+fi
 if [ -e "$GPUHOST/out/vrend.wasm" ]; then
 	mkdir -p "$W/www/vrend"
 	cp "$GPUHOST/out/vrend.js" "$GPUHOST/out/vrend.wasm" "$W/www/vrend/"

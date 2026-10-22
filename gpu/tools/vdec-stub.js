@@ -6,6 +6,11 @@
 // and ffmpeg to decode on their own.
 //   HOOK=gpu/tools/gpu-stub.js GPU_STUB_CHAIN=gpu/tools/vdec-stub.js gpu/tools/nm-run.sh '...'
 //   VDEC_STUB_GPU=1     say frames can be drawn into GPU resources (they are only marked drawn)
+//   VDEC_STUB_GPU=executor   (VK-14) the frames are drawn for real: the stand-in decoder's pictures are a test card (eight
+//                       colour bars over a grey ramp, a white marker that moves with the picture's number), sent as
+//                       NV12 descriptors over a MessagePort to the real WebGPU executor (gpu/tools/rvgpu-nm.js, which must
+//                       load this file: RVGPU_NM_CHAIN=gpu/tools/vdec-stub.js), whose rvgpu-worker.js draws them into the
+//                       guest's surfaces as it does the page's VideoFrames. VDEC_STUB_EXACT=1: the exact path (copyTo).
 //   VDEC_STUB_CODECS=1,4  the codecs offered (default all: 1 H.264, 2 HEVC, 3 VP8, 4 VP9, 5 AV1)
 //   VDEC_STUB_DUMP=DIR  the chunks
 //   VDEC_STUB_CHAIN=tools/wl-dump.js  also load that hook (wl-dump acknowledges the window server's frames, so that
@@ -18,8 +23,10 @@ const path = require("path");
 module.exports = (os, opts) => {
   const chained = process.env.VDEC_STUB_CHAIN ? require(path.resolve(process.env.VDEC_STUB_CHAIN))(os, opts) : null;
   const { VdecCore, run, probeCaps } = require(path.join(__dirname, "../../tools/www/vdec-worker.js"));
+  const { testCard } = require("./synth-frame.js");
   const dump = process.env.VDEC_STUB_DUMP;
-  const gpu = process.env.VDEC_STUB_GPU === "1";
+  const gpuMode = process.env.VDEC_STUB_GPU === "executor" ? "executor" : "";
+  const gpu = process.env.VDEC_STUB_GPU === "1" || gpuMode === "executor";
   const codecs = (process.env.VDEC_STUB_CODECS || "1,2,3,4,5").split(",").map(Number);
   const CODEC_OF = { avc1: 1, hev1: 2, vp8: 3, vp09: 4, av01: 5 };
   const files = new Map();
@@ -39,6 +46,12 @@ module.exports = (os, opts) => {
     }
     clone() {
       return new Frame(this.timestamp, this.codedWidth, this.codedHeight);
+    }
+    // (for the executor's Worker, which makes a VideoFrame stand-in of it: gpu/tools/rvgpu-nm-worker.js)
+    toDescriptor() {
+      const { y, uv } = testCard(this.codedWidth, this.codedHeight, this.timestamp);
+      return { synthetic: true, timestamp: this.timestamp, format: "NV12", codedWidth: this.codedWidth, codedHeight: this.codedHeight,
+               displayWidth: this.displayWidth, displayHeight: this.displayHeight, colorSpace: this.colorSpace, y, uv };
     }
     close() {
       this.closed = true;
@@ -92,12 +105,27 @@ module.exports = (os, opts) => {
       this.byteLength = this.data.length;
     }
   }
-  const port = gpu ? {
-    postMessage(m) {
-      m.frame.close();
-      Atomics.store(new Int32Array(os.memory.buffer), Math.floor(m.ready / 4), m.seq | 0);
-    },
-  } : null;
+  let port = null;
+  if (gpuMode === "executor") {
+    // (a real MessageChannel to the executor's Worker; its frames are the descriptors of toDescriptor)
+    const real = new MessageChannel();
+    const join = () => (os.rvgpuNm ? os.rvgpuNm.vdecPort(real.port2) : setTimeout(join, 100));
+    join();
+    port = {
+      postMessage(m) {
+        const f = m.frame;
+        real.port1.postMessage({ ...m, frame: f.toDescriptor() });
+        f.close();
+      },
+    };
+  } else if (gpu) {
+    port = {
+      postMessage(m) {
+        m.frame.close();
+        Atomics.store(new Int32Array(os.memory.buffer), Math.floor(m.ready / 4), m.seq | 0);
+      },
+    };
+  }
 
   let core = null;
   const channel = new BroadcastChannel("rv-gpu");
@@ -108,7 +136,7 @@ module.exports = (os, opts) => {
       return;
     }
     core = new VdecCore({ memory: os.memory, ring: m.vdec, VideoDecoder, EncodedVideoChunk, gpuPort: port,
-      log: (t) => console.error("vdec-stub: " + t) });
+      exact: process.env.VDEC_STUB_EXACT === "1", log: (t) => console.error("vdec-stub: " + t) });
     // (what the guest sent, for decoding it elsewhere)
     const decode = core.decode.bind(core);
     core.decode = (c, id, slot, seq, addr, size, flags, end) => {
@@ -131,7 +159,7 @@ module.exports = (os, opts) => {
     const caps = await probeCaps(VideoDecoder);
     core.publish(caps.map((c) => Object.assign(c, { flags: 1 })), gpu);
     console.error("vdec-stub: vdec ring at " + m.vdec + ", codecs " + caps.map((c) => c.codec).join(",")
-                  + (gpu ? ", frames drawn (marked)" : ", copies only"));
+                  + (gpuMode ? ", frames drawn by the executor" : gpu ? ", frames drawn (marked)" : ", copies only"));
     clearInterval(ask);
     run(core);
   };

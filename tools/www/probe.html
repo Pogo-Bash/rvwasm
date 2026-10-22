@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>rvwasm browser probe</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!--
+  Feature probe for the machine (dev.html, served as /desktop). It runs, in the visitor's own browser, the things the
+  machine needs and prints a pass/fail table: what blocks the boot, what only degrades something, what is only
+  information. Self-contained on purpose (one file, no other requests but the two HEAD requests that read the
+  server's headers), so that it works on a page that could not boot. Served at /probe.
+
+  What it tests and why is in docs/firefox.md. `?quick=1` skips the slower tests (many workers, the big memory
+  steps); the buttons at the bottom run those on demand. window.probeReport is the result as an object (for a test
+  driver), window.probeDone resolves when the automatic tests are finished.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f2ea; --fg: #2b2a26; --dim: #6c675c; --line: #d9d2c2; --card: #fffdf8;
+    --pass: #2f7d4f; --warn: #a86a00; --fail: #b3321f; --info: #3b6ea5; --skip: #8a8578;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1e1e2e; --fg: #cdd6f4; --dim: #9399b2; --line: #45475a; --card: #181825;
+      --pass: #a6e3a1; --warn: #f9e2af; --fail: #f38ba8; --info: #89b4fa; --skip: #7f849c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 6px; text-transform: lowercase; letter-spacing: .04em; color: var(--dim); }
+  p.lead { margin: 0 0 12px; color: var(--dim); }
+  code, pre, td.msg { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  #verdict { padding: 12px 14px; border: 1px solid var(--line); border-left-width: 5px; border-radius: 6px;
+             background: var(--card); margin: 12px 0 4px; }
+  #verdict.ok { border-left-color: var(--pass); } #verdict.bad { border-left-color: var(--fail); }
+  #verdict.meh { border-left-color: var(--warn); } #verdict.run { border-left-color: var(--info); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); }
+  td, th { text-align: left; vertical-align: top; padding: 6px 10px; border-top: 1px solid var(--line); }
+  th { font-weight: 600; font-size: 12px; color: var(--dim); border-top: 0; }
+  td.st { width: 74px; font-weight: 700; font-size: 12px; white-space: nowrap; }
+  td.sev { width: 92px; color: var(--dim); font-size: 12px; white-space: nowrap; }
+  td.name { width: 30%; }
+  td.msg { font-size: 12.5px; color: var(--dim); word-break: break-word; }
+  .pass { color: var(--pass); } .warn { color: var(--warn); } .fail { color: var(--fail); }
+  .info { color: var(--info); } .skip { color: var(--skip); } .run { color: var(--dim); }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+           border-radius: 6px; cursor: pointer; }
+  button:hover { border-color: var(--info); }
+  pre { background: var(--card); border: 1px solid var(--line); padding: 10px; overflow: auto; max-height: 340px;
+        font-size: 12px; border-radius: 6px; }
+  noscript { display: block; padding: 12px; border: 1px solid var(--fail); }
+</style>
+</head>
+<body>
+<main>
+  <h1>rvwasm browser probe</h1>
+  <p class="lead">Tests, in this browser, what the machine at <a href="/desktop">/desktop</a> needs. Nothing is sent anywhere.
+  If something fails, copy the report (the button at the bottom) and send it along.</p>
+  <noscript>This page needs JavaScript.</noscript>
+  <div id="verdict" class="run">running the tests...</div>
+  <div id="groups"></div>
+  <div class="buttons">
+    <button id="copy">Copy report</button>
+    <button id="again">Run again</button>
+    <button id="b-workers" title="starts 400 workers, then lets them go">More workers (400)</button>
+    <button id="b-memory" title="grows the machine's memory object to its 16 GiB maximum (address space only, nothing is touched)">Memory to 16 GiB</button>
+    <button id="b-kernel" title="downloads the 7 MB kernel and asks the engine to compile it">Compile the kernel (7 MB)</button>
+    <button id="b-audio" title="a click lets the audio context run">Audio test (needs this click)</button>
+  </div>
+  <pre id="report"></pre>
+</main>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------------------------------------------
+// The tests. Each: {group, name, sev, run}. sev says what a failure costs: "blocks" (the machine does not boot),
+// "degrades" (it boots, something is worse or missing), "cosmetic", "info" (no pass or fail, only a fact).
+// run() returns {status: "pass"|"warn"|"fail"|"info"|"skip", msg}. A thrown error is a fail with its message.
+// ---------------------------------------------------------------------------------------------------------------
+
+const QUICK = new URLSearchParams(location.search).has("quick");
+const results = [];
+const tests = [];
+const T = (group, name, sev, run) => tests.push({ group, name, sev, run });
+const ok = (msg) => ({ status: "pass", msg: msg || "" });
+const bad = (msg) => ({ status: "fail", msg });
+const meh = (msg) => ({ status: "warn", msg });
+const note = (msg) => ({ status: "info", msg });
+const skip = (msg) => ({ status: "skip", msg });
+const errText = (e) => (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
+
+// ---- running things in a Worker (a Blob script; the page is cross-origin isolated, so a Blob worker is allowed)
+const inWorker = (source, message, timeout = 20000, transfer = []) => new Promise((resolve, reject) => {
+  let worker;
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
+  } catch (e) {
+    reject(e);
+    return;
+  }
+  const timer = setTimeout(() => { worker.terminate(); reject(new Error("no answer in " + timeout / 1000 + " s")); }, timeout);
+  worker.onmessage = (event) => { clearTimeout(timer); worker.terminate(); resolve(event.data); };
+  worker.onerror = (event) => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message || "worker error")); };
+  worker.postMessage(message, transfer);
+});
+
+// A worker script: runs `fn` (a function declaration's text, which must not use anything outside itself) on the
+// message and posts its result, or its error.
+const workerOf = (...fns) => fns.map((f) => f.toString()).join("\n") + "\n" +
+  "self.onmessage = async (event) => { try { postMessage({ ok: true, value: await main(event.data) }); }" +
+  " catch (e) { postMessage({ ok: false, error: (e && e.name ? e.name + ': ' : '') + (e && e.message || e) }); } };";
+const callWorker = async (source, message, timeout, transfer) => {
+  const answer = await inWorker(source, message, timeout, transfer);
+  if (!answer.ok) {
+    throw new Error(answer.error);
+  }
+  return answer.value;
+};
+
+// ---- WebAssembly modules by hand (just enough to ask the engine "do you validate this?")
+const leb = (n) => { const o = []; n = BigInt(n); do { let b = Number(n & 0x7fn); n >>= 7n; if (n) b |= 0x80; o.push(b); } while (n); return o; };
+const vec = (items) => [...leb(items.length), ...items.flat()];
+const sec = (id, bytes) => [id, ...leb(bytes.length), ...bytes];
+const I32 = 0x7f;
+// funcs: [{ result: bool, body: bytes }]; mem: the memory type's bytes (flags, min, [max]) or null
+const wasm = (funcs, mem) => new Uint8Array([
+  0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+  ...sec(1, vec([[0x60, 0, 1, I32], [0x60, 0, 0]])),
+  ...sec(3, vec(funcs.map((f) => [f.result ? 0 : 1]))),
+  ...(mem ? sec(5, vec([mem])) : []),
+  ...sec(10, vec(funcs.map((f) => [...leb(f.body.length + 2), 0, ...f.body, 0x0b]))),
+]);
+const v128zero = [0xfd, 0x0c, ...new Array(16).fill(0)];
+const FEATURES = [
+  // name, severity, what it is for, module
+  ["threads (shared memory, atomics)", "blocks", "every CPU and task is a Worker on one shared memory",
+    wasm([{ result: true, body: [0x41, 0, 0x41, 1, 0xfe, 0x1e, 2, 0] }], [0x03, 1, 1])],
+  ["bulk memory (memory.fill)", "blocks", "kernel and libc",
+    wasm([{ result: false, body: [0x41, 0, 0x41, 0, 0x41, 0, 0xfc, 0x0b, 0x00] }], [0x00, 1])],
+  ["sign extension", "blocks", "kernel and libc", wasm([{ result: true, body: [0x41, 0, 0xc0] }])],
+  ["memory64 (shared, atomics at i64 addresses)", "blocks", "the kernel and all programs are wasm64",
+    wasm([{ result: true, body: [0x42, 0, 0x41, 1, 0xfe, 0x1e, 2, 0] }], [0x07, 1, 1])],
+  ["SIMD (v128)", "degrades", "the riscv64 JIT's fused multiply-add probe",
+    wasm([{ result: true, body: [...v128zero, 0xfd, 0x1b, 0] }])],
+  ["relaxed SIMD (f64x2.relaxed_madd)", "degrades", "the JIT's fast fused multiply-add; without it the emulator computes it in software",
+    wasm([{ result: true, body: [...v128zero, ...v128zero, ...v128zero, 0xfd, 0x87, 0x02, 0xfd, 0x1b, 0] }])],
+  ["tail calls (return_call)", "info", "built with -mtail-call? (the Chitin toolchain notes say -fno-optimize-sibling-calls for wasm, so probably not needed)",
+    wasm([{ result: true, body: [0x12, 0x01] }, { result: true, body: [0x41, 0] }])],
+  ["exceptions, legacy (try / catch_all)", "info", "C++ programs built with -fwasm-exceptions (the native Qt / KDE work)",
+    wasm([{ result: false, body: [0x06, 0x40, 0x19, 0x0b] }])],
+  ["exceptions, exnref (try_table)", "info", "the same, built for the final exception proposal",
+    wasm([{ result: false, body: [0x1f, 0x40, 0x00, 0x0b] }])],
+];
+FEATURES.forEach(([name, sev, why, bytes]) => T("webassembly", name, sev, async () => {
+  const valid = WebAssembly.validate(bytes);
+  if (valid) {
+    return ok(why);
+  }
+  return sev === "info" ? note("not supported (" + why + ")") : bad("this engine rejects it (" + why + ")");
+}));
+
+// ---- environment
+T("this browser", "user agent", "info", async () => note(navigator.userAgent));
+T("this browser", "platform, processors, memory", "info", async () => note(
+  (navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || "?") + ", " +
+  (navigator.hardwareConcurrency || "?") + " processors, navigator.deviceMemory " +
+  (navigator.deviceMemory === undefined ? "absent (Firefox and Safari do not have it: the page then gives the machine the kernel's 3 GiB unless ?mem=MiB says otherwise)" : navigator.deviceMemory + " GB")));
+T("this browser", "secure context", "blocks", async () =>
+  window.isSecureContext ? ok("") : bad("not a secure context: use https:// or localhost; Workers' shared memory and OPFS need it"));
+T("this browser", "cross-origin isolated (COOP + COEP)", "blocks", async () => {
+  if (window.crossOriginIsolated && typeof SharedArrayBuffer === "function") {
+    return ok("crossOriginIsolated is true, SharedArrayBuffer exists");
+  }
+  return bad("crossOriginIsolated is " + window.crossOriginIsolated + ", SharedArrayBuffer is " + typeof SharedArrayBuffer +
+             ": the server must send Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp (or credentialless)");
+});
+T("this browser", "the server's headers", "info", async () => {
+  const names = ["cross-origin-opener-policy", "cross-origin-embedder-policy", "cross-origin-resource-policy", "document-isolation-policy"];
+  const lines = [];
+  try {
+    const a = await fetch(location.pathname, { method: "HEAD", cache: "no-store" });
+    lines.push("this page: " + names.map((n) => n + "=" + (a.headers.get(n) || "-")).join(" "));
+  } catch (e) {
+    lines.push("this page: " + errText(e));
+  }
+  try {
+    const b = await fetch("vmlinux-wasm64_nommu.wasm", { method: "HEAD", cache: "no-store" });
+    lines.push("kernel: " + (b.ok ? "HTTP " + b.status + ", content-type " + b.headers.get("content-type") +
+      (/^application\/wasm\b/.test(b.headers.get("content-type") || "") ? "" : "  <-- compileStreaming needs application/wasm") : "HTTP " + b.status + " (not served here; fine when this page is opened from elsewhere)"));
+  } catch (e) {
+    lines.push("kernel: " + errText(e));
+  }
+  return note(lines.join(" | "));
+});
+T("this browser", "timer resolution", "degrades", async () => {
+  // The kernel's clock is performance.timeOrigin + performance.now() in each Worker. A coarse timer (Firefox with
+  // privacy.resistFingerprinting, or without cross-origin isolation) makes the machine's time jumpy.
+  const seen = new Set();
+  const end = performance.now() + 30;
+  while (performance.now() < end) {
+    seen.add(performance.now());
+  }
+  const sorted = [...seen].sort((a, b) => a - b);
+  let step = Infinity;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i - 1] > 0) step = Math.min(step, sorted[i] - sorted[i - 1]);
+  }
+  const msg = "smallest step of performance.now(): " + (step === Infinity ? "none seen" : (step * 1000).toFixed(0) + " us");
+  return step > 0.5 ? meh(msg + " (coarse: resistFingerprinting? the machine's clock will be jumpy)") : ok(msg);
+});
+T("this browser", "other APIs the page uses", "degrades", async () => {
+  const want = {
+    "WebAssembly.compileStreaming": typeof WebAssembly.compileStreaming === "function",
+    "Atomics.waitAsync": typeof Atomics.waitAsync === "function",
+    "BroadcastChannel": typeof BroadcastChannel === "function",
+    "OffscreenCanvas": typeof OffscreenCanvas === "function",
+    "createImageBitmap": typeof createImageBitmap === "function",
+    "navigator.storage.getDirectory": !!(navigator.storage && navigator.storage.getDirectory),
+    "AudioWorklet": typeof AudioWorkletNode === "function",
+    "WebSocket": typeof WebSocket === "function",
+    "Intl time zone": (() => { try { return !!Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return false; } })(),
+  };
+  const missing = Object.keys(want).filter((k) => !want[k]);
+  if (!missing.length) return ok(Object.keys(want).join(", "));
+  const harmless = missing.every((k) => k === "Atomics.waitAsync");
+  return harmless ? meh("missing: " + missing.join(", ") + " (older Firefox lacks Atomics.waitAsync before 145: the GPU and video executors then poll on a timer)") : bad("missing: " + missing.join(", "));
+});
+
+// ---- the machine's memory: one shared 64-bit WebAssembly.Memory, as linux.js makes it
+const MEM_IMPORT = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
+  ...sec(1, vec([[0x60, 0, 1, I32]])),
+  ...sec(2, vec([[3, 0x65, 0x6e, 0x76, 6, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x07, 0, 0x80, 0x80, 0x10]])),
+  ...sec(3, vec([[0]])),
+  ...sec(7, vec([[1, 0x66, 0, 0]])),
+  ...sec(10, vec([[...leb(8), 0, 0x42, 0, 0xfe, 0x10, 2, 0, 0x0b]])),
+]);
+let machineMemory = null;     // the memory of the first memory test, the later ones go on with it
+let machineMemoryKey = null;
+T("memory", "shared memory64 as linux.js makes it (16 GiB maximum)", "blocks", async () => {
+  const tried = [];
+  for (const key of ["address", "index"]) {
+    for (const max of [0x40000n, 0x20000n, 0x10000n]) {
+      try {
+        const memory = new WebAssembly.Memory({ initial: 30n, maximum: max, shared: true, [key]: "i64" });
+        // Is it really 64-bit? A module whose memory import is i64 only links to such a memory.
+        const instance = await WebAssembly.instantiate(MEM_IMPORT, { env: { memory } });
+        instance.instance.exports.f();
+        machineMemory = memory;
+        machineMemoryKey = key;
+        const gib = Number(max) * 64 / 1048576;
+        return (max === 0x40000n && key === "address")
+          ? ok("descriptor key \"address\", maximum 16 GiB accepted")
+          : meh("works with key \"" + key + "\" and a maximum of " + gib + " GiB (linux.js uses \"address\" and 16 GiB: " + tried.join("; ") + ")");
+      } catch (e) {
+        tried.push(key + "/" + Number(max) * 64 / 1048576 + " GiB: " + errText(e));
+      }
+    }
+  }
+  return bad(tried.join("; "));
+});
+const LADDER = [["1 GiB", 16384], ["2 GiB", 32768], ["4 GiB", 65536], ["5 GiB", 81920], ["8 GiB (the page's default mem=8192M)", 131072]];
+T("memory", "grow it, past 4 GiB", "blocks", async () => {
+  if (!machineMemory) return skip("no memory");
+  if (QUICK) return skip("?quick");
+  const done = [];
+  for (const [label, pages] of LADDER) {
+    const have = BigInt(machineMemory.buffer.byteLength) / 65536n;
+    if (have < BigInt(pages)) {
+      try {
+        machineMemory.grow(BigInt(pages) - have);
+      } catch (e) {
+        return done.length >= 3 ? meh("reached " + done[done.length - 1] + " but not " + label + ": " + errText(e)) : bad("cannot reach " + label + ": " + errText(e));
+      }
+    }
+    done.push(label);
+  }
+  return ok("grew to " + (machineMemory.buffer.byteLength / 2 ** 30) + " GiB");
+});
+T("memory", "a Worker uses the same memory (postMessage, atomics high up)", "blocks", async () => {
+  if (!machineMemory) return skip("no memory");
+  const high = machineMemory.buffer.byteLength > 5 * 2 ** 30 ? 5 * 2 ** 30 : 1 * 2 ** 30;
+  const source = workerOf(async function main(m) {
+    const view = new Int32Array(m.memory.buffer);
+    const at = m.at / 4;
+    const before = Atomics.add(view, at, 41);
+    Atomics.notify(view, at);
+    return { before, shared: m.memory.buffer instanceof SharedArrayBuffer, length: m.memory.buffer.byteLength };
+  });
+  const answer = await callWorker(source, { memory: machineMemory, at: high }, 15000);
+  const view = new Int32Array(machineMemory.buffer);
+  const value = Atomics.load(view, high / 4);
+  Atomics.store(view, high / 4, 0);
+  return value === 41 && answer.shared ? ok("a write at " + (high / 2 ** 30) + " GiB from the Worker was seen here") : bad("the Worker's write was not seen: " + value);
+});
+T("memory", "Memory64 from a Worker: a wasm64 module over the shared memory", "blocks", async () => {
+  if (!machineMemory) return skip("no memory");
+  const source = workerOf(async function main(m) {
+    const { instance } = await WebAssembly.instantiate(m.bytes, { env: { memory: m.memory } });
+    return instance.exports.f();
+  });
+  const value = await callWorker(source, { memory: machineMemory, bytes: MEM_IMPORT }, 15000);
+  return ok("instantiated in a Worker, i32.atomic.load at an i64 address returned " + value);
+});
+let ready16 = false;
+const grow16 = async () => {
+  if (!machineMemory) return skip("no memory");
+  const have = BigInt(machineMemory.buffer.byteLength) / 65536n;
+  try {
+    if (have < 0x40000n) machineMemory.grow(0x40000n - have);
+    ready16 = true;
+    return ok("16 GiB reached (" + machineMemory.buffer.byteLength / 2 ** 30 + " GiB)");
+  } catch (e) {
+    return meh("stopped at " + machineMemory.buffer.byteLength / 2 ** 30 + " GiB: " + errText(e));
+  }
+};
+
+// ---- workers
+T("workers", "many Workers at once (the machine uses one per task, 8 to 60 in a desktop)", "blocks", async () => {
+  const count = QUICK ? 16 : 64;
+  const source = "postMessage(1);";
+  const url = URL.createObjectURL(new Blob([source]));
+  const started = performance.now();
+  const workers = [];
+  let up = 0;
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 20000);
+    for (let i = 0; i < count; i++) {
+      const w = new Worker(url, { name: "probe " + i });
+      w.onmessage = () => { if (++up === count) { clearTimeout(timer); resolve(); } };
+      w.onerror = () => {};
+      workers.push(w);
+    }
+  });
+  const ms = Math.round(performance.now() - started);
+  workers.forEach((w) => w.terminate());
+  return up === count ? ok(count + " Workers up in " + ms + " ms") : (up >= 16 ? meh("only " + up + " of " + count + " came up in 20 s") : bad("only " + up + " of " + count + " came up in 20 s (dom.workers.maxPerDomain?)"));
+});
+T("workers", "Atomics.wait and notify across Workers; nested Worker; synchronous XHR in a Worker (the disk worker)", "blocks", async () => {
+  const source = workerOf(async function main(m) {
+    const out = {};
+    const word = new Int32Array(m.sab);
+    out.timedOut = Atomics.wait(word, 0, 0, 5);               // blocks 5 ms
+    out.nested = await new Promise((resolve) => {
+      try {
+        const inner = new Worker(URL.createObjectURL(new Blob(["postMessage('inner')"])));
+        inner.onmessage = (e) => { inner.terminate(); resolve(e.data); };
+        inner.onerror = (e) => resolve("error: " + e.message);
+      } catch (e) {
+        resolve("cannot: " + e.name + " " + e.message);
+      }
+    });
+    try {
+      const x = new XMLHttpRequest();
+      x.open("GET", m.url, false);
+      x.responseType = "arraybuffer";
+      x.send();
+      out.xhr = x.status + ", " + x.response.byteLength + " bytes";
+    } catch (e) {
+      out.xhr = "failed: " + e.name + " " + e.message;
+    }
+    return out;
+  });
+  const a = await callWorker(source, { sab: new SharedArrayBuffer(16), url: location.href.split("#")[0] }, 15000);
+  const problems = [];
+  if (a.timedOut !== "timed-out") problems.push("Atomics.wait returned " + a.timedOut);
+  if (a.nested !== "inner") problems.push("nested Worker: " + a.nested);
+  if (!/^200,/.test(a.xhr)) problems.push("sync XHR: " + a.xhr);
+  return problems.length ? bad(problems.join("; ")) : ok("wait returned timed-out, nested Worker ran, sync XHR got " + a.xhr);
+});
+
+// ---- the private file system (the disk)
+T("storage", "OPFS: getDirectory + createSyncAccessHandle in a Worker (the disk)", "degrades", async () => {
+  const source = workerOf(async function main() {
+    const out = {};
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle("probe-" + Math.random().toString(36).slice(2), { create: true });
+    try {
+      const file = await dir.getFileHandle("data", { create: true });
+      const h = await file.createSyncAccessHandle();
+      const chunk = new Uint8Array(1 << 20).fill(7);
+      let t = performance.now();
+      for (let i = 0; i < 64; i++) h.write(chunk, { at: i * chunk.length });
+      h.flush();
+      out.writeMs = Math.round(performance.now() - t);
+      out.size = h.getSize();
+      const back = new Uint8Array(1 << 20);
+      t = performance.now();
+      out.read = h.read(back, { at: 63 * chunk.length });
+      out.readOk = back.every((b) => b === 7);
+      try {
+        const h2 = await file.createSyncAccessHandle();
+        h2.close();
+        out.second = "a second handle was allowed";
+      } catch (e) {
+        out.second = e.name;                                   // NoModificationAllowedError is what disk-worker.js expects
+      }
+      h.truncate(0);
+      h.close();
+      try {
+        const h3 = await file.createSyncAccessHandle({ mode: "readwrite-unsafe" });
+        h3.close();
+        out.unsafeMode = true;
+      } catch (e) {
+        out.unsafeMode = false;
+      }
+    } finally {
+      await root.removeEntry(dir.name, { recursive: true }).catch(() => {});
+    }
+    return out;
+  });
+  if (!navigator.storage || !navigator.storage.getDirectory) return bad("navigator.storage.getDirectory is missing: the disk is kept in memory only");
+  try {
+    const o = await callWorker(source, null, 30000);
+    const problems = [];
+    if (o.size !== 64 << 20 || !o.readOk) problems.push("read back wrong");
+    if (o.second !== "NoModificationAllowedError") problems.push("second handle: " + o.second);
+    const msg = "wrote 64 MiB in " + o.writeMs + " ms; a second handle on the same file: " + o.second + "; mode readwrite-unsafe " + (o.unsafeMode ? "supported" : "not supported (not used)");
+    return problems.length ? meh(msg + " -- " + problems.join("; ")) : ok(msg);
+  } catch (e) {
+    return bad(errText(e) + " (private windows have no OPFS in Firefox: the machine then keeps the disk in memory only)");
+  }
+});
+T("storage", "quota for the disk (about 5 GB: 3.9 GB system disk + home)", "degrades", async () => {
+  if (!navigator.storage || !navigator.storage.estimate) return skip("no navigator.storage.estimate");
+  const e = await navigator.storage.estimate();
+  const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : "?";
+  const gb = (e.quota / 2 ** 30).toFixed(1);
+  const msg = "quota " + gb + " GiB, used " + (e.usage / 2 ** 20).toFixed(0) + " MiB, persistent: " + persisted;
+  return e.quota < 5 * 2 ** 30 ? meh(msg + " -- less than 5 GiB: the browser may refuse the disk's pieces part-way; free disk space or raise the browser's limit") : ok(msg);
+});
+
+// ---- graphics
+const GL_TEST = function glTest(canvas) {
+  const r = {};
+  const gl = canvas.getContext("webgl2", { alpha: false, antialias: false });
+  if (!gl) return { ok: false, error: "getContext('webgl2') returned null" };
+  const ext = gl.getExtension("WEBGL_debug_renderer_info");
+  r.renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "(not disclosed) " + gl.getParameter(gl.RENDERER);
+  r.version = gl.getParameter(gl.VERSION);
+  r.maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  r.colorBufferFloat = !!gl.getExtension("EXT_color_buffer_float");
+  const c = {};
+  const sab = new SharedArrayBuffer(256);
+  const view = new Uint8Array(sab, 16, 16).fill(0x7f);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  const attempt = (name, f) => { try { f(); c[name] = "ok"; } catch (e) { c[name] = (e && e.name || "") + ": " + (e && e.message || e); } };
+  attempt("texSubImage2D from a shared view", () => gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, view, 0));
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  attempt("readPixels into a shared view", () => gl.readPixels(0, 0, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, view, 0));
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, 64, gl.DYNAMIC_DRAW);
+  attempt("bufferSubData from a shared view", () => gl.bufferSubData(gl.ARRAY_BUFFER, 0, view));
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer);
+  attempt("getBufferSubData into a shared view (Chrome refuses; gpu-exec.js then copies)", () => gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, view));
+  attempt("fence + clientWaitSync", () => { const s = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); gl.clientWaitSync(s, 0, 0); gl.deleteSync(s); });
+  if (typeof canvas.transferToImageBitmap === "function") {
+    attempt("transferToImageBitmap + texImage2D(bitmap)", () => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.clearColor(1, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const bmp = canvas.transferToImageBitmap();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+      bmp.close();
+    });
+  }
+  r.checks = c;
+  r.error = gl.getError();
+  return { ok: true, r };
+};
+const glReport = (o, what) => {
+  if (!o.ok) return bad(o.error);
+  const failing = Object.entries(o.r.checks).filter(([, v]) => v !== "ok");
+  const head = o.r.version + " | " + o.r.renderer + " | max texture " + o.r.maxTexture + " | EXT_color_buffer_float " + (o.r.colorBufferFloat ? "yes" : "no");
+  const refusedGet = failing.filter(([k]) => /^getBufferSubData/.test(k));
+  const real = failing.filter(([k]) => !/^getBufferSubData/.test(k));
+  if (real.length) return bad(head + " | FAILS: " + real.map(([k, v]) => k + " -> " + v).join("; "));
+  return ok(head + (refusedGet.length ? " | getBufferSubData into shared memory is refused here (expected, handled)" : "") + " | " + what);
+};
+T("graphics", "WebGL2 on the page (the window server draws with it)", "blocks", async () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 16;
+  return glReport(GL_TEST(canvas), "shared views are accepted by texSubImage2D, bufferSubData, readPixels");
+});
+T("graphics", "WebGL2 in a Worker on an OffscreenCanvas (the GPU executor, vrend)", "degrades", async () => {
+  if (typeof OffscreenCanvas !== "function") return bad("no OffscreenCanvas: guest programs draw in software");
+  const source = workerOf(GL_TEST, async function main() { return glTest(new OffscreenCanvas(16, 16)); });
+  return glReport(await callWorker(source, null, 20000), "ImageBitmap round trip works");
+});
+T("graphics", "WebGPU (only for ?exec=webgpu, which also needs JSPI)", "info", async () => {
+  const jspi = typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function";
+  if (!navigator.gpu) return note("navigator.gpu absent; JSPI " + (jspi ? "present" : "absent") + ". ?exec=webgpu falls back to WebGL2 (vrend), which is the default anyway");
+  let adapter = null;
+  try { adapter = await navigator.gpu.requestAdapter(); } catch (e) { return note("navigator.gpu present, requestAdapter failed: " + errText(e) + "; JSPI " + (jspi ? "present" : "absent")); }
+  if (!adapter) return note("navigator.gpu present, no adapter; JSPI " + (jspi ? "present" : "absent"));
+  const info = adapter.info || {};
+  return note("adapter " + [info.vendor, info.architecture, info.device].filter(Boolean).join(" ") + ", maxBufferSize " + adapter.limits.maxBufferSize +
+              ", JSPI " + (jspi ? "present: ?exec=webgpu can run" : "ABSENT: ?exec=webgpu's rvgpu.wasm cannot run, the page falls back to WebGL2"));
+});
+T("graphics", "JSPI (WebAssembly.Suspending / promising)", "info", async () => {
+  const have = typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function";
+  return note(have ? "present" : "absent (needed only by rvgpu.wasm, the ?exec=webgpu executor; the default WebGL2 path does not use it)");
+});
+
+// ---- video and sound
+T("media", "WebCodecs VideoDecoder, as the vdec Worker asks for it", "degrades", async () => {
+  const source = workerOf(async function main() {
+    if (typeof VideoDecoder === "undefined") return { have: false };
+    const probes = { "H.264": ["avc1.640033", 4096, 2304], "H.264 1080p": ["avc1.64002a", 1920, 1080], "HEVC": ["hev1.1.6.L153.B0", 3840, 2160],
+                     "VP8": ["vp8", 1920, 1080], "VP9": ["vp09.00.41.08", 1920, 1080], "AV1": ["av01.0.08M.08", 1920, 1080] };
+    const out = {};
+    for (const [name, [codec, w, h]] of Object.entries(probes)) {
+      out[name] = [];
+      for (const pref of ["prefer-hardware", "no-preference"]) {
+        try {
+          const r = await VideoDecoder.isConfigSupported({ codec, codedWidth: w, codedHeight: h, hardwareAcceleration: pref });
+          out[name].push(pref === "prefer-hardware" ? (r.supported ? "hw" : "-") : (r.supported ? "any" : "-"));
+        } catch (e) {
+          out[name].push("err");
+        }
+      }
+    }
+    return { have: true, out, audio: typeof AudioDecoder !== "undefined" };
+  });
+  const a = await callWorker(source, null, 20000);
+  if (!a.have) return meh("no VideoDecoder in a Worker here: guest players decode in software");
+  const line = Object.entries(a.out).map(([k, v]) => k + " " + v.join("/")).join(", ");
+  const any = Object.values(a.out).some((v) => v.includes("hw") || v.includes("any"));
+  return any ? ok(line + " (hw = hardware, any = with software allowed)") : meh("VideoDecoder exists but supports none of the codecs: " + line);
+});
+let audioContext = null;
+const audioTest = async (resume) => {
+  if (typeof AudioContext !== "function" || typeof AudioWorkletNode !== "function") return bad("no AudioContext or AudioWorklet: no sound");
+  if (!audioContext) audioContext = new AudioContext({ latencyHint: "playback" });
+  if (resume) await audioContext.resume().catch(() => {});
+  const code = "class P extends AudioWorkletProcessor { constructor() { super(); this.port.onmessage = (e) => { const m = e.data.memory;" +
+    " this.port.postMessage({ shared: m && m.buffer instanceof SharedArrayBuffer, isMemory: m instanceof WebAssembly.Memory, length: m && m.buffer.byteLength }); }; }" +
+    " process() { return true; } } registerProcessor('probe-p', P);";
+  await audioContext.audioWorklet.addModule(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+  const node = new AudioWorkletNode(audioContext, "probe-p", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+  const answer = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 4000);
+    node.port.onmessage = (e) => { clearTimeout(timer); resolve(e.data); };
+    try { node.port.postMessage({ memory: machineMemory || new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true }) }); } catch (e) { clearTimeout(timer); resolve({ error: errText(e) }); }
+  });
+  const state = audioContext.state + " at " + audioContext.sampleRate + " Hz";
+  if (!answer) return meh("worklet loaded, but its processor did not answer in 4 s (context " + state + "; click 'Audio test' to let it run)");
+  if (answer.error) return meh("worklet loaded, but the machine's Memory cannot be posted to it (" + answer.error + "); audio.js then posts the buffer instead. Context " + state);
+  return answer.shared ? ok("AudioWorklet loaded from a Blob, the machine's shared Memory arrives shared (context " + state + ")") : meh("worklet gets a non-shared copy: " + JSON.stringify(answer));
+};
+T("media", "AudioContext + AudioWorklet over the shared memory", "degrades", async () => audioTest(false));
+
+// ---- input
+T("input", "clipboard (navigator.clipboard)", "degrades", async () => {
+  const w = !!(navigator.clipboard && navigator.clipboard.writeText), r = !!(navigator.clipboard && navigator.clipboard.readText);
+  let perm = "";
+  try { perm = (await navigator.permissions.query({ name: "clipboard-read" })).state; } catch (e) { perm = "the permission name is not known (" + e.name + ")"; }
+  const msg = "writeText " + (w ? "yes" : "no") + ", readText " + (r ? "yes" : "no") + ", clipboard-read permission: " + perm;
+  return w ? ok(msg + " (paste goes through the paste event first, so readText is only a fallback)") : meh(msg);
+});
+T("input", "keyboard layout detection (navigator.keyboard.getLayoutMap)", "degrades", async () => {
+  if (!navigator.keyboard || !navigator.keyboard.getLayoutMap) return meh("absent (Chrome/Edge only): the layout starts as US; pick another in the machine's bar, or open /desktop?kbd=de");
+  const map = await navigator.keyboard.getLayoutMap();
+  return ok("Q types " + JSON.stringify(map.get("KeyQ")) + ", Semicolon types " + JSON.stringify(map.get("Semicolon")));
+});
+T("input", "keyboard lock + fullscreen (Escape and Alt-Tab to the guest)", "cosmetic", async () => {
+  const lock = !!(navigator.keyboard && navigator.keyboard.lock);
+  const fs = !!(document.fullscreenEnabled && document.documentElement.requestFullscreen);
+  const msg = "navigator.keyboard.lock " + (lock ? "yes" : "no") + ", fullscreen " + (fs ? "yes" : "no");
+  return fs ? (lock ? ok(msg) : meh(msg + " (Escape leaves fullscreen and Ctrl-W / Cmd-W closes the tab; the machine still works)")) : meh(msg);
+});
+T("input", "storage persistence request", "cosmetic", async () => note(
+  "navigator.storage.persist " + (navigator.storage && navigator.storage.persist ? "present (Firefox shows a permission prompt for it; Chrome decides silently)" : "absent")));
+
+// ---------------------------------------------------------------------------------------------------------------
+// Running and printing
+// ---------------------------------------------------------------------------------------------------------------
+
+const label = { pass: "PASS", warn: "WARN", fail: "FAIL", info: "INFO", skip: "SKIP", run: "..." };
+const rows = new Map();
+const groupsEl = document.getElementById("groups");
+const buildTable = () => {
+  groupsEl.textContent = "";
+  rows.clear();
+  const groups = [...new Set(tests.map((t) => t.group))];
+  for (const g of groups) {
+    const h = document.createElement("h2");
+    h.textContent = g;
+    groupsEl.appendChild(h);
+    const table = document.createElement("table");
+    table.innerHTML = "<tr><th>result</th><th>test</th><th>if it fails</th><th>details</th></tr>";
+    for (const t of tests.filter((x) => x.group === g)) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = '<td class="st run">...</td><td class="name"></td><td class="sev"></td><td class="msg"></td>';
+      tr.children[1].textContent = t.name;
+      tr.children[2].textContent = t.sev === "blocks" ? "blocks boot" : t.sev === "info" ? "" : t.sev;
+      table.appendChild(tr);
+      rows.set(t, tr);
+    }
+    groupsEl.appendChild(table);
+  }
+};
+const show = (t, res) => {
+  const tr = rows.get(t);
+  const cell = tr.children[0];
+  cell.className = "st " + res.status;
+  cell.textContent = label[res.status];
+  tr.children[3].textContent = res.msg || "";
+};
+const summarize = (final) => {
+  const v = document.getElementById("verdict");
+  const failed = results.filter((r) => r.status === "fail");
+  const blockers = failed.filter((r) => r.sev === "blocks");
+  const lesser = failed.concat(results.filter((r) => r.status === "warn"));
+  if (!final) { v.className = "run"; v.textContent = "running the tests... (" + results.length + " of " + tests.length + ")"; return; }
+  if (blockers.length) {
+    v.className = "bad";
+    v.textContent = blockers.length + " thing" + (blockers.length > 1 ? "s" : "") + " this browser lacks that the machine needs to boot: " + blockers.map((r) => r.name).join("; ") + ".";
+  } else if (lesser.length) {
+    v.className = "meh";
+    v.textContent = "Nothing blocks the boot. " + lesser.length + " thing" + (lesser.length > 1 ? "s" : "") + " will work less well or differently (see WARN and FAIL below).";
+  } else {
+    v.className = "ok";
+    v.textContent = "Everything the machine uses is here. Open /desktop.";
+  }
+};
+const reportText = () => {
+  const lines = ["rvwasm probe " + new Date().toISOString() + " " + location.origin, navigator.userAgent, ""];
+  for (const r of results) lines.push((label[r.status] + "     ").slice(0, 5) + " [" + r.group + "] " + r.name + (r.sev && r.sev !== "info" ? " (" + r.sev + ")" : "") + (r.msg ? " -- " + r.msg : ""));
+  return lines.join("\n");
+};
+const finish = () => {
+  summarize(true);
+  document.getElementById("report").textContent = reportText();
+  window.probeReport = { time: new Date().toISOString(), userAgent: navigator.userAgent, results: results.map((r) => ({ ...r })) };
+  document.title = "rvwasm probe: " + results.filter((r) => r.status === "fail" && r.sev === "blocks").length + " blocking";
+};
+const runOne = async (t) => {
+  let res;
+  try {
+    res = await t.run();
+  } catch (e) {
+    res = { status: t.sev === "info" ? "info" : "fail", msg: errText(e) };
+  }
+  const entry = { group: t.group, name: t.name, sev: t.sev, status: res.status, msg: res.msg || "" };
+  const old = results.findIndex((r) => r.group === t.group && r.name === t.name);
+  if (old >= 0) results[old] = entry; else results.push(entry);
+  if (rows.has(t)) show(t, res);
+  return res;
+};
+const runAll = async () => {
+  results.length = 0;
+  buildTable();
+  summarize(false);
+  for (const t of tests) {
+    await runOne(t);
+    summarize(false);
+  }
+  finish();
+};
+const extra = (name, f) => async () => {
+  const t = tests.find((x) => x.name === name) || { group: "extra", name, sev: "info" };
+  if (!rows.has(t)) { tests.push(t); buildTable(); results.forEach((r) => { const u = tests.find((x) => x.group === r.group && x.name === r.name); if (u) show(u, { status: r.status, msg: r.msg }); }); }
+  const tr = rows.get(t);
+  tr.children[0].className = "st run"; tr.children[0].textContent = "...";
+  t.run = f;
+  await runOne(t);
+  finish();
+};
+document.getElementById("again").onclick = () => runAll();
+document.getElementById("copy").onclick = async () => {
+  const text = reportText();
+  try { await navigator.clipboard.writeText(text); } catch (e) { const pre = document.getElementById("report"); pre.focus(); getSelection().selectAllChildren(pre); }
+  document.getElementById("copy").textContent = "Copied";
+  setTimeout(() => { document.getElementById("copy").textContent = "Copy report"; }, 1500);
+};
+document.getElementById("b-memory").onclick = extra("memory to 16 GiB", grow16);
+document.getElementById("b-audio").onclick = extra("audio, with a click to let it run", () => audioTest(true));
+document.getElementById("b-workers").onclick = extra("400 Workers", async () => {
+  const url = URL.createObjectURL(new Blob(["postMessage(1)"]));
+  const started = performance.now();
+  const ws = [];
+  let up = 0;
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 60000);
+    for (let i = 0; i < 400; i++) {
+      try { const w = new Worker(url); w.onmessage = () => { if (++up === 400) { clearTimeout(timer); resolve(); } }; ws.push(w); } catch (e) { break; }
+    }
+  });
+  const ms = Math.round(performance.now() - started);
+  ws.forEach((w) => w.terminate());
+  return up === 400 ? ok("400 Workers up in " + ms + " ms") : meh("only " + up + " of 400 (created " + ws.length + ") in 60 s: the browser limits Workers per site (Firefox: dom.workers.maxPerDomain); a heavy desktop session may hit it");
+});
+document.getElementById("b-kernel").onclick = extra("compile the kernel", async () => {
+  const started = performance.now();
+  const module = await WebAssembly.compileStreaming(fetch("vmlinux-wasm64_nommu.wasm", { cache: "no-store" }));
+  const exports = WebAssembly.Module.exports(module).map((e) => e.name);
+  return ok("compiled in " + Math.round(performance.now() - started) + " ms, " + exports.length + " exports, wasm_mem_pages_max " + (exports.includes("wasm_mem_pages_max") ? "present" : "ABSENT"));
+});
+
+window.probeDone = runAll();
+</script>
+</body>
+</html>

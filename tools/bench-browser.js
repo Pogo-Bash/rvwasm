@@ -5,7 +5,7 @@
 // background pages switched off: a page that is not on screen is otherwise
 // slowed down about three times, which ruins a measurement.
 //
-//   node tools/bench-browser.js sh 'COMMAND' [TIMEOUT_MS] [--image NAME] [--disk NAME] [--then 'COMMAND']
+//   node tools/bench-browser.js sh 'COMMAND' [TIMEOUT_MS] [--image NAME] [--disk NAME] [--then 'COMMAND'] [--query K=V]
 //                                             [--profile FILE --profile-at MS --profile-for MS]
 //                                                (run one command on Linux/Wasm, print the output;
 //                                                --then: load the page again and run another, to see what a
@@ -159,7 +159,10 @@ function parseBench(text) {
 }
 
 async function oneRun() {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "rvbench-"));
+  // PROFILE_DIR=DIR: that profile, kept afterwards (a second run with it is the next visit of the same browser:
+  // what the page kept in its private file system, and the browser's caches, are there). Else a new one, removed.
+  const profile = process.env.PROFILE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), "rvbench-"));
+  fs.mkdirSync(profile, { recursive: true });
   const { chrome, address } = await startChrome(profile);
   try {
     const cdp = await connect(address);
@@ -189,17 +192,34 @@ async function oneRun() {
       if (args.includes("--pool")) {
         query.push("pool=" + args[args.indexOf("--pool") + 1]);
       }
+      // --query K=V (as often as wanted): more of the page's parameters, e.g. jitcache=0.
+      args.forEach((arg, i) => {
+        if (arg == "--query") {
+          query.push(args[i + 1]);
+        }
+      });
       const url = base + "/dev.html" + (query.length ? "?" + query.join("&") : "");
       const timeout = parseInt(args[2], 10) || 120000;
       // A page that dies (out of memory, most likely) answers nothing any more: say so instead of waiting.
+      // --page-log RE: the page's console lines that match RE (e.g. "rvgpu|vkr|WebGPU"), to stderr.
+      const pageLog = args.includes("--page-log") ? new RegExp(args[args.indexOf("--page-log") + 1]) : null;
       cdp.onEvent = (msg) => {
         if (msg.method == "Inspector.targetCrashed" || msg.method == "Target.targetCrashed") {
           console.error("the page crashed");
           chrome.kill();
           process.exit(3);
         }
+        if (pageLog && msg.method == "Runtime.consoleAPICalled") {
+          const text = msg.params.args.map((a) => a.value !== undefined ? String(a.value) : a.description || "").join(" ");
+          if (pageLog.test(text)) {
+            console.error("[page] " + text);
+          }
+        }
       };
       await cdp.send("Inspector.enable", {}, sessionId).catch(() => {});
+      if (pageLog) {
+        await cdp.send("Runtime.enable", {}, sessionId).catch(() => {});
+      }
       // --profile: every Worker the page starts is attached to as it starts, with the profiler ready in it.
       const profiling = args.includes("--profile");
       const profileFile = profiling ? args[args.indexOf("--profile") + 1] : null;
@@ -288,7 +308,10 @@ async function oneRun() {
             break;
           }
         }
-        r.log = await evaluate("linuxLog.filter((line) => line.startsWith('[Disk')).join('\\n')");
+        // (The store of translated code kept now, not a minute later: a run after --then is to find it.)
+        await evaluate("typeof jitcache != 'undefined' && jitcache.save_now ? jitcache.save_now().then(() => true) : false")
+          .catch(() => {});
+        r.log = await evaluate("linuxLog.filter((line) => line.startsWith('[Disk') || line.startsWith('[JIT')).join('\\n')");
         if (profiled) {
           await profiled;
         }
@@ -374,7 +397,9 @@ async function oneRun() {
   } finally {
     chrome.kill();
     await sleep(500);
-    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+    if (!process.env.PROFILE_DIR) {
+      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+    }
   }
 }
 

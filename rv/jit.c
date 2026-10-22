@@ -117,15 +117,36 @@
 
 #include "rv.h"
 #include "wasm_emit.h"
+#include "wasm_emu.h"
 
 #define JIT_MAX_BLOCKS	128
 /*
  * Regions are made one at a time, each a module of its own, and every module
  * takes at least a page of the engine's code space (16 KiB on a Mac) where
- * most regions' machine code is a few KiB: every JIT_BATCH of them, the
+ * most regions' machine code is a few KiB: once enough of them wait, the
  * functions of those still there are compiled again as one module (batch_make()).
+ * Which regions make a batch is decided by what they are, not by how many
+ * came before or when: only regions next to each other in the guest's code
+ * (batch_bucket(): the same file, the same 512 bytes of it) make a batch, and
+ * it ends with the first region of that stretch (JIT_BATCH_MIN waiting in it
+ * or more) whose function's hash has JIT_BATCH_MASK's bits clear, or after
+ * JIT_BATCH_MAX, and its functions are in the order of their hashes. So a
+ * program started again, which makes mostly the same regions in another order
+ * (from the store, at once, instead of after being run a few hundred times,
+ * and in whatever order its processes and threads come), makes mostly the
+ * same batches, byte for byte, and the engine (or the page: tools/patch-runtime.py,
+ * 28) compiles each, and optimizes its hot functions, only once. Measured on
+ * Konsole started three times: 5, 14, 38 percent of the batches' bytes the
+ * same as an earlier launch's when a batch ended after 8 or more regions of
+ * whatever came; 11, 72, 97 percent with these.
+ * (The cost: about 2400 modules of a launch instead of 150, a second more in the
+ * first launch. RV_JIT_GROUP=min:mask:shift tries others.)
  */
-#define JIT_BATCH	32
+#define JIT_BATCH_MIN	1
+#define JIT_BATCH_MASK	1
+#define JIT_BATCH_MAX	96
+#define JIT_PENDING_MAX	512	/* regions waiting in all buckets together: past it the oldest region's bucket goes */
+#define JIT_GROUP_SHIFT	9	/* 512 bytes of a file's code; 64 or more: no buckets, every region is in the one (RV_JIT_GROUP=8:15:64 is the old way) */
 #define JIT_MAX_INSNS	4096	/* per region */
 #define JIT_BLOCK_INSNS	256	/* per block */
 #define JIT_BUDGET	0x10000	/* guest instructions per call of a region */
@@ -145,6 +166,9 @@
 #define JIT_HOT_MADE	50
 #define JIT_POLL	0x40000	/* guest instructions between signal polls */
 #define JIT_WARM	1	/* interpreted runs that get a block into a region: see warm() */
+#define JALR_SITES_BITS	9	/* indirect jumps the interpreter remembers the targets of (struct jalr_site) */
+#define JALR_TARGETS	16
+#define JALR_INLINE	3	/* a jump with at most this many targets seen compares with each inline (gen_insn(), JALR) */
 
 /*
  * The map of translated blocks and the table of counts start small and grow
@@ -177,9 +201,32 @@
 #define L_CHAIN		42	/* it is leaving for a jump target, which may be another region's */
 #define L_MAP		43	/* cpu->map and cpu->npages, read when the region is called: see check_access() */
 #define L_NPAGES	44
+/*
+ * The translation cache (check_access()): for each of the PCACHE_SLOTS guest
+ * registers that address memory most in the region, the page its last access
+ * was on. L_CB_R(k) and L_CB_W(k) are the guest address of that page, or
+ * CACHE_NONE, according to whether it may be read, and written; L_CD(k) is
+ * what to add to a guest address in it to get the host address.
+ */
+#define PCACHE_SLOTS	8
+#define L_CB_R(k)	(45 + 3 * (k))
+#define L_CB_W(k)	(46 + 3 * (k))
+#define L_CD(k)		(47 + 3 * (k))
+#define CACHE_NONE	0x8000000000000000ULL	/* a page no address is within 4 KiB of */
 #define N_I64_LOCALS	36
 #define N_I32_LOCALS	4
 #define N_I64_MORE	2	/* L_MAP, L_NPAGES */
+/*
+ * Only in code made with the access path's parts on (OFF_OUTLINE, OFF_HOIST),
+ * a fourth group, i64: the failed access the shared slow block is to finish
+ * (see check_access_as()), and the pages that groups of accesses by one base
+ * register were checked for (CACHE_SLOTS of them).
+ */
+#define L_HOW		45	/* size | prot << 8 | aligned << 16 | instructions not run << 32 */
+#define L_SPARE		46
+#define L_CPAGE(s)	(47 + 2 * (s))	/* the guest address of the page slot s was checked for */
+#define L_CDELTA(s)	(48 + 2 * (s))	/* ... and host - guest there */
+#define CACHE_SLOTS	4
 
 /*
  * Each region that has an indirect jump has a table of its own blocks for
@@ -220,6 +267,8 @@ enum {
 /* The functions a module defines: the region (exported as "r"), and the same as H_RESERVE, faster (gen_reserve_fn()). */
 #define F_REGION	N_HELPERS
 #define F_RESERVE	(N_HELPERS + 1)
+#define F_XLAT		(N_HELPERS + 2)	/* a memory access that missed its translation cache (gen_xlat_fn()) */
+#define N_MODULE_FNS	2		/* the functions besides the regions: F_RESERVE, F_XLAT */
 
 typedef void (*rv_region_fn)(struct rv_cpu *, uint32_t entry, uint32_t budget);
 
@@ -266,6 +315,8 @@ struct jit_block {
 	int is_return;		/* a call in the region returns here */
 };
 
+struct layout;
+
 struct jit_region {
 	int nblocks, ninsns;
 	struct jit_block blocks[JIT_MAX_BLOCKS];
@@ -289,6 +340,10 @@ struct jit_made {
 	uint32_t batch;		/* the batch its function is in now, + 1; 0 while it is in a module of its own */
 	uint8_t *body;		/* its function's code, kept until it is put into a batch */
 	uint32_t body_len;
+	uint32_t *hints, nhints;	/* ... and its branch hints (offsets in it << 1 | likely), as long */
+	uint64_t body_hash;	/* of the function's code: the order in a batch, and where a batch ends */
+	uint64_t bucket;	/* what the region is next to: only regions of one bucket make a batch (batch_bucket()) */
+	uint8_t snapped;	/* RV_JIT_SNAP: the state at its first entry was written out (snapshot()) */
 };
 enum { R_FREE, R_LIVE, R_SUSPENDED };
 #define R_STRIKES	16
@@ -342,6 +397,7 @@ struct rv_jit {
 	uint32_t pages_bits, pages_used;
 	int fma;			/* the host multiplies and adds in one rounding: 1, -1 if not, 0 if not asked yet (fma_probe()) */
 	int fake;			/* RV_JIT_FAKE: see the top */
+	int emu;			/* RV_JIT_EMU: the native build runs translated code by interpreting the Wasm (wasm_emu.c) */
 	uint32_t fake_slot;
 	struct jit_target *targets_now;	/* of the region being translated (NULL: it has no indirect jump) */
 	uint64_t target_multiplier;	/* ... and the hash multiplier chosen for it */
@@ -349,11 +405,41 @@ struct rv_jit {
 
 	/* Scratch for the translation in progress: the process's (see scratch_get()), while this thread has it. */
 	struct jit_region *region;
+	struct layout *layout;
 	struct wbuf body, func, module;
+	/* OFF_HINTS: the branch hints of the body being made (hint()), offset << 1 | likely; then of the function. */
+	uint32_t *hints, nhints, hints_cap;
+	uint32_t hint_sites;	/* RV_JIT_HINT_SITES: which of them (HS_*) */
+	/*
+	 * Where the interpreter saw indirect jumps go (rv_jit_note_jalr()), by
+	 * the jump's address: the targets a region's blocks are joined up with
+	 * (layout_edges()) and the blocks a region takes in for them
+	 * (build_region()). A small table; a site keeps its last JALR_TARGETS
+	 * distinct targets.
+	 */
+	struct jalr_site {
+		uint64_t pc;
+		uint64_t to[JALR_TARGETS];
+		uint8_t n, next;
+	} jalr[1u << JALR_SITES_BITS];
 	const char *dump_dir;
+	const char *snap_dir;	/* RV_JIT_SNAP=DIR: the guest's state at the first entry of each region, for tools/region-bench.js (snapshot()) */
+	uint32_t nsnaps, snap_max;
+	uint64_t snap_every, snap_next;	/* RV_JIT_SNAP_EVERY=N: instead, at the first region entry every N instructions */
 	int names;		/* RV_JIT_NAMES=1: a name section in every module, for the host's profiler (gen_names()) */
+	uint32_t batch_min, batch_mask, group_shift;	/* RV_JIT_GROUP=min:mask:shift (see batch_trigger()) */
 	uint32_t old;		/* RV_JIT_OLD=bits: as before chromeperf, for measuring against it (OLD_*) */
 	int log_fd;		/* RV_JIT_LOG=FILE: a line for every region made (see log_region()), or -1 */
+	/*
+	 * RV_JIT_FLATMEM=delta (the native build, for tools/region-bench.js
+	 * only): memory accesses are not checked at all, the host address is
+	 * the guest address plus delta. Wrong for any real use: an experiment
+	 * that measures what the page table costs, the harness laying every
+	 * page out at that distance.
+	 */
+	uint64_t flatmem;
+	int flatmem_on;
+	int pcache_slots;	/* registers with a translation cache per region (RV_JIT_PCACHE, at most PCACHE_SLOTS) */
 
 	uint64_t stat_regions, stat_blocks, stat_insns, stat_bytes, stat_flushes, stat_failed;
 	uint64_t stat_nomem;		/* translations, or tidying, given up for want of memory (the interpreter goes on) */
@@ -372,7 +458,7 @@ struct rv_jit {
 	uint32_t refuse, room_asked;	/* RV_JIT_REFUSE=n: see room_for() */
 	/* Batches (see batch_make()). */
 	int batch_off;
-	uint32_t pending[JIT_BATCH];	/* regions in modules of their own, to be put into the next batch */
+	uint32_t pending[JIT_PENDING_MAX];	/* regions in modules of their own, to be put into the next batch of their bucket */
 	uint32_t npending;
 	uint16_t *batch_live;		/* by batch: its regions still there; 0 once it is gone */
 	uint16_t *batch_size;		/* ... and how many it was made with */
@@ -381,15 +467,45 @@ struct rv_jit {
 	/* Code that changed: events looked at, regions suspended, taken up again as they were, found changed, given up. */
 	uint64_t stat_events, stat_suspended, stat_revived, stat_changed, stat_thrashed, stat_tidied;
 	uint64_t stat_same;		/* regions whose module was one made in the process before (module_seen()) */
+	/* The store of translations kept outside the process (jitcache.c, "Translations kept" below). */
+	int jc;				/* there is a store, and this thread's code may be kept in it */
+	int jc_verify;			/* RV_JIT_CACHE_VERIFY=1: what the store gives is made again and compared */
+	int hints_off;			/* RV_JIT_HINTS=0: no regions made early from the store's hints */
+	const uint64_t *hint;		/* a region being made again as it was made before (hint_translate()): its blocks, sorted */
+	uint32_t nhint;
+	uint64_t stat_jc_hits, stat_jc_misses, stat_jc_puts, stat_jc_other;
+	uint64_t stat_hint_asked, stat_hint_found, stat_hint_made;
 	uint64_t stat_ran, stat_calls;	/* guest instructions run by translated code, in how many calls */
+	uint64_t lap[4];		/* (with -v or RV_JIT_LOG) ns in the last region's build_region(), store lookup, function, module */
 	uint64_t stat_ns_translate, stat_ns_install, stat_ns_start;	/* (with -v) time making regions, time the host took to compile them, when the thread's JIT began */
 	/* With -v: where execution went when a region was left. */
 	uint64_t stat_to_self, stat_to_self_displaced, stat_to_other, stat_to_interp, stat_budget;
 	uint64_t stat_chained;		/* jumps from region to region (counted by code made with -v) */
+	uint64_t stat_misses;		/* memory accesses that missed their translation cache (counted by code made with -v) */
 	uint64_t stat_opcode[128];	/* ... and which instruction the interpreter was needed for */
 	/* With -v: floating-point instructions the translated code left to the call (rv_jit_fp()), by kind: see rv_jit_count_fp(). */
 	uint64_t stat_fp_call[72];
 };
+
+/* Call the function in table slot `slot` as a region: (cpu, entry, budget). */
+static void region_call_raw(struct rv_jit *jit, uint32_t slot, struct rv_cpu *cpu, uint32_t entry, uint32_t budget)
+{
+#ifdef __wasm__
+	(void)jit;
+	((rv_region_fn)(uintptr_t)slot)(cpu, entry, budget);
+#else
+	if (jit->emu && rv_emu_run((long)slot, cpu, entry, budget) < 0) {
+		fprintf(stderr, "rv: jit emu: translated code failed at pc 0x%llx\n", (unsigned long long)cpu->pc);
+		_exit(97);
+	}
+#endif
+}
+
+/* Run the region in table slot `slot` from its block `entry`, with `budget` instructions. */
+static void region_call(struct rv_jit *jit, uint32_t slot, struct rv_cpu *cpu, uint32_t entry, uint32_t budget)
+{
+	region_call_raw(jit, slot, cpu, entry, budget);
+}
 
 /* ------------------------------------------------------------------ lookup */
 
@@ -603,8 +719,8 @@ static void slot_release(struct rv_jit *jit, uint32_t slot)
 	if (!jit->no_release && __rv_jit_install(NULL, 0, slot) < 0)
 		jit->no_release = 1;
 #else
-	(void)jit;
-	(void)slot;
+	if (jit->emu)
+		rv_emu_install(NULL, 0, slot);
 #endif
 }
 
@@ -1165,6 +1281,55 @@ static void catch_up(struct rv_cpu *cpu)
 	jit->epoch = now;
 }
 
+/* RV_JIT_OFF bits. */
+#define OFF_FP		1	/* floating point and CSRs inside regions */
+#define OFF_CHAIN	2	/* jumps from region to region */
+#define OFF_TARGETS	4	/* indirect jumps that stay in the region */
+#define OFF_RETURNS	8	/* the block after a call joining the region */
+#define OFF_WARM	16	/* only blocks that have run joining a region */
+#define OFF_FPHOST	32	/* floating point done by the host's instructions in the region */
+#define OFF_FMA		64	/* the host's fused multiply-add, where it has one */
+#define OFF_STRUCT	128	/* the nesting of blocks as loops (struct layout): flat instead, every jump through the dispatcher */
+#define OFF_PCACHE	256	/* the translation cache of memory accesses (check_access()): the page table every time */
+#define OFF_JALRPROF	512	/* the targets the interpreter saw indirect jumps take (jalr_targets()): regions without them */
+#define OFF_DIV		1024	/* division inline (gen_divrem()): by a call instead */
+#define OFF_FPLOC	2048	/* floating-point registers and fcsr in locals (floc_*()): in *cpu at every instruction instead */
+
+/* ----------------------------------------------------- indirect jump sites */
+
+/* The interpreter executed the JALR at pc, which went to target (interp.c). */
+void rv_jit_note_jalr(struct rv_cpu *cpu, uint64_t pc, uint64_t target)
+{
+	struct rv_jit *jit = cpu->jit;
+	struct jalr_site *site = &jit->jalr[(uint32_t)(((pc >> 1) * HASH_MULTIPLIER) >> (64 - JALR_SITES_BITS))];
+
+	if (site->pc != pc) {
+		site->pc = pc;
+		site->n = site->next = 0;
+	}
+	for (int i = 0; i < site->n; i++)
+		if (site->to[i] == target)
+			return;
+	if (site->n < JALR_TARGETS) {
+		site->to[site->n++] = target;
+	} else {
+		/* Full: the oldest goes. */
+		site->to[site->next] = target;
+		site->next = (uint8_t)((site->next + 1) % JALR_TARGETS);
+	}
+}
+
+/* The targets seen for the JALR at pc, into `out` (room for JALR_TARGETS); how many. */
+static int jalr_targets(const struct rv_jit *jit, uint64_t pc, uint64_t *out)
+{
+	const struct jalr_site *site = &jit->jalr[(uint32_t)(((pc >> 1) * HASH_MULTIPLIER) >> (64 - JALR_SITES_BITS))];
+
+	if (site->pc != pc || (jit->off & OFF_JALRPROF))
+		return 0;
+	memcpy(out, site->to, site->n * sizeof(*out));
+	return site->n;
+}
+
 /* ------------------------------------------------------------ region shape */
 
 #define OPCODE(i)	((i) & 0x7f)
@@ -1191,14 +1356,26 @@ static int64_t imm_j(uint32_t i)
 
 enum kind { K_NONE, K_PLAIN, K_BRANCH, K_JAL, K_JALR };
 
-/* RV_JIT_OFF bits. */
-#define OFF_FP		1	/* floating point and CSRs inside regions */
-#define OFF_CHAIN	2	/* jumps from region to region */
-#define OFF_TARGETS	4	/* indirect jumps that stay in the region */
-#define OFF_RETURNS	8	/* the block after a call joining the region */
-#define OFF_WARM	16	/* only blocks that have run joining a region */
-#define OFF_FPHOST	32	/* floating point done by the host's instructions in the region */
-#define OFF_FMA		64	/* the host's fused multiply-add, where it has one */
+/*
+ * The access path (2026-10-13; bits above rvjit-dispatch's, which go up to
+ * 4096): the slow way of a load or store out of line in a block shared by the
+ * region, not a call at every access (OFF_OUTLINE); one page check for a
+ * block's accesses by the same base register (OFF_HOIST); branch hints on the
+ * arms that are cold by construction (OFF_HINTS). See check_access_as().
+ *
+ * OFF_OUTLINE is set unless RV_JIT_OUTLINE=1: under V8 it made code slower
+ * (node-machine, Node 22 with branch hints on: qsort 265 -> 326 ms, jbox2d
+ * 5.13 -> 11.36 ms/step). Every continuation is a second way into the middle
+ * of a block, and TurboFan lays the block out of line behind a jump with
+ * register moves at each one. What the outline was for, keeping the call's
+ * register saves off the fast path, the branch hint on the inline call's arm
+ * does by itself (V8 puts the saves in the deferred arm): jbox2d 5.97 ->
+ * 5.13 ms/step; leaving every failed access to the interpreter, no call at
+ * all, measured no better (5.00).
+ */
+#define OFF_OUTLINE	8192
+#define OFF_HOIST	16384
+#define OFF_HINTS	32768
 
 /*
  * An experiment, RV_JIT_TAG=1: what every memory access would cost more if
@@ -1413,6 +1590,24 @@ static int warm(struct rv_jit *jit, uint64_t pc)
 	return map_find(jit, pc) != NULL;
 }
 
+/* Was the block at pc in the region as it was made before (jit->hint, sorted)? */
+static int hinted(const struct rv_jit *jit, uint64_t pc)
+{
+	uint32_t lo = 0, hi = jit->nhint;
+
+	while (lo < hi) {
+		uint32_t mid = (lo + hi) / 2;
+
+		if (jit->hint[mid] == pc)
+			return 1;
+		if (jit->hint[mid] < pc)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return 0;
+}
+
 /* Queue the block starting at pc, unless it is known, cold, untranslatable or there is no room. */
 static void want_block(struct rv_cpu *cpu, struct jit_region *r, uint64_t pc)
 {
@@ -1420,8 +1615,12 @@ static void want_block(struct rv_cpu *cpu, struct jit_region *r, uint64_t pc)
 
 	if (r->nblocks == JIT_MAX_BLOCKS || find_block(r, pc) >= 0)
 		return;
-	/* The first block is the hot one that started this; the others have to have been running too. */
-	if (r->nblocks && !(cpu->jit->off & OFF_WARM) && !warm(cpu->jit, pc))
+	/*
+	 * The first block is the hot one that started this; the others have to
+	 * have been running too. (Or, for a region made again as it was made
+	 * before, to have been in it then: see hint_translate().)
+	 */
+	if (r->nblocks && !(cpu->jit->off & OFF_WARM) && !(cpu->jit->nhint ? hinted(cpu->jit, pc) : warm(cpu->jit, pc)))
 		return;
 	if (fetch(cpu, pc, &probe) == K_NONE)
 		return;
@@ -1472,8 +1671,21 @@ static void build_region(struct rv_cpu *cpu, struct jit_region *r, uint64_t entr
 		} else if (kind == K_JAL || kind == K_JALR) {
 			const struct jit_insn *last = &r->insns[r->ninsns - 1];
 
-			if (kind == K_JAL)
+			if (kind == K_JAL) {
 				want_block(cpu, r, last->pc + (uint64_t)imm_j(last->raw));
+			} else {
+				/*
+				 * Where the interpreter saw this jump go: a return to a
+				 * caller in the region, the cases of a switch, the
+				 * handlers of an interpreter's dispatch. Without them a
+				 * region would end at every indirect jump.
+				 */
+				uint64_t targets[JALR_TARGETS];
+				int n = jalr_targets(cpu->jit, last->pc, targets);
+
+				for (int i = 0; i < n; i++)
+					want_block(cpu, r, targets[i]);
+			}
 			/*
 			 * A call: the callee returns to the next instruction. With that
 			 * block in the region too, the return need not leave it.
@@ -1493,24 +1705,237 @@ static void build_region(struct rv_cpu *cpu, struct jit_region *r, uint64_t entr
 
 /* -------------------------------------------------------------- code output */
 
+/*
+ * The shape of a region's code (gen_body()). The blocks are nested as the
+ * loops of the guest's code are, so that most jumps are direct branches:
+ *
+ *   block EXIT
+ *     loop TOP                      ; the region's dispatcher
+ *       block ITEM_n-1 ... block ITEM_0
+ *         leave if a signal is pending or the budget is spent
+ *         br_table $next -> the item that has block $next
+ *       end  ; item 0's code
+ *       ...
+ *       end  ; item n-1's code
+ *     end
+ *   end
+ *
+ * An item is a block of the region, or a loop of the guest's: a strongly
+ * connected part of its control flow, with the block it is entered at as its
+ * header, nested the same way (loop L; block ladder; the loop's items; end).
+ * The items of a scope are in topological order of the edges that remain
+ * when those into the header are taken away, so a jump to a later item of
+ * the same scope, or of an enclosing one, is a plain `br` to its block, and
+ * a jump back to the header of a loop is `br` to the loop. The loop's top
+ * tests whether $next is its header: if not, the loop was entered from
+ * outside at some other of its blocks (the dispatcher above, or an indirect
+ * jump), and its own br_table dispatches on $next, which may go on into a
+ * nested loop the same way. So every block can still be entered from
+ * anywhere by setting $next and branching to the loop that has it, and the
+ * signal and budget check is where every cycle passes: at the top. What is
+ * neither forward nor a header (an irreducible jump) goes through TOP.
+ *
+ * Indirect jumps go to the lookup (gen_lookup()) of the innermost scope that
+ * has them: an item of its own, right after the header, selected through the
+ * scope's dispatcher with $next = nblocks + scope; from there every target
+ * is a branch as above. The layout is made by layout_region() from the
+ * blocks' static successors, the return addresses of calls, and the targets
+ * the interpreter saw indirect jumps take (jalr_note()).
+ */
+#define SCOPE_MAX	(JIT_MAX_BLOCKS + 1)
+#define ITEM_LOOKUP	(-1)
+#define ITEM_SCOPE(s)	(-2 - (s))
+#define SCOPE_OF_ITEM(v) (-2 - (v))
+
+struct scope {
+	int parent;		/* -1 for the top */
+	int parent_item;	/* index of its item in the parent */
+	int header;		/* block index; -1 for the top */
+	int first, nitems;	/* its items: layout.items[first .. first + nitems) */
+	int lookup;		/* index of its lookup item, or -1 */
+	int lo, hi;		/* the blocks inside it, nested scopes' included, are numbered lo..hi (layout_renumber()) */
+};
+
+struct layout {
+	int nscopes;
+	struct scope scopes[SCOPE_MAX];
+	int items[2 * JIT_MAX_BLOCKS + 2 * SCOPE_MAX];	/* a block index, ITEM_LOOKUP, or ITEM_SCOPE(s) */
+	int nitems;
+	int block_scope[JIT_MAX_BLOCKS];	/* the scope each block is a direct item of */
+	int block_item[JIT_MAX_BLOCKS];	/* ... and its index there */
+	uint64_t succ[JIT_MAX_BLOCKS][(JIT_MAX_BLOCKS + 63) / 64];	/* edges, as bit sets */
+};
+
 struct gen {
 	struct rv_cpu *cpu;
 	struct wbuf *b;
 	const struct jit_region *r;
-	int block;		/* index of the block being generated */
-	int nb;			/* blocks the loop dispatches to: the region's, and its jump target lookup if it has one */
+	const struct layout *lay;
+	int scope, item;	/* where code is being generated: the item (-1: the scope's dispatcher) */
 	uint32_t used, written;	/* guest registers, as bit masks */
+	int hoist, hints;
+	/* OFF_HOIST: for the block being generated, by instruction: its part in a group of accesses (ACC_*). */
+	uint8_t role[JIT_BLOCK_INSNS], slot[JIT_BLOCK_INSNS], uprot[JIT_BLOCK_INSNS];
+	uint32_t j;		/* the instruction of the block being generated */
+	int bad;		/* the code would be wrong (a count did not match): not to be used */
+	int8_t cache_slot[32];	/* the translation cache slot of each register, or -1 (cache_slots()) */
+	uint32_t bases;		/* the slots in use, as a bit mask (set up on entry) */
+	/* OFF_FPLOC: floating-point registers in locals (floc_*()). fcsr is the local at fbase, f registers follow it as they are first used. */
+	int floc;		/* on for this region */
+	uint32_t fbase;		/* the first local of the group */
+	int8_t fmap[32];	/* the local (after fcsr's) of each f register, or -1 */
+	int nf;			/* f registers with a local */
+	uint32_t fwritten;	/* ... those written, as a bit mask */
+	int fc_used, fc_written;
 };
+enum { ACC_PLAIN, ACC_FIRST, ACC_MEMBER };
 
-/* Branch depths from inside block code: `extra` counts enclosing ifs. */
-static uint32_t loop_depth(const struct gen *g, uint32_t extra)
+/*
+ * Label depths from where code is being generated. The labels open, from the
+ * inside out: the item blocks after the current one in its scope, the
+ * scope's loop, then the same for each enclosing scope, then EXIT. `extra`
+ * counts blocks and ifs the caller has opened around the branch.
+ */
+static uint32_t depth_to_loop(const struct gen *g, int scope, uint32_t extra)
 {
-	return extra + (uint32_t)(g->nb - 1 - g->block);
+	int s = g->scope, cur = g->item;
+	uint32_t depth = extra;
+
+	for (;;) {
+		depth += (uint32_t)(g->lay->scopes[s].nitems - 1 - cur);
+		if (s == scope)
+			return depth;
+		depth++;
+		cur = g->lay->scopes[s].parent_item;
+		s = g->lay->scopes[s].parent;
+	}
+}
+
+static uint32_t depth_to_item(const struct gen *g, int scope, int item, uint32_t extra)
+{
+	int s = g->scope, cur = g->item;
+	uint32_t depth = extra;
+
+	while (s != scope) {
+		depth += (uint32_t)(g->lay->scopes[s].nitems - 1 - cur) + 1;
+		cur = g->lay->scopes[s].parent_item;
+		s = g->lay->scopes[s].parent;
+	}
+	return depth + (uint32_t)(item - cur - 1);
+}
+
+/* Room for n branch hints in jit->hints: 0, or -1 if there is none. */
+static int hints_room(struct rv_jit *jit, uint32_t n)
+{
+	uint32_t cap = jit->hints_cap ? jit->hints_cap : 1024, *h;
+
+	if (n <= jit->hints_cap)
+		return 0;
+	while (cap < n)
+		cap *= 2;
+	if (!(h = realloc(jit->hints, cap * sizeof(*h))))
+		return -1;
+	jit->hints = h;
+	jit->hints_cap = cap;
+	return 0;
+}
+
+/* Where hints go (RV_JIT_HINT_SITES=mask, default all: for measuring them one by one; in the cache key, cache_switches()). */
+enum { HS_ACCESS = 1, HS_RESERVE = 2, HS_FAULT = 4, HS_FP = 8, HS_POLL = 16, HS_ALL = 31 };
+
+/*
+ * A branch hint (OFF_HINTS) for the `if` or `br_if` about to be written:
+ * likely or not. Kept as the offset in the body, which gen_module() makes the
+ * offset in the function.
+ */
+static void hint(struct gen *g, uint32_t site, int likely)
+{
+	struct rv_jit *jit = g->cpu->jit;
+
+	if (!g->hints || !(jit->hint_sites & site))
+		return;
+	if (hints_room(jit, jit->nhints + 1)) {
+		g->hints = 0;	/* no hints for this one, then */
+		jit->nhints = 0;
+		return;
+	}
+	jit->hints[jit->nhints++] = (uint32_t)g->b->len << 1 | (likely ? 1 : 0);
 }
 
 static uint32_t exit_depth(const struct gen *g, uint32_t extra)
 {
-	return loop_depth(g, extra) + 1;
+	return depth_to_loop(g, 0, extra) + 1;
+}
+
+/* The item of scope `a` that `s` (a descendant of a, or a itself with item `cur`) is inside; -1 if s is not inside a. */
+static int item_at(const struct layout *lay, int a, int s, int cur)
+{
+	while (s != a) {
+		if (s < 0)
+			return -1;
+		cur = lay->scopes[s].parent_item;
+		s = lay->scopes[s].parent;
+	}
+	return cur;
+}
+
+static int scope_depth(const struct layout *lay, int s)
+{
+	int d = 0;
+
+	for (; s > 0; s = lay->scopes[s].parent)
+		d++;
+	return d;
+}
+
+static void set_next(struct gen *g, int value)
+{
+	w_i32(g->b, value);
+	w_local(g->b, W_LOCAL_SET, L_NEXT);
+}
+
+/* Go on at block t of the region, from where code is being generated. */
+static void branch_to_block(struct gen *g, int t, uint32_t extra)
+{
+	const struct layout *lay = g->lay;
+	int ts = lay->block_scope[t], a = g->scope, b = ts;
+	int da = scope_depth(lay, a), db = scope_depth(lay, b);
+
+	/* The lowest scope that has both. */
+	while (da > db) {
+		a = lay->scopes[a].parent;
+		da--;
+	}
+	while (db > da) {
+		b = lay->scopes[b].parent;
+		db--;
+	}
+	while (a != b) {
+		a = lay->scopes[a].parent;
+		b = lay->scopes[b].parent;
+	}
+	{
+		int here = item_at(lay, a, g->scope, g->item);
+		int there = item_at(lay, a, ts, lay->block_item[t]);
+
+		if (ts == a && a > 0 && lay->scopes[a].header == t) {
+			/* Back to the header of a loop we are in. */
+			set_next(g, t);
+			w_br(g->b, W_BR, depth_to_loop(g, a, extra));
+		} else if (there > here && ts == a) {
+			w_br(g->b, W_BR, depth_to_item(g, a, there, extra));
+		} else if (there > here) {
+			/* Into a loop we are not in: its dispatcher goes on. */
+			set_next(g, t);
+			w_br(g->b, W_BR, depth_to_item(g, a, there, extra));
+		} else {
+			/* Backwards, and not to a header: the region's dispatcher (which may leave: pc has to be right). */
+			w_i64(g->b, g->r->blocks[t].pc);
+			w_local(g->b, W_LOCAL_SET, L_PC);
+			set_next(g, t);
+			w_br(g->b, W_BR, depth_to_loop(g, 0, extra));
+		}
+	}
 }
 
 static void get_reg(struct gen *g, uint32_t r)
@@ -1548,13 +1973,11 @@ static void transition(struct gen *g, uint64_t target, uint32_t extra)
 {
 	int k = find_block(g->r, target);
 
-	w_i64(g->b, target);
-	w_local(g->b, W_LOCAL_SET, L_PC);
 	if (k >= 0) {
-		w_i32(g->b, k);
-		w_local(g->b, W_LOCAL_SET, L_NEXT);
-		w_br(g->b, W_BR, loop_depth(g, extra));
+		branch_to_block(g, k, extra);
 	} else {
+		w_i64(g->b, target);
+		w_local(g->b, W_LOCAL_SET, L_PC);
 		leave_for_target(g, extra);
 	}
 }
@@ -1586,75 +2009,240 @@ static void bail(struct gen *g, const struct jit_insn *insn, uint32_t not_run, u
  * either: the interpreter, which the region is left for, gives it some.
  */
 static void check_access_as(struct gen *g, const struct jit_insn *insn, uint32_t not_run,
-			    unsigned size, unsigned prot, int aligned);
+			    unsigned size, unsigned prot, int aligned, uint32_t base);
 static void call_helper(struct gen *g, int helper);
 
-static void check_access(struct gen *g, const struct jit_insn *insn, uint32_t not_run,
-			 unsigned size, unsigned prot)
+/*
+ * Which registers get a translation cache: the PCACHE_SLOTS (or RV_JIT_PCACHE)
+ * that address memory most in the region, by a count of the instructions.
+ * The cache lives in locals; a local for every register was tried, and
+ * TurboFan, with that many values live through the whole function, spilled
+ * and shuffled them around the miss path's call on the fast path.
+ */
+static void cache_slots(struct gen *g)
 {
-	check_access_as(g, insn, not_run, size, prot, 0);
+	uint32_t count[32] = { 0 }, defs[32] = { 0 };
+	int slots = g->cpu->jit->pcache_slots;
+
+	memset(g->cache_slot, -1, sizeof(g->cache_slot));
+	if (!slots || (g->cpu->jit->off & OFF_PCACHE) || g->cpu->jit->flatmem_on || g->cpu->jit->tag)
+		return;
+	for (int i = 0; i < g->r->ninsns; i++) {
+		uint32_t raw = g->r->insns[i].raw;
+
+		switch (OPCODE(raw)) {
+		case 0x03:
+			count[RS1(raw)]++;
+			defs[RD(raw)]++;	/* (loaded: a pointer followed) */
+			break;
+		case 0x07: case 0x23: case 0x27:
+			count[RS1(raw)]++;
+			break;
+		}
+	}
+	/*
+	 * A register that is loaded from memory about as often as it addresses
+	 * memory is a pointer followed from object to object (a list walked
+	 * down, a temporary holding what was just loaded): on another page as
+	 * often as not, and a miss costs more than the check does. No cache for
+	 * it. A register that advances by arithmetic (an array's address, the
+	 * stack pointer, a frame or base pointer) is the one whose last page is
+	 * the next page as well.
+	 */
+	count[0] = 0;
+	for (int r = 1; r < 32; r++)
+		if (defs[r] * 2 > count[r])
+			count[r] = 0;
+	for (int k = 0; k < slots; k++) {
+		int best = -1;
+
+		for (int r = 1; r < 32; r++)
+			if (count[r] && (best < 0 || count[r] > count[best]))
+				best = r;
+		if (best < 0)
+			break;
+		g->cache_slot[best] = (int8_t)k;
+		count[best] = 0;
+	}
 }
 
-/* The same; with `aligned`, also leave unless the address is a multiple of the size (which keeps it in one page). */
+/*
+ * The access at L_ADDR is through register `base` (0: none): if the register
+ * has a translation cache (cache_slots()), that is tried first. It has the
+ * page of the register's last access: an access that lies within that page,
+ * and that the page allows (reading and writing are cached apart), needs
+ * nothing but a subtraction, a comparison and an addition, where the page
+ * table needs the clamp, the load, the test of the flags and the test for a
+ * page crossing. Only a miss does all that, in the module's own function
+ * (gen_xlat_fn()), which leaves the cache's new contents in cpu->xlat. The
+ * cache is in locals, so it is empty when the region is entered and gone
+ * when it is left, and what it holds is at most JIT_BUDGET instructions old:
+ * changes to a page's protection by another thread (mprotect(), code being
+ * marked) are seen by the next region call at the latest; this thread's own
+ * changes are all system calls, outside translated code.
+ */
+static void check_access(struct gen *g, const struct jit_insn *insn, uint32_t not_run,
+			 unsigned size, unsigned prot, uint32_t base)
+{
+	struct wbuf *b = g->b;
+	int k = base ? g->cache_slot[base] : -1;
+
+	if (k < 0) {
+		check_access_as(g, insn, not_run, size, prot, 0, 0);
+		return;
+	}
+	g->bases |= 1u << k;
+	/* addr - page < 4096 - (size - 1): in the cached page, the last byte too */
+	w_local(b, W_LOCAL_GET, L_ADDR);
+	w_local(b, W_LOCAL_GET, prot & RV_PROT_WRITE ? L_CB_W(k) : L_CB_R(k));
+	w_op(b, W_I64_SUB);
+	w_i64(b, RV_PAGE_SIZE - size + 1);
+	w_op(b, W_I64_LT_U);
+	w_byte(b, W_IF);
+	w_byte(b, W_TYPE_VOID);
+	w_local(b, W_LOCAL_GET, L_ADDR);
+	w_local(b, W_LOCAL_GET, L_CD(k));
+	w_op(b, W_I64_ADD);
+	w_local(b, W_LOCAL_SET, L_HOST);
+	w_byte(b, W_ELSE);
+	/* A miss: the module's function does the whole check and leaves the cache's new contents in cpu->xlat. */
+	w_local(b, W_LOCAL_GET, L_CPU);
+	w_local(b, W_LOCAL_GET, L_ADDR);
+	w_i64(b, size | prot << 8);
+	call_helper(g, F_XLAT);
+	w_local(b, W_LOCAL_TEE, L_HOST);
+	w_op(b, W_I64_EQZ);
+	w_byte(b, W_IF);
+	w_byte(b, W_TYPE_VOID);
+	bail(g, insn, not_run, 2);
+	w_op(b, W_END);
+	if (g->cpu->verbose) {
+		/* (-v: count the misses, for region-bench.js and the report.) */
+		w_local(b, W_LOCAL_GET, L_CPU);
+		w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, jit));
+		w_local(b, W_LOCAL_TEE, L_TMP);
+		w_local(b, W_LOCAL_GET, L_TMP);
+		w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_jit, stat_misses));
+		w_i64(b, 1);
+		w_op(b, W_I64_ADD);
+		w_mem(b, W_I64_STORE, 3, offsetof(struct rv_jit, stat_misses));
+	}
+	for (int j = 0; j < 3; j++) {
+		w_local(b, W_LOCAL_GET, L_CPU);
+		w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, xlat) + 8 * j);
+		w_local(b, W_LOCAL_SET, j == 0 ? L_CB_R(k) : j == 1 ? L_CB_W(k) : L_CD(k));
+	}
+	w_op(b, W_END);
+}
+
+/*
+ * The same; with `aligned`, also leave unless the address is a multiple of the size (which keeps it in one page).
+ *
+ * The slow way (the test failed: no page in the table that allows this as it
+ * stands, across two pages, misaligned for an atomic, or a reservation's
+ * page) is the module's own function for it (gen_reserve_fn()), which gives
+ * the host address or 0, and 0 leaves for the interpreter. That call is right
+ * there, at every access (the shared slow block that OFF_OUTLINE was is gone: it
+ * made code slower under V8, see the git history).
+ *
+ * OFF_HOIST: in a block, the accesses by one base register that is not
+ * written in between form a group (gen_groups()). The first checks its
+ * page as above for what all of them do (read and/or write) and keeps the
+ * page's guest address and host - guest in a slot's two locals; the others
+ * only test that they are in that page (one subtraction and compare), with
+ * the slow way as above if not. The slot is good for the rest of the block
+ * only: like a pending change of code (RV_SIG_CODE), a change of the page
+ * table by another thread is seen at the end of the block at the latest.
+ * Nothing the block itself calls changes the table (rv_jit_reserve() only
+ * looks).
+ */
 static void check_access_as(struct gen *g, const struct jit_insn *insn, uint32_t not_run,
-			    unsigned size, unsigned prot, int aligned)
+			    unsigned size, unsigned prot, int aligned, uint32_t base)
 {
 	struct wbuf *b = g->b;
 	int tag = g->cpu->jit->tag && tag_table;
+	int role = g->hoist && !aligned && !tag ? g->role[g->j] : ACC_PLAIN;
+	uint32_t s = g->slot[g->j];
+	uint64_t how;
 
-	if (tag) {
-		/* tag[(addr >> 12) & mask] != addr >> 12, left on the stack for the test below */
+	if (role == ACC_FIRST)
+		prot = g->uprot[g->j];
+	how = size | prot << 8 | (aligned ? 1 << 16 : 0);
+
+	(void)base;
+
+	if (g->cpu->jit->flatmem_on) {
+		(void)insn; (void)not_run; (void)size; (void)prot; (void)aligned;
 		w_local(b, W_LOCAL_GET, L_ADDR);
-		w_i64(b, RV_PAGE_SHIFT);
-		w_op(b, W_I64_SHR_U);
-		w_i64(b, ((uint64_t)1 << TAG_BITS) - 1);
-		w_op(b, W_I64_AND);
-		w_i64(b, 3);
-		w_op(b, W_I64_SHL);
-		w_mem(b, W_I64_LOAD, 3, (uint64_t)(uintptr_t)tag_table);
-		w_local(b, W_LOCAL_GET, L_ADDR);
-		w_i64(b, RV_PAGE_SHIFT);
-		w_op(b, W_I64_SHR_U);
-		w_op(b, W_I64_NE);
+		w_i64(b, g->cpu->jit->flatmem);
+		w_op(b, W_I64_ADD);
+		w_local(b, W_LOCAL_SET, L_HOST);
+		return;
 	}
 
-	w_local(b, W_LOCAL_GET, L_ADDR);
-	w_i64(b, RV_PAGE_SHIFT);
-	w_op(b, W_I64_SHR_U);
-	w_local(b, W_LOCAL_TEE, L_HOST);
-	w_local(b, W_LOCAL_GET, L_NPAGES);
-	w_local(b, W_LOCAL_GET, L_HOST);
-	w_local(b, W_LOCAL_GET, L_NPAGES);
-	w_op(b, W_I64_LT_U);
-	w_op(b, W_SELECT);
-	w_i64(b, 3);
-	w_op(b, W_I64_SHL);
-	w_local(b, W_LOCAL_GET, L_MAP);
-	w_op(b, W_I64_ADD);
-	w_mem(b, W_I64_LOAD, 3, 0);
-	w_local(b, W_LOCAL_TEE, L_HOST);
-	w_op(b, W_I32_WRAP_I64);
-	w_i32(b, (int32_t)prot);
-	w_op(b, W_I32_AND);
-	w_i32(b, (int32_t)prot);
-	w_op(b, W_I32_NE);
-	if (aligned) {
+	if (role == ACC_MEMBER) {
+		/* addr - page >u 4096 - size: not in the page the group was checked for (or across its end) */
 		w_local(b, W_LOCAL_GET, L_ADDR);
-		w_i64(b, size - 1);
-		w_op(b, W_I64_AND);
-		w_i64(b, 0);
-		w_op(b, W_I64_NE);
-		w_op(b, W_I32_OR);
-	} else if (size > 1) {
-		w_local(b, W_LOCAL_GET, L_ADDR);
-		w_i64(b, RV_PAGE_SIZE - 1);
-		w_op(b, W_I64_AND);
+		w_local(b, W_LOCAL_GET, L_CPAGE(s));
+		w_op(b, W_I64_SUB);
 		w_i64(b, RV_PAGE_SIZE - size);
 		w_op(b, W_I64_GT_U);
-		w_op(b, W_I32_OR);
+	} else {
+		if (tag) {
+			/* tag[(addr >> 12) & mask] != addr >> 12, left on the stack for the test below */
+			w_local(b, W_LOCAL_GET, L_ADDR);
+			w_i64(b, RV_PAGE_SHIFT);
+			w_op(b, W_I64_SHR_U);
+			w_i64(b, ((uint64_t)1 << TAG_BITS) - 1);
+			w_op(b, W_I64_AND);
+			w_i64(b, 3);
+			w_op(b, W_I64_SHL);
+			w_mem(b, W_I64_LOAD, 3, (uint64_t)(uintptr_t)tag_table);
+			w_local(b, W_LOCAL_GET, L_ADDR);
+			w_i64(b, RV_PAGE_SHIFT);
+			w_op(b, W_I64_SHR_U);
+			w_op(b, W_I64_NE);
+		}
+
+		w_local(b, W_LOCAL_GET, L_ADDR);
+		w_i64(b, RV_PAGE_SHIFT);
+		w_op(b, W_I64_SHR_U);
+		w_local(b, W_LOCAL_TEE, L_HOST);
+		w_local(b, W_LOCAL_GET, L_NPAGES);
+		w_local(b, W_LOCAL_GET, L_HOST);
+		w_local(b, W_LOCAL_GET, L_NPAGES);
+		w_op(b, W_I64_LT_U);
+		w_op(b, W_SELECT);
+		w_i64(b, 3);
+		w_op(b, W_I64_SHL);
+		w_local(b, W_LOCAL_GET, L_MAP);
+		w_op(b, W_I64_ADD);
+		w_mem(b, W_I64_LOAD, 3, 0);
+		w_local(b, W_LOCAL_TEE, L_HOST);
+		w_op(b, W_I32_WRAP_I64);
+		w_i32(b, (int32_t)prot);
+		w_op(b, W_I32_AND);
+		w_i32(b, (int32_t)prot);
+		w_op(b, W_I32_NE);
+		if (aligned) {
+			w_local(b, W_LOCAL_GET, L_ADDR);
+			w_i64(b, size - 1);
+			w_op(b, W_I64_AND);
+			w_i64(b, 0);
+			w_op(b, W_I64_NE);
+			w_op(b, W_I32_OR);
+		} else if (size > 1) {
+			w_local(b, W_LOCAL_GET, L_ADDR);
+			w_i64(b, RV_PAGE_SIZE - 1);
+			w_op(b, W_I64_AND);
+			w_i64(b, RV_PAGE_SIZE - size);
+			w_op(b, W_I64_GT_U);
+			w_op(b, W_I32_OR);
+		}
+		if (tag)
+			w_op(b, W_I32_OR);
 	}
-	if (tag)
-		w_op(b, W_I32_OR);
+	hint(g, HS_ACCESS, 0);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
 	/*
@@ -1664,17 +2252,18 @@ static void check_access_as(struct gen *g, const struct jit_insn *insn, uint32_t
 	 * or 0, and 0 leaves. L_HOST is made what it would be for a page in the
 	 * table (the host address minus the guest address has no bits in
 	 * RV_PAGE_FLAGS: the two are as far into their pages), so the code below
-	 * is the same for both. The function answers 0 for an address in the
-	 * table as well (that access failed for another reason), so there is
-	 * one call and one way out here, not a test and two (a seventh less
-	 * code: codegen-regs, 442ff04).
+	 * is the same for both. The function answers for an address in the
+	 * table as well (that access failed for another reason, or is a group's
+	 * in another page), so there is one call and one way out here, not a
+	 * test and two (a seventh less code: codegen-regs, 442ff04).
 	 */
 	w_local(b, W_LOCAL_GET, L_CPU);
 	w_local(b, W_LOCAL_GET, L_ADDR);
-	w_i64(b, size | prot << 8 | (aligned ? 1 << 16 : 0));
+	w_i64(b, how);
 	call_helper(g, F_RESERVE);
 	w_local(b, W_LOCAL_TEE, L_HOST);
 	w_op(b, W_I64_EQZ);
+	hint(g, HS_RESERVE, 0);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
 	bail(g, insn, not_run, 2);
@@ -1683,13 +2272,33 @@ static void check_access_as(struct gen *g, const struct jit_insn *insn, uint32_t
 	w_local(b, W_LOCAL_GET, L_ADDR);
 	w_op(b, W_I64_SUB);
 	w_local(b, W_LOCAL_SET, L_HOST);
+	if (role == ACC_MEMBER) {
+		w_byte(b, W_ELSE);
+		w_local(b, W_LOCAL_GET, L_CDELTA(s));
+		w_local(b, W_LOCAL_SET, L_HOST);
+	}
 	w_op(b, W_END);
+	if (role == ACC_MEMBER) {
+		w_local(b, W_LOCAL_GET, L_HOST);
+		w_local(b, W_LOCAL_GET, L_ADDR);
+		w_op(b, W_I64_ADD);
+		w_local(b, W_LOCAL_SET, L_HOST);
+		return;
+	}
 	w_local(b, W_LOCAL_GET, L_HOST);
 	w_i64(b, ~(uint64_t)RV_PAGE_FLAGS);
 	w_op(b, W_I64_AND);
+	if (role == ACC_FIRST)
+		w_local(b, W_LOCAL_TEE, L_CDELTA(s));
 	w_local(b, W_LOCAL_GET, L_ADDR);
 	w_op(b, W_I64_ADD);
 	w_local(b, W_LOCAL_SET, L_HOST);
+	if (role == ACC_FIRST) {
+		w_local(b, W_LOCAL_GET, L_ADDR);
+		w_i64(b, ~(RV_PAGE_SIZE - 1));
+		w_op(b, W_I64_AND);
+		w_local(b, W_LOCAL_SET, L_CPAGE(s));
+	}
 }
 
 /* L_ADDR = rs1 + imm */
@@ -1754,6 +2363,104 @@ static void alu(struct gen *g, uint32_t f3, int sub_or_sra, int word)
 }
 
 /*
+ * Floating-point registers and fcsr in locals (OFF_FPLOC), as the integer
+ * registers are: the ones a region uses are read from *cpu when it is
+ * entered and the ones it writes stored when it is left; only a call to
+ * rv_jit_fp() (gen_fp_call()) sees *cpu, so the operands go there before it
+ * and the results come back after it. A local is made at an f register's
+ * first use.
+ */
+static uint32_t floc(struct gen *g, uint32_t r, int write)
+{
+	if (g->fmap[r] < 0)
+		g->fmap[r] = (int8_t)g->nf++;
+	if (write)
+		g->fwritten |= 1u << r;
+	return g->fbase + 1 + (uint32_t)g->fmap[r];
+}
+
+/* f[r] on the stack, as bits. */
+static void freg_get(struct gen *g, uint32_t r)
+{
+	if (g->floc) {
+		w_local(g->b, W_LOCAL_GET, floc(g, r, 0));
+	} else {
+		w_local(g->b, W_LOCAL_GET, L_CPU);
+		w_mem(g->b, W_I64_LOAD, 3, offsetof(struct rv_cpu, f) + 8 * r);
+	}
+}
+
+/* Storing into f[rd] the bits that freg_put_end() will find on the stack: this goes first. */
+static void freg_put_begin(struct gen *g)
+{
+	if (!g->floc)
+		w_local(g->b, W_LOCAL_GET, L_CPU);
+}
+
+static void freg_put_end(struct gen *g, uint32_t r)
+{
+	if (g->floc)
+		w_local(g->b, W_LOCAL_SET, floc(g, r, 1));
+	else
+		w_mem(g->b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * r);
+}
+
+/* The bits of f[r] into a local. */
+static void freg_to(struct gen *g, uint32_t r, uint32_t local)
+{
+	freg_get(g, r);
+	w_local(g->b, W_LOCAL_SET, local);
+}
+
+/* The bits of the local into f[r]. */
+static void freg_from(struct gen *g, uint32_t local, uint32_t r)
+{
+	freg_put_begin(g);
+	w_local(g->b, W_LOCAL_GET, local);
+	freg_put_end(g, r);
+}
+
+/* fcsr on the stack, as an i32. */
+static void fcsr_get(struct gen *g)
+{
+	if (g->floc) {
+		g->fc_used = 1;
+		w_local(g->b, W_LOCAL_GET, g->fbase);
+		w_op(g->b, W_I32_WRAP_I64);
+	} else {
+		w_local(g->b, W_LOCAL_GET, L_CPU);
+		w_mem(g->b, W_I32_LOAD, 2, offsetof(struct rv_cpu, fcsr));
+	}
+}
+
+/* Which f registers an instruction of F/D reads, and which it writes (bit masks); what is not known is taken as reading rs1, rs2 and writing rd. */
+static void fp_regs(uint32_t i, uint32_t *src, uint32_t *dst)
+{
+	uint32_t s1 = 1u << RS1(i), s2 = 1u << RS2(i), d = 1u << RD(i);
+
+	*src = *dst = 0;
+	if (OPCODE(i) >= 0x43 && OPCODE(i) <= 0x4f) {
+		*src = s1 | s2 | (1u << (i >> 27));
+		*dst = d;
+		return;
+	}
+	switch (i >> 27) {
+	case 0x00: case 0x01: case 0x02: case 0x03: case 0x04: case 0x05:
+		*src = s1 | s2; *dst = d; break;
+	case 0x0b: case 0x08:
+		*src = s1; *dst = d; break;
+	case 0x14:
+		*src = s1 | s2; break;
+	case 0x18: case 0x1c:
+		*src = s1; break;
+	case 0x1a: case 0x1e:
+		*dst = d; break;
+	default:
+		*src = s1 | s2; *dst = d; break;
+	}
+}
+
+/*
  * A floating-point or CSR instruction by a call to the interpreter's code
  * for it. An integer result is left in L_TMP. `extra`: how many blocks the
  * caller has opened around this.
@@ -1765,6 +2472,24 @@ static void gen_fp_call(struct gen *g, const struct jit_insn *insn, uint32_t not
 	int csr = OPCODE(i) == 0x73;
 	int reads_int = csr ? !(F3(i) & 4) : rv_fp_int_source(i);
 
+	uint32_t src = 0, dst = 0;
+
+	/* The call sees *cpu: the operands and fcsr go there, and what it writes comes back. */
+	if (g->floc && !csr) {
+		fp_regs(i, &src, &dst);
+		for (uint32_t r = 0; r < 32; r++) {
+			if (!(src & (1u << r)))
+				continue;
+			w_local(b, W_LOCAL_GET, L_CPU);
+			w_local(b, W_LOCAL_GET, floc(g, r, 0));
+			w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * r);
+		}
+		g->fc_used = g->fc_written = 1;
+		w_local(b, W_LOCAL_GET, L_CPU);
+		w_local(b, W_LOCAL_GET, g->fbase);
+		w_op(b, W_I32_WRAP_I64);
+		w_mem(b, W_I32_STORE, 2, offsetof(struct rv_cpu, fcsr));
+	}
 	w_local(b, W_LOCAL_GET, L_CPU);
 	w_i64(b, i);
 	if (reads_int)
@@ -1777,18 +2502,25 @@ static void gen_fp_call(struct gen *g, const struct jit_insn *insn, uint32_t not
 	/* Not a valid instruction after all (its rounding mode, say): the interpreter's to report. */
 	w_local(b, W_LOCAL_GET, L_CPU);
 	w_mem(b, W_I32_LOAD, 2, offsetof(struct rv_cpu, jit_fault));
+	hint(g, HS_FAULT, 0);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
 	bail(g, insn, not_run, extra + 1);
 	w_op(b, W_END);
-}
 
-/* The bits of f[r] into a local. */
-static void freg_to(struct gen *g, uint32_t r, uint32_t local)
-{
-	w_local(g->b, W_LOCAL_GET, L_CPU);
-	w_mem(g->b, W_I64_LOAD, 3, offsetof(struct rv_cpu, f) + 8 * r);
-	w_local(g->b, W_LOCAL_SET, local);
+	if (g->floc && !csr) {
+		for (uint32_t r = 0; r < 32; r++) {
+			if (!(dst & (1u << r)))
+				continue;
+			w_local(b, W_LOCAL_GET, L_CPU);
+			w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, f) + 8 * r);
+			w_local(b, W_LOCAL_SET, floc(g, r, 1));
+		}
+		w_local(b, W_LOCAL_GET, L_CPU);
+		w_mem(b, W_I32_LOAD, 2, offsetof(struct rv_cpu, fcsr));
+		w_op(b, W_I64_EXTEND_I32_U);
+		w_local(b, W_LOCAL_SET, g->fbase);
+	}
 }
 
 /* The double (or the single) whose bits are in a local, on the stack. */
@@ -1915,8 +2647,7 @@ static void is_finite32(struct gen *g, uint32_t local)
  */
 static void fcsr_allows(struct gen *g, uint32_t rm)
 {
-	w_local(g->b, W_LOCAL_GET, L_CPU);
-	w_mem(g->b, W_I32_LOAD, 2, offsetof(struct rv_cpu, fcsr));
+	fcsr_get(g);
 	w_i32(g->b, rm == 7 ? 0xe1 : 0x01);
 	w_op(g->b, W_I32_AND);
 	w_i32(g->b, 1);
@@ -2071,9 +2802,7 @@ static int gen_fp_host(struct gen *g, const struct jit_insn *insn, uint32_t not_
 		}
 		if (dbl) {
 			/* Always: no condition, no call. */
-			w_local(b, W_LOCAL_GET, L_CPU);
-			w_local(b, W_LOCAL_GET, L_FP);
-			w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * rd);
+			freg_from(g, L_FP, rd);
 			return 1;
 		}
 		is_boxed(g, L_ADDR);
@@ -2203,12 +2932,12 @@ static int gen_fp_host(struct gen *g, const struct jit_insn *insn, uint32_t not_
 			return 0;
 		if (dbl && rs2 < 2) {
 			/* A 32-bit integer is a double exactly: always. */
-			w_local(b, W_LOCAL_GET, L_CPU);
+			freg_put_begin(g);
 			get_reg(g, rs1);
 			w_op(b, W_I32_WRAP_I64);
 			w_op(b, rs2 ? W_F64_CONVERT_I32_U : W_F64_CONVERT_I32_S);
 			w_op(b, W_I64_REINTERPRET_F64);
-			w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * rd);
+			freg_put_end(g, rd);
 			return 1;
 		}
 		/*
@@ -2273,8 +3002,7 @@ static int gen_fp_host(struct gen *g, const struct jit_insn *insn, uint32_t not_
 	case 0x1c: /* FMV.X.W and FMV.X.D: bits (FCLASS is the call's) */
 		if (rs2 != 0 || f3 != 0)
 			return 0;
-		w_local(b, W_LOCAL_GET, L_CPU);
-		w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, f) + 8 * rs1);
+		freg_get(g, rs1);
 		if (!dbl)
 			sext32(g);
 		set_reg(g, rd);
@@ -2283,7 +3011,7 @@ static int gen_fp_host(struct gen *g, const struct jit_insn *insn, uint32_t not_
 	case 0x1e: /* FMV.W.X and FMV.D.X */
 		if (rs2 != 0 || f3 != 0)
 			return 0;
-		w_local(b, W_LOCAL_GET, L_CPU);
+		freg_put_begin(g);
 		get_reg(g, rs1);
 		if (!dbl) {
 			w_i64(b, 0xffffffffULL);
@@ -2291,7 +3019,7 @@ static int gen_fp_host(struct gen *g, const struct jit_insn *insn, uint32_t not_
 			w_i64(b, 0xffffffff00000000ULL);
 			w_op(b, W_I64_OR);
 		}
-		w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * rd);
+		freg_put_end(g, rd);
 		return 1;
 
 	default:
@@ -2299,15 +3027,14 @@ static int gen_fp_host(struct gen *g, const struct jit_insn *insn, uint32_t not_
 	}
 
 	/* The test is on the stack and the candidate in L_FP. */
+	hint(g, HS_FP, 1);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
 	if (int_result) {
 		w_local(b, W_LOCAL_GET, L_FP);
 		w_local(b, W_LOCAL_SET, L_TMP);
 	} else {
-		w_local(b, W_LOCAL_GET, L_CPU);
-		w_local(b, W_LOCAL_GET, L_FP);
-		w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * rd);
+		freg_from(g, L_FP, rd);
 	}
 	w_byte(b, W_ELSE);
 	gen_fp_call(g, insn, not_run, 1);
@@ -2351,7 +3078,10 @@ static void is_moderate64(struct gen *g, uint32_t local)
  */
 static int fma_probe(struct rv_jit *jit)
 {
-#ifdef __wasm__
+#ifndef __wasm__
+	if (!jit->emu)
+		return -1;
+#endif
 	static const uint8_t head[] = {
 		0, 'a', 's', 'm', 1, 0, 0, 0,
 		1, 7, 1, W_TYPE_FUNC, 3, W_TYPE_I64, W_TYPE_I32, W_TYPE_I32, 0,	/* the type of a region */
@@ -2385,8 +3115,13 @@ static int fma_probe(struct rv_jit *jit)
 	w_uleb(&m, 1);
 	w_uleb(&m, body.len);
 	w_bytes(&m, body.data, body.len);
+#ifdef __wasm__
 	if (m.overflow || body.overflow || (slot = __rv_jit_install(m.data, m.len, -1)) < 0)
 		return -1;
+#else
+	if (m.overflow || body.overflow || (slot = rv_emu_install(m.data, m.len, -1)) < 0)
+		return -1;
+#endif
 
 	for (int k = 0; k < 64; k++) {
 		if (k == 0) {
@@ -2407,15 +3142,11 @@ static int fma_probe(struct rv_jit *jit)
 				v[2] = rv_jit_fused64(v[0], v[1], 0) ^ 0x8000000000000001ULL;
 		}
 		v[3] = 0;
-		((rv_region_fn)(uintptr_t)slot)((struct rv_cpu *)(void *)v, 0, 0);
+		region_call_raw(jit, (uint32_t)slot, (struct rv_cpu *)(void *)v, 0, 0);
 		if (v[3] != rv_jit_fused64(v[0], v[1], v[2]))
 			return -1;
 	}
 	return 1;
-#else
-	(void)jit;
-	return -1;
-#endif
 }
 
 /*
@@ -2458,6 +3189,7 @@ static int gen_fp_fused(struct gen *g, const struct jit_insn *insn, uint32_t not
 	w_op(b, W_I64_EQZ);
 	w_op(b, W_I32_OR);
 	w_op(b, W_I32_AND);
+	hint(g, HS_FP, 1);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
 	w_local(b, W_LOCAL_GET, L_ADDR);
@@ -2494,11 +3226,10 @@ static int gen_fp_fused(struct gen *g, const struct jit_insn *insn, uint32_t not
 	w_op(b, W_END);
 
 	w_local(b, W_LOCAL_GET, L_TMP32);
+	hint(g, HS_FP, 1);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
-	w_local(b, W_LOCAL_GET, L_CPU);
-	w_local(b, W_LOCAL_GET, L_FP);
-	w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * rd);
+	freg_from(g, L_FP, rd);
 	w_byte(b, W_ELSE);
 	gen_fp_call(g, insn, not_run, 1);
 	w_op(b, W_END);
@@ -2522,8 +3253,7 @@ static int gen_csr(struct gen *g, const struct jit_insn *insn)
 	if (op == 0 || csr < 1 || csr > 3)
 		return 0;
 	/* The whole register in L_TMP, the CSR as it was in L_FP. */
-	w_local(b, W_LOCAL_GET, L_CPU);
-	w_mem(b, W_I32_LOAD, 2, offsetof(struct rv_cpu, fcsr));
+	fcsr_get(g);
 	w_op(b, W_I64_EXTEND_I32_U);
 	w_local(b, W_LOCAL_TEE, L_TMP);
 	if (csr == 2) {
@@ -2556,14 +3286,26 @@ static int gen_csr(struct gen *g, const struct jit_insn *insn)
 		}
 		w_local(b, W_LOCAL_SET, L_HOST);
 		/* ... put into the register in place of what was there. */
-		w_local(b, W_LOCAL_GET, L_CPU);
-		w_local(b, W_LOCAL_GET, L_TMP);
-		w_i64(b, csr == 1 ? ~0x1fULL : csr == 2 ? 0x1f : 0);
-		w_op(b, W_I64_AND);
-		w_local(b, W_LOCAL_GET, L_HOST);
-		w_op(b, W_I64_OR);
-		w_op(b, W_I32_WRAP_I64);
-		w_mem(b, W_I32_STORE, 2, offsetof(struct rv_cpu, fcsr));
+		if (g->floc) {
+			g->fc_used = g->fc_written = 1;
+			w_local(b, W_LOCAL_GET, L_TMP);
+			w_i64(b, csr == 1 ? ~0x1fULL : csr == 2 ? 0x1f : 0);
+			w_op(b, W_I64_AND);
+			w_local(b, W_LOCAL_GET, L_HOST);
+			w_op(b, W_I64_OR);
+			w_i64(b, 0xffffffffULL);
+			w_op(b, W_I64_AND);
+			w_local(b, W_LOCAL_SET, g->fbase);
+		} else {
+			w_local(b, W_LOCAL_GET, L_CPU);
+			w_local(b, W_LOCAL_GET, L_TMP);
+			w_i64(b, csr == 1 ? ~0x1fULL : csr == 2 ? 0x1f : 0);
+			w_op(b, W_I64_AND);
+			w_local(b, W_LOCAL_GET, L_HOST);
+			w_op(b, W_I64_OR);
+			w_op(b, W_I32_WRAP_I64);
+			w_mem(b, W_I32_STORE, 2, offsetof(struct rv_cpu, fcsr));
+		}
 	}
 	w_local(b, W_LOCAL_GET, L_FP);
 	set_reg(g, rd);
@@ -2745,6 +3487,73 @@ static int gen_bitmanip(struct gen *g, uint32_t i)
 	return 1;
 }
 
+/*
+ * DIV, DIVU, REM, REMU and their W forms, inline: Wasm's divisions trap where
+ * RISC-V's have results (a divisor of 0, and the most negative dividend over
+ * -1 for a signed quotient), so the divisor is made 1 in those cases and the
+ * RISC-V result selected afterwards: by 0, the quotient is all ones and the
+ * remainder the dividend; overflowing, the quotient is the dividend (0 - a,
+ * which wraps to it) and the remainder 0 (which Wasm's rem_s gives without
+ * trapping). The W forms are done in 64 bits on the operands' low halves,
+ * sign- or zero-extended: no 64-bit case can then overflow, and the low 32
+ * bits of the result are RISC-V's. A call to the emulator for each was
+ * dearer than the division.
+ */
+static void gen_divrem(struct gen *g, uint32_t f3, uint32_t rs1, uint32_t rs2, int word)
+{
+	struct wbuf *b = g->b;
+	int rem = f3 >= 6, sign = !(f3 & 1);
+
+	/* a in L_ADDR, b in L_TMP, as 64-bit values */
+	for (int k = 0; k < 2; k++) {
+		get_reg(g, k ? rs2 : rs1);
+		if (word) {
+			if (sign) {
+				w_op(b, W_I32_WRAP_I64);
+				w_op(b, W_I64_EXTEND_I32_S);
+			} else {
+				w_i64(b, 0xffffffffULL);
+				w_op(b, W_I64_AND);
+			}
+		}
+		w_local(b, W_LOCAL_SET, k ? L_TMP : L_ADDR);
+	}
+	/* L_TMP32: the divisor is special (0; or -1 for a signed 64-bit quotient) */
+	w_local(b, W_LOCAL_GET, L_TMP);
+	if (sign && !rem && !word) {
+		w_i64(b, 1);
+		w_op(b, W_I64_ADD);
+		w_i64(b, 2);
+		w_op(b, W_I64_LT_U);
+	} else {
+		w_op(b, W_I64_EQZ);
+	}
+	w_local(b, W_LOCAL_SET, L_TMP32);
+	/* The result if special: quotient -1 (by 0) or -a (overflow); remainder a (by 0)... */
+	if (rem) {
+		w_local(b, W_LOCAL_GET, L_ADDR);
+	} else {
+		w_i64(b, (uint64_t)-1);
+		w_i64(b, 0);
+		w_local(b, W_LOCAL_GET, L_ADDR);
+		w_op(b, W_I64_SUB);
+		w_local(b, W_LOCAL_GET, L_TMP);
+		w_op(b, W_I64_EQZ);
+		w_op(b, W_SELECT);
+	}
+	/* ... else the division, by the divisor made 1 when special. */
+	w_local(b, W_LOCAL_GET, L_ADDR);
+	w_i64(b, 1);
+	w_local(b, W_LOCAL_GET, L_TMP);
+	w_local(b, W_LOCAL_GET, L_TMP32);
+	w_op(b, W_SELECT);
+	w_op(b, rem ? (sign ? W_I64_REM_S : W_I64_REM_U) : (sign ? W_I64_DIV_S : W_I64_DIV_U));
+	w_local(b, W_LOCAL_GET, L_TMP32);
+	w_op(b, W_SELECT);
+	if (word)
+		sext32(g);
+}
+
 static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_run)
 {
 	struct wbuf *b = g->b;
@@ -2787,12 +3596,35 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 		 * which goes on at the block or leaves.
 		 */
 		if (g->cpu->jit->targets_now) {
-			w_i32(b, g->r->nblocks);
-			w_local(b, W_LOCAL_SET, L_NEXT);
-			w_br(b, W_BR, loop_depth(g, 0));
-		} else {
-			leave_for_target(g, 0);
+			uint64_t targets[JALR_TARGETS];
+			int n = jalr_targets(g->cpu->jit, pc, targets), scope = g->scope;
+
+			/* The targets seen while interpreting, each compared with inline, if there are few. */
+			if (n <= JALR_INLINE) {
+				for (int k = 0; k < n; k++) {
+					int t = find_block(g->r, targets[k]);
+
+					if (t < 0)
+						continue;
+					w_local(b, W_LOCAL_GET, L_PC);
+					w_i64(b, targets[k]);
+					w_op(b, W_I64_EQ);
+					w_byte(b, W_IF);
+					w_byte(b, W_TYPE_VOID);
+					branch_to_block(g, t, 1);
+					w_op(b, W_END);
+				}
+			}
+			/* Then the lookup: this loop's, if it has one, else the region's. */
+			while (scope > 0 && g->lay->scopes[scope].lookup < 0)
+				scope = g->lay->scopes[scope].parent;
+			if (scope > 0 || g->lay->scopes[0].lookup >= 0) {
+				set_next(g, g->r->nblocks + scope);
+				w_br(b, W_BR, depth_to_loop(g, scope, 0));
+				break;
+			}
 		}
+		leave_for_target(g, 0);
 		break;
 
 	case 0x63: { /* BRANCH */
@@ -2818,7 +3650,7 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 		};
 
 		effective_address(g, rs1, IMM_I(i));
-		check_access(g, insn, not_run, 1u << (f3 & 3), RV_PROT_READ);
+		check_access(g, insn, not_run, 1u << (f3 & 3), RV_PROT_READ, rs1);
 		w_local(b, W_LOCAL_GET, L_HOST);
 		w_mem(b, op[f3], 0, 0);
 		set_reg(g, rd);
@@ -2829,7 +3661,7 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 		static const uint8_t op[4] = { W_I64_STORE8, W_I64_STORE16, W_I64_STORE32, W_I64_STORE };
 
 		effective_address(g, rs1, IMM_S(i));
-		check_access(g, insn, not_run, 1u << f3, RV_PROT_WRITE);
+		check_access(g, insn, not_run, 1u << f3, RV_PROT_WRITE, rs1);
 		w_local(b, W_LOCAL_GET, L_HOST);
 		get_reg(g, rs2);
 		w_mem(b, op[f3], 0, 0);
@@ -2864,6 +3696,11 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 		break;
 
 	case 0x33: /* OP */
+		if (f7 == 1 && f3 >= 4 && !(g->cpu->jit->off & OFF_DIV)) {
+			gen_divrem(g, f3, rs1, rs2, 0);
+			set_reg(g, rd);
+			break;
+		}
 		get_reg(g, rs1);
 		get_reg(g, rs2);
 		if (f7 == 1) {
@@ -2882,6 +3719,11 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 		break;
 
 	case 0x3b: /* OP-32 */
+		if (f7 == 1 && f3 >= 4 && !(g->cpu->jit->off & OFF_DIV)) {
+			gen_divrem(g, f3, rs1, rs2, 1);
+			set_reg(g, rd);
+			break;
+		}
 		get_reg(g, rs1);
 		get_reg(g, rs2);
 		if (f7 == 1) {
@@ -2915,7 +3757,7 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 
 		effective_address(g, rs1, 0);
 		check_access_as(g, insn, not_run, wide ? 8 : 4,
-				f5 == 0x02 ? RV_PROT_READ : RV_PROT_READ | RV_PROT_WRITE, 1);
+				f5 == 0x02 ? RV_PROT_READ : RV_PROT_READ | RV_PROT_WRITE, 1, 0);
 
 		if (f5 == 0x02) {
 			/* LR: the value, and a note of where it was read and what it was. */
@@ -2989,8 +3831,8 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 
 	case 0x07: /* LOAD-FP: FLW (the value is NaN-boxed) and FLD */
 		effective_address(g, rs1, IMM_I(i));
-		check_access(g, insn, not_run, f3 == 2 ? 4 : 8, RV_PROT_READ);
-		w_local(b, W_LOCAL_GET, L_CPU);
+		check_access(g, insn, not_run, f3 == 2 ? 4 : 8, RV_PROT_READ, rs1);
+		freg_put_begin(g);
 		w_local(b, W_LOCAL_GET, L_HOST);
 		if (f3 == 2) {
 			w_mem(b, W_I64_LOAD32_U, 0, 0);
@@ -2999,15 +3841,14 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 		} else {
 			w_mem(b, W_I64_LOAD, 0, 0);
 		}
-		w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * rd);
+		freg_put_end(g, rd);
 		break;
 
 	case 0x27: /* STORE-FP: FSW and FSD */
 		effective_address(g, rs1, IMM_S(i));
-		check_access(g, insn, not_run, f3 == 2 ? 4 : 8, RV_PROT_WRITE);
+		check_access(g, insn, not_run, f3 == 2 ? 4 : 8, RV_PROT_WRITE, rs1);
 		w_local(b, W_LOCAL_GET, L_HOST);
-		w_local(b, W_LOCAL_GET, L_CPU);
-		w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, f) + 8 * rs2);
+		freg_get(g, rs2);
 		w_mem(b, f3 == 2 ? W_I64_STORE32 : W_I64_STORE, 0, 0);
 		break;
 
@@ -3033,9 +3874,349 @@ static void gen_insn(struct gen *g, const struct jit_insn *insn, uint32_t not_ru
 	}
 }
 
-/* The body of the region function, without the register loads and stores around it. */
+/* ------------------------------------------------------------ region layout */
+
+/* The edges of the region's blocks: static successors, calls' return addresses, indirect jumps seen (see struct layout). */
+static void layout_edges(struct rv_cpu *cpu, const struct jit_region *r, struct layout *lay)
+{
+	memset(lay->succ, 0, sizeof(lay->succ));
+	for (int k = 0; k < r->nblocks; k++) {
+		const struct jit_block *blk = &r->blocks[k];
+		const struct jit_insn *last = &r->insns[blk->first + blk->count - 1];
+		enum kind kind = classify(last->raw);
+		int t;
+
+		switch (kind) {
+		case K_BRANCH:
+			if ((t = find_block(r, last->pc + (uint64_t)imm_b(last->raw))) >= 0)
+				lay->succ[k][t / 64] |= 1ULL << (t % 64);
+			if ((t = find_block(r, blk->next_pc)) >= 0)
+				lay->succ[k][t / 64] |= 1ULL << (t % 64);
+			break;
+		case K_JAL:
+			if ((t = find_block(r, last->pc + (uint64_t)imm_j(last->raw))) >= 0)
+				lay->succ[k][t / 64] |= 1ULL << (t % 64);
+			/* A call comes back to the next instruction, by way of the callee. */
+			if (RD(last->raw) && (t = find_block(r, blk->next_pc)) >= 0)
+				lay->succ[k][t / 64] |= 1ULL << (t % 64);
+			break;
+		case K_JALR: {
+			uint64_t targets[JALR_TARGETS];
+			int n = jalr_targets(cpu->jit, last->pc, targets);
+
+			for (int i = 0; i < n; i++)
+				if ((t = find_block(r, targets[i])) >= 0)
+					lay->succ[k][t / 64] |= 1ULL << (t % 64);
+			break;
+		}
+		default:
+			if ((t = find_block(r, blk->next_pc)) >= 0)
+				lay->succ[k][t / 64] |= 1ULL << (t % 64);
+		}
+	}
+}
+
 /*
- * The region's jump targets, for its indirect jumps (JALR jumps here with the
+ * Tarjan's strongly connected components of the blocks in `in`, edges into
+ * `cut` left out. Emitted in reverse topological order: a component after
+ * every component it has an edge to.
+ */
+struct tarjan {
+	const struct layout *lay;
+	const uint64_t *in;
+	int cut, n;
+	int index[JIT_MAX_BLOCKS], low[JIT_MAX_BLOCKS], stack[JIT_MAX_BLOCKS];
+	uint8_t on[JIT_MAX_BLOCKS];
+	int next, sp;
+	int comp[JIT_MAX_BLOCKS];	/* the component of each block, numbered in emission order */
+	int ncomp;
+};
+
+static int in_set(const uint64_t *set, int b)
+{
+	return (set[b / 64] >> (b % 64)) & 1;
+}
+
+static void tarjan_visit(struct tarjan *t, int v)
+{
+	t->index[v] = t->low[v] = t->next++;
+	t->stack[t->sp++] = v;
+	t->on[v] = 1;
+	for (int w = 0; w < t->n; w++) {
+		if (!in_set(t->lay->succ[v], w) || !in_set(t->in, w) || w == t->cut)
+			continue;
+		if (t->index[w] < 0) {
+			tarjan_visit(t, w);
+			if (t->low[w] < t->low[v])
+				t->low[v] = t->low[w];
+		} else if (t->on[w] && t->index[w] < t->low[v]) {
+			t->low[v] = t->index[w];
+		}
+	}
+	if (t->low[v] == t->index[v]) {
+		int w;
+
+		do {
+			w = t->stack[--t->sp];
+			t->on[w] = 0;
+			t->comp[w] = t->ncomp;
+		} while (w != v);
+		t->ncomp++;
+	}
+}
+
+/*
+ * Lay out the blocks in `in` (edges into `cut` left out) as the items of
+ * scope `s`: in topological order, each component of more than one block
+ * (or one that jumps to itself) as a nested scope. Returns -1 if the tables
+ * are full.
+ */
+static int layout_scope(struct layout *lay, int n, const uint64_t *in, int cut, int s)
+{
+	struct tarjan *t = malloc(sizeof(*t));
+	int order[JIT_MAX_BLOCKS], norder = 0, first_item = lay->nitems, ret = 0;
+
+	if (!t)
+		return -1;
+	t->lay = lay;
+	t->in = in;
+	t->cut = cut;
+	t->n = n;
+	t->next = t->sp = t->ncomp = 0;
+	for (int v = 0; v < n; v++) {
+		t->index[v] = -1;
+		t->on[v] = 0;
+	}
+	for (int v = 0; v < n; v++)
+		if (in_set(in, v) && t->index[v] < 0)
+			tarjan_visit(t, v);
+
+	/* Components in topological order (Tarjan's is the reverse), the header of this scope first of all. */
+	for (int c = t->ncomp - 1; c >= 0; c--)
+		order[norder++] = c;
+	lay->scopes[s].first = first_item;
+	lay->scopes[s].nitems = 0;
+	lay->scopes[s].lookup = -1;
+	/* Room: an item for each component, which is at most one per block. */
+	if (lay->nitems + norder > (int)(sizeof(lay->items) / sizeof(lay->items[0]))) {
+		free(t);
+		return -1;
+	}
+	lay->nitems += norder;
+	{
+		int at = first_item;
+
+		/* The header is a source now (its edges in are cut), so it may go first. */
+		if (cut >= 0) {
+			for (int i = 0; i < norder; i++) {
+				if (order[i] == t->comp[cut]) {
+					int c = order[i];
+
+					memmove(order + 1, order, (size_t)i * sizeof(order[0]));
+					order[0] = c;
+					break;
+				}
+			}
+		}
+		for (int i = 0; i < norder && ret == 0; i++) {
+			int c = order[i], member = -1, count = 0, self = 0;
+
+			for (int v = 0; v < n; v++) {
+				if (in_set(in, v) && t->comp[v] == c) {
+					member = v;
+					count++;
+					self |= in_set(lay->succ[v], v) && v != cut;
+				}
+			}
+			if (count == 1 && !self) {
+				lay->items[at] = member;
+				lay->block_scope[member] = s;
+				lay->block_item[member] = at - first_item;
+				at++;
+				continue;
+			}
+			/* A loop: its header is the block most entered from outside the component. */
+			{
+				uint64_t set[(JIT_MAX_BLOCKS + 63) / 64] = { 0 };
+				int header = -1, best = -1, ns;
+
+				for (int v = 0; v < n; v++) {
+					int entries = 0;
+
+					if (!in_set(in, v) || t->comp[v] != c)
+						continue;
+					set[v / 64] |= 1ULL << (v % 64);
+					for (int u = 0; u < n; u++)
+						if (in_set(lay->succ[u], v) && (!in_set(in, u) || t->comp[u] != c || u == cut))
+							entries++;
+					if (entries > best) {
+						best = entries;
+						header = v;
+					}
+				}
+				if (lay->nscopes == SCOPE_MAX) {
+					ret = -1;
+					break;
+				}
+				ns = lay->nscopes++;
+				lay->scopes[ns].parent = s;
+				lay->scopes[ns].parent_item = at - first_item;
+				lay->scopes[ns].header = header;
+				lay->items[at] = ITEM_SCOPE(ns);
+				at++;
+				ret = layout_scope(lay, n, set, header, ns);
+			}
+		}
+		lay->scopes[s].nitems = at - first_item;
+	}
+	free(t);
+	return ret;
+}
+
+/*
+ * Which scopes get a lookup (gen_lookup()), placed after the header: the top,
+ * if the region has an indirect jump at all (every jump can fall back to
+ * it), and a loop of its own if it has a jump with many targets (an
+ * interpreter's dispatch), so that those go on inside the loop without
+ * passing through the top. A jump with few targets compares with each of
+ * them where it is (gen_insn(), JALR) and needs no lookup of its own; one
+ * lookup is a few KiB of code, so they are not handed out freely.
+ */
+static void layout_lookups(struct rv_cpu *cpu, struct layout *lay, const struct jit_region *r)
+{
+	for (int s = 0; s < lay->nscopes; s++) {
+		struct scope *sc = &lay->scopes[s];
+		int wanted = 0, at;
+
+		for (int i = 0; i < sc->nitems && !wanted; i++) {
+			int v = lay->items[sc->first + i];
+			const struct jit_insn *last;
+
+			if (v < 0)
+				continue;
+			last = &r->insns[r->blocks[v].first + r->blocks[v].count - 1];
+			if (OPCODE(last->raw) != 0x67)
+				continue;
+			if (s == 0) {
+				wanted = 1;
+			} else {
+				uint64_t targets[JALR_TARGETS];
+
+				wanted = jalr_targets(cpu->jit, last->pc, targets) > JALR_INLINE;
+			}
+		}
+		if (s == 0 && !wanted) {
+			/* Any indirect jump anywhere: the top has the lookup they all can fall back to. */
+			for (int k = 0; k < r->nblocks && !wanted; k++)
+				wanted = OPCODE(r->insns[r->blocks[k].first + r->blocks[k].count - 1].raw) == 0x67;
+		}
+		if (!wanted)
+			continue;
+		/* After the header (item 0) of a loop; first of all at the top. Everything after (other scopes' items too: one array) moves up one. */
+		at = sc->header >= 0 ? 1 : 0;
+		memmove(&lay->items[sc->first + at + 1], &lay->items[sc->first + at], (size_t)(lay->nitems - (sc->first + at)) * sizeof(lay->items[0]));
+		lay->items[sc->first + at] = ITEM_LOOKUP;
+		sc->nitems++;
+		sc->lookup = at;
+		for (int i = at + 1; i < sc->nitems; i++) {
+			int v = lay->items[sc->first + i];
+
+			if (v >= 0)
+				lay->block_item[v] = i;
+			else if (v <= -2)
+				lay->scopes[SCOPE_OF_ITEM(v)].parent_item = i;
+		}
+		/* Scopes after this one have their items further along as well. */
+		for (int o = 0; o < lay->nscopes; o++)
+			if (lay->scopes[o].first > sc->first)
+				lay->scopes[o].first++;
+		lay->nitems++;
+	}
+}
+
+/* The layout of region r (see struct layout). 0, or -1 if it does not fit, in which case everything is one flat scope. */
+static int layout_region(struct rv_cpu *cpu, const struct jit_region *r, struct layout *lay)
+{
+	uint64_t all[(JIT_MAX_BLOCKS + 63) / 64] = { 0 };
+	int n = r->nblocks;
+
+	layout_edges(cpu, r, lay);
+	for (int v = 0; v < n; v++)
+		all[v / 64] |= 1ULL << (v % 64);
+	lay->nscopes = 1;
+	lay->nitems = 0;
+	lay->scopes[0].parent = -1;
+	lay->scopes[0].parent_item = -1;
+	lay->scopes[0].header = -1;
+	if ((cpu->jit->off & OFF_STRUCT) || layout_scope(lay, n, all, -1, 0) < 0 ||
+	    lay->nitems + lay->nscopes > (int)(sizeof(lay->items) / sizeof(lay->items[0]))) {
+		/* Flat: every block an item of the top scope, every jump through its dispatcher. */
+		lay->nscopes = 1;
+		lay->scopes[0].first = 0;
+		lay->scopes[0].nitems = n;
+		lay->scopes[0].lookup = -1;
+		lay->nitems = n;
+		for (int v = 0; v < n; v++) {
+			lay->items[v] = v;
+			lay->block_scope[v] = 0;
+			lay->block_item[v] = v;
+		}
+		memset(lay->succ, 0, sizeof(lay->succ));
+	}
+	layout_lookups(cpu, lay, r);
+	return 0;
+}
+
+/*
+ * Number the blocks in the order of the layout (a scope's items in order, a
+ * nested scope's blocks where its item is): the blocks array is permuted so
+ * that a block's index is its number, and every scope's blocks are then
+ * lo..hi, which is what its dispatcher's br_table spans. Done once, before
+ * anything else (the map, the table of targets, the copy kept) uses the
+ * indices.
+ */
+static void renumber_visit(struct layout *lay, int s, int *number, int *next)
+{
+	struct scope *sc = &lay->scopes[s];
+
+	sc->lo = *next;
+	for (int k = 0; k < sc->nitems; k++) {
+		int v = lay->items[sc->first + k];
+
+		if (v >= 0)
+			number[v] = (*next)++;
+		else if (v <= -2)
+			renumber_visit(lay, SCOPE_OF_ITEM(v), number, next);
+	}
+	sc->hi = *next - 1;
+}
+
+static void layout_renumber(struct jit_region *r, struct layout *lay)
+{
+	static struct jit_block blocks[JIT_MAX_BLOCKS];	/* (under the scratch lock, like r itself) */
+	int number[JIT_MAX_BLOCKS], scope_of[JIT_MAX_BLOCKS], item_of[JIT_MAX_BLOCKS], next = 0;
+
+	renumber_visit(lay, 0, number, &next);
+	for (int k = 0; k < r->nblocks; k++) {
+		blocks[number[k]] = r->blocks[k];
+		scope_of[number[k]] = lay->block_scope[k];
+		item_of[number[k]] = lay->block_item[k];
+	}
+	memcpy(r->blocks, blocks, (size_t)r->nblocks * sizeof(blocks[0]));
+	memcpy(lay->block_scope, scope_of, (size_t)r->nblocks * sizeof(scope_of[0]));
+	memcpy(lay->block_item, item_of, (size_t)r->nblocks * sizeof(item_of[0]));
+	for (int i = 0; i < lay->nitems; i++)
+		if (lay->items[i] >= 0)
+			lay->items[i] = number[lay->items[i]];
+	for (int sc = 0; sc < lay->nscopes; sc++)
+		if (lay->scopes[sc].header >= 0)
+			lay->scopes[sc].header = number[lay->scopes[sc].header];
+}
+
+/* -------------------------------------------------------------- the body */
+
+/*
+ * The lookup of a scope, for its indirect jumps (JALR comes here with the
  * target in $pc): the block whose address it is, found by hashing the address
  * (as target_slot() does) into a br_table of the region's table of targets
  * (target_table()), each entry a comparison; the region goes on there, or it
@@ -3080,9 +4261,7 @@ static void gen_lookup(struct gen *g)
 			w_op(b, W_I64_EQ);
 			w_byte(b, W_IF);
 			w_byte(b, W_TYPE_VOID);
-			w_i32(b, (int32_t)e->index);
-			w_local(b, W_LOCAL_SET, L_NEXT);
-			w_br(b, W_BR, loop_depth(g, 1 + inside + 1));
+			branch_to_block(g, (int)e->index, 1 + inside + 1);
 			w_op(b, W_END);
 		}
 		if (inside)
@@ -3092,20 +4271,96 @@ static void gen_lookup(struct gen *g)
 	leave_for_target(g, 0);
 }
 
-static void gen_body(struct gen *g)
+/* Whether gen_insn() checks a memory access for the instruction (calls check_access_as()). */
+static int insn_accesses(uint32_t i)
 {
-	const struct jit_region *r = g->r;
+	if (rv_zb_kind(i))
+		return 0;
+	switch (OPCODE(i)) {
+	case 0x03: case 0x23: case 0x2f: case 0x07: case 0x27:
+		return 1;
+	}
+	return 0;
+}
+
+/* An integer register the instruction may write (0: none), for gen_groups(): erring towards yes costs only a group. */
+static uint32_t insn_writes(uint32_t i)
+{
+	switch (OPCODE(i)) {
+	case 0x23: case 0x27: case 0x63: case 0x0f: case 0x07:
+	case 0x43: case 0x47: case 0x4b: case 0x4f:
+		return 0;
+	}
+	return RD(i);
+}
+
+/*
+ * OFF_HOIST: the groups of block k's accesses (see check_access_as()). Loads
+ * and stores (not atomics) by the same base register, while it is not
+ * written (other than by a small step: addi r, r, imm), in at most
+ * CACHE_SLOTS groups at a time; a group of one is none. Which accesses are in
+ * a group only decides where the test is cheap: each access of a group tests
+ * that it is in the group's page, so none is ever wrong.
+ */
+static void gen_groups(struct gen *g, const struct jit_block *blk)
+{
+	int reg[CACHE_SLOTS], first[CACHE_SLOTS], members[CACHE_SLOTS];
+	uint32_t next = 0;
+
+	for (int s = 0; s < CACHE_SLOTS; s++)
+		reg[s] = -1;
+	for (uint32_t j = 0; j < blk->count; j++) {
+		uint32_t i = g->r->insns[blk->first + j].raw, w;
+		int s;
+
+		g->role[j] = ACC_PLAIN;
+		if (insn_accesses(i) && OPCODE(i) != 0x2f) {
+			unsigned prot = OPCODE(i) == 0x23 || OPCODE(i) == 0x27 ? RV_PROT_WRITE : RV_PROT_READ;
+
+			for (s = 0; s < CACHE_SLOTS && reg[s] != (int)RS1(i); s++)
+				;
+			if (s < CACHE_SLOTS) {
+				g->role[j] = ACC_MEMBER;
+				g->slot[j] = (uint8_t)s;
+				g->uprot[first[s]] |= (uint8_t)prot;
+				members[s]++;
+			} else {
+				for (s = 0; s < CACHE_SLOTS && reg[s] >= 0; s++)
+					;
+				if (s == CACHE_SLOTS)
+					s = (int)(next++ % CACHE_SLOTS);
+				if (reg[s] >= 0 && !members[s])
+					g->role[first[s]] = ACC_PLAIN;
+				reg[s] = (int)RS1(i);
+				first[s] = (int)j;
+				members[s] = 0;
+				g->role[j] = ACC_FIRST;
+				g->slot[j] = (uint8_t)s;
+				g->uprot[j] = (uint8_t)prot;
+			}
+		}
+		w = insn_writes(i);
+		/* addi r, r, small (a stack frame, a pointer stepping through an array): r most likely stays in the page. */
+		if (OPCODE(i) == 0x13 && F3(i) == 0 && RS1(i) == w && IMM_I(i) > -2048 && IMM_I(i) < 2048)
+			w = 0;
+		for (s = 0; w && s < CACHE_SLOTS; s++) {
+			if (reg[s] == (int)w) {
+				if (!members[s])
+					g->role[first[s]] = ACC_PLAIN;
+				reg[s] = -1;
+			}
+		}
+	}
+	for (int s = 0; s < CACHE_SLOTS; s++)
+		if (reg[s] >= 0 && !members[s])
+			g->role[first[s]] = ACC_PLAIN;
+}
+
+/* Leave if a signal is pending or the budget is spent. `pc`: what $pc is to be then, or 0 if it is right already. */
+static void gen_check(struct gen *g, uint64_t pc, uint32_t extra)
+{
 	struct wbuf *b = g->b;
-	int lookup = g->cpu->jit->targets_now != NULL;
 
-	g->nb = r->nblocks + lookup;
-
-	w_byte(b, W_BLOCK);		/* leaving the region branches to the end of this */
-	w_byte(b, W_TYPE_VOID);
-	w_byte(b, W_LOOP);
-	w_byte(b, W_TYPE_VOID);
-
-	/* Stop for a pending signal or when the budget is spent; $pc says where we are. */
 	w_local(b, W_LOCAL_GET, L_BUDGET);
 	w_i32(b, 0);
 	w_op(b, W_I32_LT_S);
@@ -3114,42 +4369,132 @@ static void gen_body(struct gen *g)
 	w_i64(b, 0);
 	w_op(b, W_I64_NE);
 	w_op(b, W_I32_OR);
-	w_br(b, W_BR_IF, 1);
+	hint(g, HS_POLL, 0);
+	if (!pc) {
+		w_br(b, W_BR_IF, exit_depth(g, extra));
+		return;
+	}
+	w_byte(b, W_IF);
+	w_byte(b, W_TYPE_VOID);
+	w_i64(b, pc);
+	w_local(b, W_LOCAL_SET, L_PC);
+	w_br(b, W_BR, exit_depth(g, extra + 1));
+	w_op(b, W_END);
+}
 
-	for (int k = 0; k < g->nb; k++) {
+/* br_table on $next: to the item of scope s that has that block (or lookup). */
+static void gen_dispatch(struct gen *g, int s, uint32_t extra)
+{
+	const struct layout *lay = g->lay;
+	const struct scope *sc = &lay->scopes[s];
+	struct wbuf *b = g->b;
+	/* Out of the range: $next names this scope's lookup (nblocks + scope: see JALR in gen_insn()), or nothing is asked for. */
+	int fallback = sc->lookup >= 0 ? sc->lookup : 0;
+
+	w_local(b, W_LOCAL_GET, L_NEXT);
+	if (sc->lo) {
+		w_i32(b, sc->lo);
+		w_op(b, W_I32_SUB);
+	}
+	w_byte(b, W_BR_TABLE);
+	w_uleb(b, (uint64_t)(sc->hi - sc->lo + 1));
+	for (int v = sc->lo; v <= sc->hi; v++) {
+		int item = item_at(lay, s, lay->block_scope[v], lay->block_item[v]);
+
+		w_uleb(b, (uint64_t)(item < 0 ? fallback : item) + extra);
+	}
+	w_uleb(b, (uint64_t)fallback + extra);
+}
+
+static void gen_scope(struct gen *g, int s);
+
+static void gen_block(struct gen *g, int k)
+{
+	const struct jit_region *r = g->r;
+	const struct jit_block *blk = &r->blocks[k];
+	const struct jit_insn *last = &r->insns[blk->first + blk->count - 1];
+	struct wbuf *b = g->b;
+
+	/*
+	 * The self-check (checked_call()) runs regions one block at a time, by
+	 * giving them no budget: so with it every block looks at the budget,
+	 * where otherwise only the loops' tops do.
+	 */
+	if (g->cpu->jit->check)
+		gen_check(g, blk->pc, 0);
+	w_local(b, W_LOCAL_GET, L_BUDGET);
+	w_i32(b, (int32_t)blk->count);
+	w_op(b, W_I32_SUB);
+	w_local(b, W_LOCAL_SET, L_BUDGET);
+	if (g->hoist)
+		gen_groups(g, blk);
+	for (uint32_t j = 0; j < blk->count; j++) {
+		g->j = j;
+		gen_insn(g, &r->insns[blk->first + j], blk->count - j);
+	}
+	if (classify(last->raw) == K_PLAIN)
+		transition(g, blk->next_pc, 0);
+}
+
+/* The items of scope s inside its loop (the caller opened it): the ladder, the dispatcher, the items. */
+static void gen_scope(struct gen *g, int s)
+{
+	const struct layout *lay = g->lay;
+	const struct scope *sc = &lay->scopes[s];
+	struct wbuf *b = g->b;
+
+	for (int k = 0; k < sc->nitems; k++) {
 		w_byte(b, W_BLOCK);
 		w_byte(b, W_TYPE_VOID);
 	}
-	w_local(b, W_LOCAL_GET, L_NEXT);
-	w_byte(b, W_BR_TABLE);
-	w_uleb(b, (uint64_t)g->nb);
-	for (int k = 0; k < g->nb; k++)
-		w_uleb(b, (uint64_t)k);
-	w_uleb(b, 0);	/* default: never taken, $next is always a block index */
-
-	for (int k = 0; k < r->nblocks; k++) {
-		const struct jit_block *blk = &r->blocks[k];
-		const struct jit_insn *last = &r->insns[blk->first + blk->count - 1];
+	g->scope = s;
+	g->item = -1;
+	if (sc->header < 0) {
+		/* The top: the check, then wherever $next says. */
+		gen_check(g, 0, 0);
+		gen_dispatch(g, s, 0);
+	} else {
+		/* A loop: entered at its header (a back edge, mostly), or elsewhere through $next. */
+		w_local(b, W_LOCAL_GET, L_NEXT);
+		w_i32(b, sc->header);
+		w_op(b, W_I32_NE);
+		w_byte(b, W_IF);
+		w_byte(b, W_TYPE_VOID);
+		gen_dispatch(g, s, 1);
+		w_op(b, W_END);
+		gen_check(g, g->r->blocks[sc->header].pc, 0);
+	}
+	for (int k = 0; k < sc->nitems; k++) {
+		int v = lay->items[sc->first + k];
 
 		w_op(b, W_END);
-		g->block = k;
-
-		w_local(b, W_LOCAL_GET, L_BUDGET);
-		w_i32(b, (int32_t)blk->count);
-		w_op(b, W_I32_SUB);
-		w_local(b, W_LOCAL_SET, L_BUDGET);
-
-		for (uint32_t j = 0; j < blk->count; j++)
-			gen_insn(g, &r->insns[blk->first + j], blk->count - j);
-		if (classify(last->raw) == K_PLAIN)
-			transition(g, blk->next_pc, 0);
+		g->scope = s;
+		g->item = k;
+		if (v >= 0) {
+			gen_block(g, v);
+		} else if (v == ITEM_LOOKUP) {
+			gen_lookup(g);
+		} else {
+			w_byte(b, W_LOOP);
+			w_byte(b, W_TYPE_VOID);
+			gen_scope(g, SCOPE_OF_ITEM(v));
+			w_op(b, W_END);
+			g->scope = s;
+			g->item = k;
+		}
 	}
-	if (lookup) {
-		w_op(b, W_END);
-		g->block = r->nblocks;
-		gen_lookup(g);
-	}
+}
 
+/* The body of the region function, without the register loads and stores around it. */
+static void gen_body(struct gen *g)
+{
+	struct wbuf *b = g->b;
+
+	w_byte(b, W_BLOCK);		/* leaving the region branches to the end of this */
+	w_byte(b, W_TYPE_VOID);
+	w_byte(b, W_LOOP);
+	w_byte(b, W_TYPE_VOID);
+	gen_scope(g, 0);
 	w_op(b, W_END);	/* loop */
 	w_op(b, W_END);	/* block */
 }
@@ -3179,7 +4524,14 @@ static void gen_reserve_fn(struct rv_cpu *cpu, struct wbuf *b)
 	w_uleb(b, 1);	/* one group of locals: two i64 */
 	w_uleb(b, 2);
 	w_byte(b, W_TYPE_I64);
-	/* An address in the table: 0 (check_access_as() calls this for every access that fails). */
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, map));
+	w_local(b, W_LOCAL_SET, T_MAP);
+	/*
+	 * An address in the table: its own entry, looked at as below (an access
+	 * of a group in another page than the group's, see check_access_as(); for
+	 * any other access it failed the same test already, and fails it again).
+	 */
 	w_local(b, W_LOCAL_GET, A_ADDR);
 	w_i64(b, RV_PAGE_SHIFT);
 	w_op(b, W_I64_SHR_U);
@@ -3188,12 +4540,11 @@ static void gen_reserve_fn(struct rv_cpu *cpu, struct wbuf *b)
 	w_op(b, W_I64_LT_U);
 	w_byte(b, W_IF);
 	w_byte(b, W_TYPE_VOID);
-	w_i64(b, 0);
-	w_op(b, W_RETURN);
-	w_op(b, W_END);
-	w_local(b, W_LOCAL_GET, A_CPU);
-	w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, map));
-	w_local(b, W_LOCAL_SET, T_MAP);
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_i64(b, RV_PAGE_SHIFT);
+	w_op(b, W_I64_SHR_U);
+	w_local(b, W_LOCAL_SET, T_AT);
+	w_byte(b, W_ELSE);
 	/* T_AT = the slot's offset in reserve_seen */
 	w_local(b, W_LOCAL_GET, A_ADDR);
 	w_i64(b, RV_PAGE_SHIFT);
@@ -3225,6 +4576,7 @@ static void gen_reserve_fn(struct rv_cpu *cpu, struct wbuf *b)
 	w_op(b, W_I32_AND);
 	w_op(b, W_SELECT);
 	w_local(b, W_LOCAL_SET, T_AT);
+	w_op(b, W_END);
 	/* (map[T_AT] & prot) == prot */
 	w_local(b, W_LOCAL_GET, T_AT);
 	w_i64(b, 3);
@@ -3291,11 +4643,141 @@ static void gen_reserve_fn(struct rv_cpu *cpu, struct wbuf *b)
 	w_op(b, W_I64_ADD);
 	w_op(b, W_RETURN);
 	w_op(b, W_END);
+	/* Not allowed in the table: the interpreter's (it raises the fault, or marks the code changed, or ...). */
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_i64(b, RV_PAGE_SHIFT);
+	w_op(b, W_I64_SHR_U);
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, npages));
+	w_op(b, W_I64_LT_U);
+	w_byte(b, W_IF);
+	w_byte(b, W_TYPE_VOID);
+	w_i64(b, 0);
+	w_op(b, W_RETURN);
+	w_op(b, W_END);
 	w_local(b, W_LOCAL_GET, A_CPU);
 	w_local(b, W_LOCAL_GET, A_ADDR);
 	w_local(b, W_LOCAL_GET, A_HOW);
 	w_byte(b, W_CALL);
 	w_uleb(b, H_RESERVE);
+	w_op(b, W_END);
+}
+
+/*
+ * The module's function for a memory access that missed its translation
+ * cache (check_access()): (cpu, addr, size | prot << 8) -> the host address,
+ * or 0 if the access is not to be made as it stands (the region leaves it to
+ * the interpreter). The check is rv_ptr()'s: the page's entry allows prot
+ * and the access is within the page; else the page may be in a reservation
+ * (F_RESERVE). It leaves in cpu->xlat what the caller puts into the
+ * register's cache: the page, for reading and for writing as the entry
+ * allows (CACHE_NONE where it does not), and the distance to the host
+ * address. Everything is found through its first argument, so the function
+ * is the same in every thread and process.
+ */
+static void gen_xlat_fn(struct wbuf *b)
+{
+	enum { A_CPU, A_ADDR, A_HOW, T_E, T_PAGE };
+
+	w_uleb(b, 1);	/* one group of locals: two i64 */
+	w_uleb(b, 2);
+	w_byte(b, W_TYPE_I64);
+	/* T_PAGE = min(addr >> 12, npages): the entry at npages allows nothing */
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_i64(b, RV_PAGE_SHIFT);
+	w_op(b, W_I64_SHR_U);
+	w_local(b, W_LOCAL_TEE, T_PAGE);
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, npages));
+	w_local(b, W_LOCAL_GET, T_PAGE);
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, npages));
+	w_op(b, W_I64_LT_U);
+	w_op(b, W_SELECT);
+	w_local(b, W_LOCAL_SET, T_PAGE);
+	/* T_E = map[T_PAGE] */
+	w_local(b, W_LOCAL_GET, T_PAGE);
+	w_i64(b, 3);
+	w_op(b, W_I64_SHL);
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_mem(b, W_I64_LOAD, 3, offsetof(struct rv_cpu, map));
+	w_op(b, W_I64_ADD);
+	w_mem(b, W_I64_LOAD, 3, 0);
+	w_local(b, W_LOCAL_SET, T_E);
+	/* (e & prot) != prot || (addr & 4095) + size > 4096: not as it stands */
+	w_local(b, W_LOCAL_GET, T_E);
+	w_local(b, W_LOCAL_GET, A_HOW);
+	w_i64(b, 8);
+	w_op(b, W_I64_SHR_U);
+	w_i64(b, 0xff);
+	w_op(b, W_I64_AND);
+	w_op(b, W_I64_AND);
+	w_local(b, W_LOCAL_GET, A_HOW);
+	w_i64(b, 8);
+	w_op(b, W_I64_SHR_U);
+	w_i64(b, 0xff);
+	w_op(b, W_I64_AND);
+	w_op(b, W_I64_NE);
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_i64(b, RV_PAGE_SIZE - 1);
+	w_op(b, W_I64_AND);
+	w_local(b, W_LOCAL_GET, A_HOW);
+	w_i64(b, 0xff);
+	w_op(b, W_I64_AND);
+	w_op(b, W_I64_ADD);
+	w_i64(b, RV_PAGE_SIZE);
+	w_op(b, W_I64_GT_U);
+	w_op(b, W_I32_OR);
+	w_byte(b, W_IF);
+	w_byte(b, W_TYPE_VOID);
+	/* A reservation? The host address, or 0; as an entry: the distance, allowing what was asked. */
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_local(b, W_LOCAL_GET, A_HOW);
+	w_byte(b, W_CALL);
+	w_uleb(b, F_RESERVE);
+	w_local(b, W_LOCAL_TEE, T_E);
+	w_op(b, W_I64_EQZ);
+	w_byte(b, W_IF);
+	w_byte(b, W_TYPE_VOID);
+	w_i64(b, 0);
+	w_op(b, W_RETURN);
+	w_op(b, W_END);
+	w_local(b, W_LOCAL_GET, T_E);
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_op(b, W_I64_SUB);
+	w_local(b, W_LOCAL_GET, A_HOW);
+	w_i64(b, 8);
+	w_op(b, W_I64_SHR_U);
+	w_i64(b, RV_PROT_MASK);
+	w_op(b, W_I64_AND);
+	w_op(b, W_I64_OR);
+	w_local(b, W_LOCAL_SET, T_E);
+	w_op(b, W_END);
+	/* cpu->xlat: the page if readable, the page if writable, the distance */
+	for (int w = 0; w < 2; w++) {
+		w_local(b, W_LOCAL_GET, A_CPU);
+		w_local(b, W_LOCAL_GET, A_ADDR);
+		w_i64(b, ~(uint64_t)(RV_PAGE_SIZE - 1));
+		w_op(b, W_I64_AND);
+		w_i64(b, CACHE_NONE);
+		w_local(b, W_LOCAL_GET, T_E);
+		w_op(b, W_I32_WRAP_I64);
+		w_i32(b, w ? RV_PROT_WRITE : RV_PROT_READ);
+		w_op(b, W_I32_AND);
+		w_op(b, W_SELECT);
+		w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, xlat) + 8 * w);
+	}
+	w_local(b, W_LOCAL_GET, A_CPU);
+	w_local(b, W_LOCAL_GET, T_E);
+	w_i64(b, ~(uint64_t)RV_PAGE_FLAGS);
+	w_op(b, W_I64_AND);
+	w_local(b, W_LOCAL_TEE, T_E);
+	w_mem(b, W_I64_STORE, 3, offsetof(struct rv_cpu, xlat) + 16);
+	/* The host address. */
+	w_local(b, W_LOCAL_GET, T_E);
+	w_local(b, W_LOCAL_GET, A_ADDR);
+	w_op(b, W_I64_ADD);
 	w_op(b, W_END);
 }
 
@@ -3358,6 +4840,7 @@ static void gen_module_head(struct wbuf *m)
 #define OLD_UNSHARED	1
 #define OLD_GROW_FLUSH	2
 #define OLD_PROBES2	4
+#define OLD_BATCH_FIXED	8	/* a batch ends after JIT_BATCH_MIN + JIT_BATCH_MASK regions, whatever they are */
 
 static void gen_unshared(struct wbuf *m)
 {
@@ -3381,13 +4864,13 @@ static void gen_unshared(struct wbuf *m)
  */
 static void gen_names(struct rv_cpu *cpu, struct wbuf *m, const uint64_t *pcs, const uint32_t *index, uint32_t k)
 {
-	uint8_t sub_data[96 * (JIT_BATCH + 2)], tmp_data[sizeof(sub_data) + 16];
+	uint8_t sub_data[96 * (JIT_BATCH_MAX + 2)], tmp_data[sizeof(sub_data) + 16];
 	struct wbuf sub = { sub_data, 0, sizeof(sub_data), 0 }, tmp = { tmp_data, 0, sizeof(tmp_data), 0 };
 	uint32_t reserve = F_RESERVE;
 	int done = 0;
 
-	/* Names in the order of the functions' indices: the reservation function is N_HELPERS + 1. */
-	w_uleb(&sub, k + 1);
+	/* Names in the order of the functions' indices: the reservation function is N_HELPERS + 1, xlat after it. */
+	w_uleb(&sub, k + N_MODULE_FNS);
 	for (uint32_t j = 0; j < k; j++) {
 		uint64_t dev, ino, offset;
 		int fixed;
@@ -3396,6 +4879,8 @@ static void gen_names(struct rv_cpu *cpu, struct wbuf *m, const uint64_t *pcs, c
 		if (!done && index[j] > reserve) {
 			w_uleb(&sub, reserve);
 			w_name(&sub, "reserve");
+			w_uleb(&sub, F_XLAT);
+			w_name(&sub, "xlat");
 			done = 1;
 		}
 		if (rv_mm_file_at(cpu, pcs[j], &dev, &ino, &offset, &fixed))
@@ -3409,6 +4894,8 @@ static void gen_names(struct rv_cpu *cpu, struct wbuf *m, const uint64_t *pcs, c
 	if (!done) {
 		w_uleb(&sub, reserve);
 		w_name(&sub, "reserve");
+		w_uleb(&sub, F_XLAT);
+		w_name(&sub, "xlat");
 	}
 	w_name(&tmp, "name");
 	w_byte(&tmp, 1);		/* function names */
@@ -3419,25 +4906,95 @@ static void gen_names(struct rv_cpu *cpu, struct wbuf *m, const uint64_t *pcs, c
 	w_section(m, 0, &tmp);
 }
 
-static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
+/*
+ * OFF_HINTS: the branch hints section (the branch hinting proposal's
+ * "metadata.code.branch_hint"), which has to come before the code section:
+ * for each function that has hints, in the order of their indices, its index
+ * and its hints, each the offset of an `if` or `br_if` from the start of the
+ * function's code (its locals' declaration, which is where gen_module()'s
+ * offsets count from), the length 1 and whether the branch is likely.
+ * Engines that do not know the section skip it.
+ */
+static void gen_hints(struct wbuf *m, uint32_t nfn, const uint32_t *index, uint32_t *const *hints, const uint32_t *nhints)
 {
-	struct gen g = { .cpu = cpu, .b = &jit->body, .r = jit->region };
-	struct wbuf *f = &jit->func, *m = &jit->module;
-	static uint8_t tmp_data[1024];	/* the small sections, one at a time */
-	struct wbuf tmp = { tmp_data, 0, sizeof(tmp_data), 0 };
+	size_t cap = 64;
+	uint32_t with = 0;
+	struct wbuf sec;
 
+	for (uint32_t j = 0; j < nfn; j++) {
+		cap += 16 + 8 * (size_t)nhints[j];
+		with += nhints[j] != 0;
+	}
+	if (!with)
+		return;
+	sec = (struct wbuf){ malloc(cap), 0, cap, 0 };
+	if (!sec.data)
+		return;		/* none, then */
+	w_name(&sec, "metadata.code.branch_hint");
+	w_uleb(&sec, with);
+	for (uint32_t j = 0; j < nfn; j++) {
+		if (!nhints[j])
+			continue;
+		w_uleb(&sec, index[j]);
+		w_uleb(&sec, nhints[j]);
+		for (uint32_t h = 0; h < nhints[j]; h++) {
+			w_uleb(&sec, hints[j][h] >> 1);
+			w_uleb(&sec, 1);
+			w_byte(&sec, hints[j][h] & 1);
+		}
+	}
+	if (!sec.overflow)
+		w_section(m, 0, &sec);
+	free(sec.data);
+}
+
+/* The region's function, in jit->func (gen_body() into jit->body first). jit->module.overflow is set if either did not fit. */
+static void gen_func(struct rv_cpu *cpu, struct rv_jit *jit)
+{
+	struct gen g = { .cpu = cpu, .b = &jit->body, .r = jit->region, .lay = jit->layout };
+	struct wbuf *f = &jit->func, *m = &jit->module;
+
+	uint32_t n_access = 0;		/* the fourth group of locals (L_HOW on, or the translation cache's) */
+	uint32_t n_fl;			/* the fifth: fcsr and the f registers (OFF_FPLOC) */
+	int pcache_on;
+	size_t at_body;
+
+	pcache_on = jit->pcache_slots && !(jit->off & OFF_PCACHE) && !jit->flatmem_on && !jit->tag;
+	/* The translation cache and the per-block groups both keep page checks in locals; one at a time (the cache's locals take the groups' places). */
+	g.hoist = !(jit->off & OFF_HOIST) && !pcache_on;
+	g.hints = !(jit->off & OFF_HINTS);
+	jit->nhints = 0;
+	m->overflow = 0;
 	jit->body.len = jit->body.overflow = 0;
+	cache_slots(&g);
+	if (pcache_on)
+		n_access = 3 * PCACHE_SLOTS;
+	else if (g.hoist)
+		n_access = L_CDELTA(CACHE_SLOTS - 1) + 1 - L_HOW;
+	/* The floating-point group of locals follows the fourth: fcsr, then the f registers as they are used. */
+	g.floc = !(jit->off & OFF_FPLOC) && !(jit->off & OFF_FP);
+	g.fbase = L_HOW + n_access;
+	memset(g.fmap, -1, sizeof(g.fmap));
 	gen_body(&g);
+	n_fl = g.floc && (g.nf || g.fc_used) ? 1 + (uint32_t)g.nf : 0;
 
 	/* The function: locals, register loads, the body, register stores. */
 	f->len = f->overflow = 0;
-	w_uleb(f, 3);
+	w_uleb(f, 3 + (n_access ? 1 : 0) + (n_fl ? 1 : 0));
 	w_uleb(f, N_I64_LOCALS);
 	w_byte(f, W_TYPE_I64);
 	w_uleb(f, N_I32_LOCALS);
 	w_byte(f, W_TYPE_I32);
 	w_uleb(f, N_I64_MORE);
 	w_byte(f, W_TYPE_I64);
+	if (n_access) {
+		w_uleb(f, n_access);
+		w_byte(f, W_TYPE_I64);
+	}
+	if (n_fl) {
+		w_uleb(f, n_fl);
+		w_byte(f, W_TYPE_I64);
+	}
 
 	/*
 	 * The page table and its size are the process's, read from *cpu here
@@ -3462,9 +5019,34 @@ static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
 		w_mem(f, W_I64_LOAD, 3, offsetof(struct rv_cpu, x) + 8 * r);
 		w_local(f, W_LOCAL_SET, L_REG(r));
 	}
+
+	if (n_fl) {
+		if (g.fc_used) {
+			w_local(f, W_LOCAL_GET, L_CPU);
+			w_mem(f, W_I32_LOAD, 2, offsetof(struct rv_cpu, fcsr));
+			w_op(f, W_I64_EXTEND_I32_U);
+			w_local(f, W_LOCAL_SET, g.fbase);
+		}
+		for (uint32_t r = 0; r < 32; r++) {
+			if (g.fmap[r] < 0)
+				continue;
+			w_local(f, W_LOCAL_GET, L_CPU);
+			w_mem(f, W_I64_LOAD, 3, offsetof(struct rv_cpu, f) + 8 * r);
+			w_local(f, W_LOCAL_SET, g.fbase + 1 + (uint32_t)g.fmap[r]);
+		}
+	}
 	w_local(f, W_LOCAL_GET, L_CPU);
 	w_mem(f, W_I64_LOAD, 3, offsetof(struct rv_cpu, pc));
 	w_local(f, W_LOCAL_SET, L_PC);
+	/* The translation caches start out empty (a local starts as 0, which is page 0, never mapped; but be sure). */
+	for (int k = 0; k < PCACHE_SLOTS; k++) {
+		if (!(g.bases & (1u << k)))
+			continue;
+		w_i64(f, CACHE_NONE);
+		w_local(f, W_LOCAL_SET, L_CB_R(k));
+		w_i64(f, CACHE_NONE);
+		w_local(f, W_LOCAL_SET, L_CB_W(k));
+	}
 	/* cpu->jit_used[a hash of the region's address] = 1: it was entered (evict(), used_hash()). */
 	w_local(f, W_LOCAL_GET, L_CPU);
 	w_mem(f, W_I64_LOAD, 3, offsetof(struct rv_cpu, jit_used));
@@ -3475,7 +5057,10 @@ static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
 	w_local(f, W_LOCAL_GET, L_BUDGET_IN);
 	w_local(f, W_LOCAL_SET, L_BUDGET);
 
+	at_body = f->len;
 	w_bytes(f, jit->body.data, jit->body.len);
+	for (uint32_t h = 0; h < jit->nhints; h++)
+		jit->hints[h] += (uint32_t)at_body << 1;	/* offsets in the function */
 
 	for (uint32_t r = 1; r < 32; r++) {
 		if (!(g.written & (1u << r)))
@@ -3483,6 +5068,21 @@ static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
 		w_local(f, W_LOCAL_GET, L_CPU);
 		w_local(f, W_LOCAL_GET, L_REG(r));
 		w_mem(f, W_I64_STORE, 3, offsetof(struct rv_cpu, x) + 8 * r);
+	}
+	if (n_fl) {
+		if (g.fc_written) {
+			w_local(f, W_LOCAL_GET, L_CPU);
+			w_local(f, W_LOCAL_GET, g.fbase);
+			w_op(f, W_I32_WRAP_I64);
+			w_mem(f, W_I32_STORE, 2, offsetof(struct rv_cpu, fcsr));
+		}
+		for (uint32_t r = 0; r < 32; r++) {
+			if (!(g.fwritten & (1u << r)))
+				continue;
+			w_local(f, W_LOCAL_GET, L_CPU);
+			w_local(f, W_LOCAL_GET, g.fbase + 1 + (uint32_t)g.fmap[r]);
+			w_mem(f, W_I64_STORE, 3, offsetof(struct rv_cpu, f) + 8 * r);
+		}
 	}
 	w_local(f, W_LOCAL_GET, L_CPU);
 	w_local(f, W_LOCAL_GET, L_PC);
@@ -3561,15 +5161,25 @@ static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
 	}
 	w_op(f, W_END);
 	w_op(f, W_END);
+	if (jit->body.overflow || f->overflow || g.bad)
+		m->overflow = 1;
+}
 
-	/* The module. */
+/* The region's module, in jit->module, around its function, in jit->func (gen_func(), or the store's: cache_find()). */
+static void gen_wrap(struct rv_cpu *cpu, struct rv_jit *jit)
+{
+	struct wbuf *f = &jit->func, *m = &jit->module;
+	static uint8_t tmp_data[1024];	/* the small sections, one at a time */
+	struct wbuf tmp = { tmp_data, 0, sizeof(tmp_data), 0 };
+
 	m->len = m->overflow = 0;
 	gen_module_head(m);
 
 	tmp.len = 0;
-	w_uleb(&tmp, 2);
-	w_uleb(&tmp, 0);
-	w_uleb(&tmp, 2);
+	w_uleb(&tmp, 1 + N_MODULE_FNS);
+	w_uleb(&tmp, 0);	/* the region */
+	w_uleb(&tmp, 2);	/* reserve */
+	w_uleb(&tmp, 2);	/* xlat */
 	w_section(m, 3, &tmp);
 
 	tmp.len = 0;
@@ -3579,24 +5189,36 @@ static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
 	w_uleb(&tmp, N_HELPERS);
 	w_section(m, 7, &tmp);
 
-	/* Code: two bodies, each preceded by its size. */
 	{
-		uint8_t size_data[16], fn_data[512], fn_size_data[16];
+		uint32_t index = F_REGION, *hints = jit->hints;
+
+		gen_hints(m, 1, &index, &hints, &jit->nhints);
+	}
+
+	/* Code: the bodies, each preceded by its size. */
+	{
+		uint8_t size_data[16], fn_data[512], fn_size_data[16], xl_data[512], xl_size_data[16];
 		struct wbuf size = { size_data, 0, sizeof(size_data), 0 };
 		struct wbuf fn = { fn_data, 0, sizeof(fn_data), 0 };
 		struct wbuf fn_size = { fn_size_data, 0, sizeof(fn_size_data), 0 };
+		struct wbuf xl = { xl_data, 0, sizeof(xl_data), 0 };
+		struct wbuf xl_size = { xl_size_data, 0, sizeof(xl_size_data), 0 };
 
 		gen_reserve_fn(cpu, &fn);
+		gen_xlat_fn(&xl);
 		w_uleb(&size, f->len);
 		w_uleb(&fn_size, fn.len);
+		w_uleb(&xl_size, xl.len);
 		w_byte(m, 10);
-		w_uleb(m, 1 + size.len + f->len + fn_size.len + fn.len);
-		w_uleb(m, 2);
+		w_uleb(m, 1 + size.len + f->len + fn_size.len + fn.len + xl_size.len + xl.len);
+		w_uleb(m, 1 + N_MODULE_FNS);
 		w_bytes(m, size.data, size.len);
 		w_bytes(m, f->data, f->len);
 		w_bytes(m, fn_size.data, fn_size.len);
 		w_bytes(m, fn.data, fn.len);
-		if (fn.overflow)
+		w_bytes(m, xl_size.data, xl_size.len);
+		w_bytes(m, xl.data, xl.len);
+		if (fn.overflow || xl.overflow)
 			m->overflow = 1;
 	}
 
@@ -3609,11 +5231,22 @@ static void gen_module(struct rv_cpu *cpu, struct rv_jit *jit)
 	if (jit->old & OLD_UNSHARED)
 		gen_unshared(m);
 
-	if (jit->body.overflow || f->overflow || tmp.overflow)
+	if (f->overflow || tmp.overflow)
 		m->overflow = 1;
 }
 
 /* ---------------------------------------------------------------- driving */
+
+/* A hash of a function's code (the first half of the store's key for it, jitcache.c). */
+static uint64_t body_hash(const uint8_t *code, size_t len)
+{
+	uint8_t key[RV_JC_KEY];
+	uint64_t h;
+
+	rv_jc_key(code, len, key);
+	memcpy(&h, key, sizeof(h));
+	return h;
+}
 
 static long install(struct rv_jit *jit, uint64_t entry_pc, long slot)
 {
@@ -3627,15 +5260,103 @@ static long install(struct rv_jit *jit, uint64_t entry_pc, long slot)
 			fwrite(jit->module.data, 1, jit->module.len, out);
 			fclose(out);
 		}
+		/* Its layout (struct layout), for looking at. */
+		snprintf(path, sizeof(path), "%s/region-%llx.layout", jit->dump_dir, (unsigned long long)entry_pc);
+		out = fopen(path, "w");
+		if (out) {
+			const struct layout *lay = jit->layout;
+
+			for (int sc = 0; sc < lay->nscopes; sc++) {
+				fprintf(out, "scope %d: parent %d item %d header %d lookup %d:", sc, lay->scopes[sc].parent,
+					lay->scopes[sc].parent_item, lay->scopes[sc].header, lay->scopes[sc].lookup);
+				for (int k = 0; k < lay->scopes[sc].nitems; k++) {
+					int v = lay->items[lay->scopes[sc].first + k];
+
+					if (v >= 0)
+						fprintf(out, " b%d@%llx", v, (unsigned long long)jit->region->blocks[v].pc);
+					else if (v == ITEM_LOOKUP)
+						fprintf(out, " lookup");
+					else
+						fprintf(out, " scope%d", SCOPE_OF_ITEM(v));
+				}
+				fprintf(out, "\n");
+			}
+			for (int v = 0; v < jit->region->nblocks; v++) {
+				fprintf(out, "b%d@%llx ->", v, (unsigned long long)jit->region->blocks[v].pc);
+				for (int w = 0; w < jit->region->nblocks; w++)
+					if (in_set(lay->succ[v], w))
+						fprintf(out, " b%d", w);
+				fprintf(out, "\n");
+			}
+			fclose(out);
+		}
+		/* And which blocks it has, in order, for tools/region-bench.js. */
+		snprintf(path, sizeof(path), "%s/region-%llx.blocks", jit->dump_dir, (unsigned long long)entry_pc);
+		out = fopen(path, "w");
+		if (out) {
+			for (int k = 0; k < jit->region->nblocks; k++)
+				fprintf(out, "%llx %u\n", (unsigned long long)jit->region->blocks[k].pc, jit->region->blocks[k].count);
+			fclose(out);
+		}
 	}
 #ifdef __wasm__
 	return __rv_jit_install(jit->module.data, jit->module.len, slot);
 #else
-	/* No Wasm engine here: the module can only be dumped. (RV_JIT_FAKE: as if it had a slot, see the top.) */
+	/* No Wasm engine here: the module can only be dumped, or run by wasm_emu.c (RV_JIT_EMU). (RV_JIT_FAKE: as if it had a slot, see the top.) */
+	if (jit->emu)
+		return rv_emu_install(jit->module.data, jit->module.len, slot);
 	if (jit->fake)
 		return slot >= 0 ? slot : (long)jit->fake_slot++;
 	return -1;
 #endif
+}
+
+/*
+ * What a region is next to, so that regions near each other in the guest's code
+ * (the same file, the same 2^shift bytes of it) make a batch together and no
+ * others: a batch is then the regions of one stretch of code that came before
+ * its end, not whichever regions happened to come at about the same time, and
+ * a program started again, whose regions come in another order (from the
+ * store, at once, instead of after being run a few hundred times), makes the
+ * same batches for the stretches it runs the same. Code that is in no file
+ * (a JavaScript engine's) is by address. shift 64: one bucket for everything.
+ */
+static uint64_t batch_bucket(struct rv_cpu *cpu, const struct rv_jit *jit, uint64_t pc)
+{
+	uint64_t dev, ino, offset, h = 0x9e3779b97f4a7c15ULL;
+	int fixed;
+
+	if (jit->group_shift >= 64)
+		return 0;
+	if (rv_mm_file_at(cpu, pc, &dev, &ino, &offset, &fixed)) {
+		h = (h ^ dev) * 0x100000001b3ULL;
+		h = (h ^ ino) * 0x100000001b3ULL;
+		h = (h ^ (offset >> jit->group_shift)) * 0x100000001b3ULL;
+	} else {
+		h = (h ^ 0xff) * 0x100000001b3ULL;
+		h = (h ^ (pc >> jit->group_shift)) * 0x100000001b3ULL;
+	}
+	return h | 1;
+}
+
+static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit, uint64_t bucket);
+
+/* A new region (made[n], already in pending) has come: does a batch of its bucket end with it? */
+static void batch_trigger(struct rv_cpu *cpu, struct rv_jit *jit, uint32_t n)
+{
+	uint32_t count = 0;
+	uint64_t bucket = jit->made[n].bucket;
+
+	for (uint32_t i = 0; i < jit->npending; i++)
+		count += jit->made[jit->pending[i]].bucket == bucket;
+	if (count >= JIT_BATCH_MAX ||
+	    (count >= jit->batch_min &&
+	     ((jit->old & OLD_BATCH_FIXED) ? count >= jit->batch_min + jit->batch_mask :
+	      (jit->made[n].body_hash & jit->batch_mask) == 0))) {
+		batch_make(cpu, jit, bucket);
+	} else if (jit->npending >= JIT_PENDING_MAX) {
+		batch_make(cpu, jit, jit->made[jit->pending[0]].bucket);
+	}
 }
 
 /*
@@ -3647,27 +5368,57 @@ static long install(struct rv_jit *jit, uint64_t entry_pc, long slot)
  * N_HELPERS + 1 (F_RESERVE), so that is where it is here too: the first
  * region's function, the reservation function, then the others. Regions
  * call one another only through the table. The host is given the slots after
- * the module (__rv_jit_install with slot -16 - count), for its account.
+ * the module (__rv_jit_install with slot -16 - count) and puts function "j"
+ * of the module's exports into the j-th.
  */
-static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit)
+static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit, uint64_t bucket)
 {
-	uint32_t k = 0, list[JIT_BATCH];
+	uint32_t k = 0, list[JIT_BATCH_MAX], keep = 0;
 	size_t cap = 2048;
-	struct wbuf m, fn, sec;
-	uint8_t fn_data[512];
+	struct wbuf m, fn, xl, sec;
+	uint8_t fn_data[512], xl_data[512];
 	long got;
 
 	for (uint32_t i = 0; i < jit->npending; i++) {
 		const struct jit_made *r = &jit->made[jit->pending[i]];
 
-		if (r->state != R_FREE && r->body) {
-			list[k++] = jit->pending[i];
-			cap += r->body_len + 32;
+		if (r->bucket == bucket && k < JIT_BATCH_MAX) {
+			if (r->state != R_FREE && r->body) {
+				list[k++] = jit->pending[i];
+				cap += r->body_len + 32 + 8 * (size_t)r->nhints;
+			}
+		} else {
+			jit->pending[keep++] = jit->pending[i];	/* (waits for its own bucket's batch) */
 		}
 	}
-	jit->npending = 0;
-	if (k < 2)
+	jit->npending = keep;
+	if (k < 1 || (k < 2 && jit->group_shift >= 64))
 		goto out;
+	/* (The functions in the order of their hashes: the same regions are the same bytes whatever came first.) */
+	for (uint32_t i = 1; i < k; i++) {
+		uint32_t x = list[i], j = i;
+
+		while (j && (jit->made[list[j - 1]].body_hash > jit->made[x].body_hash ||
+			     (jit->made[list[j - 1]].body_hash == jit->made[x].body_hash && list[j - 1] > x))) {
+			list[j] = list[j - 1];
+			j--;
+		}
+		list[j] = x;
+	}
+	if (jit->log_fd >= 0) {
+		/* RV_JIT_LOG: B pid regions hash:length... (in the order of the batch) */
+		char line[JIT_BATCH_MAX * 26 + 40];
+		int n = snprintf(line, sizeof(line), "B %d %u", (int)getpid(), k);
+
+		for (uint32_t j = 0; j < k && n > 0 && (size_t)n < sizeof(line) - 30; j++)
+			n += snprintf(line + n, sizeof(line) - (size_t)n, " %016llx:%u",
+				      (unsigned long long)jit->made[list[j]].body_hash, jit->made[list[j]].body_len);
+		if (n > 0 && (size_t)n < sizeof(line) - 2) {
+			line[n++] = '\n';
+			if (write(jit->log_fd, line, (size_t)n) < 0)
+				jit->log_fd = -1;
+		}
+	}
 	if (jit->nbatches == jit->batches_cap) {
 		uint32_t bcap = jit->batches_cap ? jit->batches_cap * 2 : 64;
 		uint16_t *live = realloc(jit->batch_live, bcap * sizeof(*live)), *size;
@@ -3693,34 +5444,54 @@ static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit)
 		goto out;
 	}
 	fn = (struct wbuf){ fn_data, 0, sizeof(fn_data), 0 };
+	xl = (struct wbuf){ xl_data, 0, sizeof(xl_data), 0 };
 	gen_reserve_fn(cpu, &fn);
+	gen_xlat_fn(&xl);
 	gen_module_head(&m);
 
-	/* Functions: region, reservation, regions. */
+	/* Functions: region, reservation, xlat, regions. */
 	sec.len = 0;
-	w_uleb(&sec, k + 1);
+	w_uleb(&sec, k + N_MODULE_FNS);
 	w_uleb(&sec, 0);
+	w_uleb(&sec, 2);
 	w_uleb(&sec, 2);
 	for (uint32_t j = 1; j < k; j++)
 		w_uleb(&sec, 0);
 	w_section(&m, 3, &sec);
 
-	/* Elements: function j into the slot of region j. */
+	/*
+	 * Exports: function j as "j", which the host puts into the slot of
+	 * region j (the slots follow the module). Not element segments with
+	 * the slots in them: without them the module is the same bytes in
+	 * every process that makes the same batch (a program started again),
+	 * and the engine compiles it once.
+	 */
 	sec.len = 0;
 	w_uleb(&sec, k);
 	for (uint32_t j = 0; j < k; j++) {
-		w_uleb(&sec, 0);		/* active, table 0, function indices */
-		w_byte(&sec, W_I32_CONST);
-		w_sleb(&sec, (int32_t)jit->slots[list[j]]);
-		w_op(&sec, W_END);
-		w_uleb(&sec, 1);
-		w_uleb(&sec, j ? N_HELPERS + 1 + j : N_HELPERS);
+		char name[12];
+
+		snprintf(name, sizeof(name), "%u", j);
+		w_name(&sec, name);
+		w_byte(&sec, 0x00);		/* a function */
+		w_uleb(&sec, j ? N_HELPERS + N_MODULE_FNS + j : N_HELPERS);
 	}
-	w_section(&m, 9, &sec);
+	w_section(&m, 7, &sec);
+
+	{
+		uint32_t index[JIT_BATCH_MAX], *hints[JIT_BATCH_MAX], nhints[JIT_BATCH_MAX];
+
+		for (uint32_t j = 0; j < k; j++) {
+			index[j] = j ? N_HELPERS + 1 + j : N_HELPERS;
+			hints[j] = jit->made[list[j]].hints;
+			nhints[j] = jit->made[list[j]].nhints;
+		}
+		gen_hints(&m, k, index, hints, nhints);
+	}
 
 	/* Code: the bodies in the same order, each preceded by its size. */
 	sec.len = 0;
-	w_uleb(&sec, k + 1);
+	w_uleb(&sec, k + N_MODULE_FNS);
 	for (uint32_t j = 0; j < k; j++) {
 		const struct jit_made *r = &jit->made[list[j]];
 
@@ -3729,23 +5500,25 @@ static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit)
 		if (!j) {
 			w_uleb(&sec, fn.len);
 			w_bytes(&sec, fn.data, fn.len);
+			w_uleb(&sec, xl.len);
+			w_bytes(&sec, xl.data, xl.len);
 		}
 	}
 	w_section(&m, 10, &sec);
 	free(sec.data);
 	if (jit->names) {
-		uint64_t pcs[JIT_BATCH];
-		uint32_t index[JIT_BATCH];
+		uint64_t pcs[JIT_BATCH_MAX];
+		uint32_t index[JIT_BATCH_MAX];
 
 		for (uint32_t j = 0; j < k; j++) {
 			pcs[j] = jit->made[list[j]].pcs[0];
-			index[j] = j ? N_HELPERS + 1 + j : N_HELPERS;
+			index[j] = j ? N_HELPERS + N_MODULE_FNS + j : N_HELPERS;
 		}
 		gen_names(cpu, &m, pcs, index, k);
 	}
 	if (jit->old & OLD_UNSHARED)
 		gen_unshared(&m);
-	if (m.overflow || sec.overflow || fn.overflow) {
+	if (m.overflow || sec.overflow || fn.overflow || xl.overflow) {
 		free(m.data);
 		jit->stat_batch_failed++;
 		goto out;
@@ -3767,7 +5540,7 @@ static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit)
 #ifdef __wasm__
 	got = __rv_jit_install(m.data, m.len, -16 - (long)k);
 #else
-	got = jit->fake ? 0 : -1;
+	got = jit->emu ? rv_emu_install(m.data, m.len, -16 - (long)k) : jit->fake ? 0 : -1;
 #endif
 	if (got < 0) {
 		free(m.data);
@@ -3791,8 +5564,10 @@ static void batch_make(struct rv_cpu *cpu, struct rv_jit *jit)
 	jit->stat_batched += k;
 out:
 	for (uint32_t j = 0; j < k; j++) {
-		free(jit->made[list[j]].body);
+		free(jit->made[list[j]].body);	/* (and its hints) */
 		jit->made[list[j]].body = NULL;
+		jit->made[list[j]].hints = NULL;
+		jit->made[list[j]].nhints = 0;
 	}
 	/* (And those left out: not in a batch, and not to be.) */
 }
@@ -3872,6 +5647,7 @@ static int target_table(struct rv_jit *jit, uint32_t n, const struct jit_region 
  */
 static pthread_mutex_t scratch_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct jit_region *scratch_region;
+static struct layout *scratch_layout;
 static uint8_t *scratch_code;
 static size_t scratch_cap;
 
@@ -3896,6 +5672,11 @@ static int scratch_get(struct rv_cpu *cpu, struct rv_jit *jit)
 		pthread_mutex_unlock(&scratch_lock);
 		return -1;
 	}
+	if (!scratch_layout && !(scratch_layout = malloc(sizeof(*scratch_layout)))) {
+		pthread_mutex_unlock(&scratch_lock);
+		return -1;
+	}
+	jit->layout = scratch_layout;
 	if (!scratch_code && scratch_size(CODE_CAP_MIN)) {
 		pthread_mutex_unlock(&scratch_lock);
 		return -1;
@@ -3968,7 +5749,7 @@ static int translate(struct rv_cpu *cpu, uint64_t pc)
  * RV_JIT_LOG: what was translated, a line per region, for finding out how
  * often different processes translate the same thing:
  *
- *   R pid device:inode offset base instructions blocks hash fixed ns-to-make ns-to-compile bytes tid same
+ *   R pid device:inode offset base instructions blocks hash fixed ns-to-make ns-to-compile bytes tid same cached ns-build ns-store ns-function ns-module
  *
  * device:inode and offset say which file the region's first instruction is
  * of and where in it (0:0 if none), base is its address minus that offset
@@ -3977,7 +5758,8 @@ static int translate(struct rv_cpu *cpu, uint64_t pc)
  * fixed is 1 if the code is in pages that are the file's own and cannot have
  * been written, same is 1 if the module is, byte for byte, one that was made
  * in this process before (by this thread or another: module_seen()), which
- * the browser's engine then has compiled already. And a line for every round of letting go of regions to make
+ * the browser's engine then has compiled already, cached is 1 if its function was
+ * found in the store of translations kept (cache_find()). And a line for every round of letting go of regions to make
  * room (see "Room for translated code"):
  *
  *   E pid tid regions KiB-let-go-of KiB-the-thread-keeps budget-KiB sum-KiB put-off hard
@@ -3987,10 +5769,10 @@ static int translate(struct rv_cpu *cpu, uint64_t pc)
  * hard 1 if regions still in use went as well.
  */
 static void log_region(struct rv_cpu *cpu, const struct jit_region *r, uint64_t made_ns, uint64_t compiled_ns, uint64_t bytes,
-		       int same)
+		       int same, int cached)
 {
 	uint64_t pc = r->blocks[0].pc, dev = 0, ino = 0, offset = 0, hash = 0xcbf29ce484222325ULL;
-	char line[200];
+	char line[300];
 	int fixed = 0, n;
 
 	for (int k = 0; k < r->nblocks; k++) {
@@ -4014,10 +5796,13 @@ static void log_region(struct rv_cpu *cpu, const struct jit_region *r, uint64_t 
 		if (!rv_mm_file_at(cpu, r->blocks[r->nblocks - 1].pc, &d2, &i2, &o2, &fixed2) || !fixed2)
 			fixed = 0;
 	}
-	n = snprintf(line, sizeof(line), "R %d %llx:%llx %llx %llx %d %d %016llx %d %llu %llu %llu %d %d\n", (int)getpid(),
+	n = snprintf(line, sizeof(line), "R %d %llx:%llx %llx %llx %d %d %016llx %d %llu %llu %llu %d %d %d %llu %llu %llu %llu %016llx %zu %llx\n", (int)getpid(),
 		     (unsigned long long)dev, (unsigned long long)ino, (unsigned long long)offset,
 		     (unsigned long long)(pc - offset), r->ninsns, r->nblocks, (unsigned long long)hash, fixed,
-		     (unsigned long long)made_ns, (unsigned long long)compiled_ns, (unsigned long long)bytes, (int)cpu->tid, same);
+		     (unsigned long long)made_ns, (unsigned long long)compiled_ns, (unsigned long long)bytes, (int)cpu->tid, same, cached,
+		     (unsigned long long)cpu->jit->lap[0], (unsigned long long)cpu->jit->lap[1],
+		     (unsigned long long)cpu->jit->lap[2], (unsigned long long)cpu->jit->lap[3],
+		     (unsigned long long)body_hash(cpu->jit->func.data, cpu->jit->func.len), cpu->jit->func.len, (unsigned long long)pc);
 	if (n > 0 && write(cpu->jit->log_fd, line, (size_t)n) < 0)
 		cpu->jit->log_fd = -1;
 }
@@ -4066,15 +5851,283 @@ static int module_seen(const struct wbuf *m)
 	return 0;
 }
 
+/*
+ * Translations kept (jitcache.c says what the store is, where it is and why
+ * it is nowhere the guest can write). A program that starts translates the
+ * same code that it, or another program using the same libraries, translated
+ * the last time it ran, in this visit of the page or an earlier one. So a
+ * region of a file's code (a program's, a library's) is kept in the store as
+ * its function, under a key made from everything the function depends on
+ * (cache_describe()), and a region is looked for there before it is made.
+ *
+ * What it depends on: where its blocks are (the code jumps to absolute guest
+ * addresses, and a library is at the same address in every process that has
+ * it, so this loses little: tests/jitcache.sh), the bytes of each instruction
+ * as they were read, whether a call returns to a block, the switches that
+ * change the code (RV_JIT_OFF, RV_JIT_OLD, -v, RV_JIT_TAG: cache_switches()), the host's fused multiply-add, and the
+ * translator's own sources (RV_JIT_SOURCE, in every key). The description
+ * is kept with the function and compared byte for byte before the function is
+ * used, so a key two regions share by chance does no harm, and a file that
+ * changed (a program built again) simply has other bytes: the description of
+ * its regions is not the old one. Which file, its inode or its time are not
+ * needed for that, and would not be enough.
+ */
+/*
+ * THE ONE PLACE for run-time switches that change a region's function.
+ * Every environment variable (or other setting) that the code generator reads
+ * and that makes it write other bytes for the same region goes into
+ * cache_switches() below, as one more word of cache_head.sw[] (there is room:
+ * CACHE_SWITCHES words, unused ones are 0), or a record made with one setting
+ * would be handed to a run with another. Not to be put there: what only
+ * decides whether or when a region is made (RV_JIT_HOT, _WARM, _LIMIT, _HINTS,
+ * _GROUP, _REFUSE), what is made around the function (RV_JIT_NAMES, _DUMP,
+ * _LOG: they are in the module's wrapper or not in it) and the checks
+ * (RV_JIT_CHECK, RV_JIT_CACHE_VERIFY), which compare. Known to come with the
+ * branches that change the generator: RV_JIT_CHAIN (the length of a jump's
+ * chain), RV_JIT_LINEAR, RV_JIT_EDGES (rvjit-safe, rvjit-dispatch): each adds
+ * its line in cache_switches() when it lands. The generator's own sources are
+ * not a switch: RV_JIT_SOURCE (every .c and .h of rv, rv/Makefile) is in every key.
+ */
+#define CACHE_SWITCHES	8
+struct cache_head {
+	uint32_t magic;
+	uint32_t nblocks, ninsns;
+	int32_t fma;
+	uint32_t sw[CACHE_SWITCHES];
+};
+static void cache_switches(const struct rv_cpu *cpu, const struct rv_jit *jit, uint32_t *sw)
+{
+	sw[0] = jit->off;		/* RV_JIT_OFF: parts of the translator left out */
+	sw[1] = jit->old;		/* RV_JIT_OLD: as before an earlier change, for measuring */
+	sw[2] = cpu->verbose != 0;	/* -v: checks in the code */
+	sw[3] = jit->tag != 0;		/* RV_JIT_TAG: code that says where it is from */
+	/*
+	 * The access path (jitmem): RV_JIT_OUTLINE=1 and RV_JIT_OFF's OFF_OUTLINE, OFF_HOIST, OFF_HINTS, all in
+	 * jit->off already (sw[0]); said again here so that they stay keyed if sw[0] ever leaves bits out.
+	 * OFF_HINTS does not change the function's bytes but what is kept with them (the branch hints).
+	 */
+	sw[4] = jit->off & (OFF_OUTLINE | OFF_HOIST | OFF_HINTS);
+	sw[5] = jit->hint_sites;	/* RV_JIT_HINT_SITES: which hints are kept with the function */
+	sw[6] = (uint32_t)jit->pcache_slots;	/* RV_JIT_PCACHE: registers with a translation cache */
+	sw[7] = jit->flatmem_on ? (uint32_t)jit->flatmem | 1 : 0;	/* RV_JIT_FLATMEM (a measuring tool: no check at all) */
+}
+struct cache_block {
+	uint64_t pc, next_pc;
+	uint32_t first, count;
+	uint32_t is_return, bytes;
+};
+#define CACHE_MAGIC	0x34636a72	/* "rjc4": a record is the description, the branch hints (a count, then each), then the function (not the module) */
+
+/* What region r is made from, into d. 0, or -1 if it does not fit. */
+static int cache_describe(struct rv_cpu *cpu, const struct jit_region *r, struct wbuf *d)
+{
+	struct rv_jit *jit = cpu->jit;
+	struct cache_head head = { CACHE_MAGIC, (uint32_t)r->nblocks, (uint32_t)r->ninsns, 0, { 0 } };
+
+	if (!jit->fma)
+		jit->fma = fma_probe(jit);
+	head.fma = jit->fma;
+	cache_switches(cpu, jit, head.sw);
+	d->len = d->overflow = 0;
+	w_bytes(d, &head, sizeof(head));
+	for (int k = 0; k < r->nblocks; k++) {
+		const struct jit_block *b = &r->blocks[k];
+		struct cache_block cb = { b->pc, b->next_pc, b->first, b->count, (uint32_t)b->is_return, 0 };
+
+		for (uint32_t i = 0; i < b->count; i++)
+			cb.bytes += r->insns[b->first + i].len;
+		w_bytes(d, &cb, sizeof(cb));
+		for (uint32_t i = 0; i < b->count; i++) {
+			const struct jit_insn *insn = &r->insns[b->first + i];
+
+			w_bytes(d, &insn->orig, insn->len);
+		}
+	}
+	return d->overflow ? -1 : 0;
+}
+
+/*
+ * The function for region r from the store, into jit->func: 1 if it is there
+ * as made from exactly what r is made from, 0 if not. The description is
+ * made in jit->body and the record read into jit->module meanwhile; the key
+ * is left in `key`, for keeping the function made instead (cache_keep()).
+ */
+static int cache_find(struct rv_cpu *cpu, const struct jit_region *r, uint8_t key[RV_JC_KEY])
+{
+	struct rv_jit *jit = cpu->jit;
+	struct wbuf *d = &jit->body, *m = &jit->module, *f = &jit->func;
+	long len;
+
+	if (cache_describe(cpu, r, d))
+		return 0;
+	rv_jc_key(d->data, d->len, key);
+	len = rv_jc_get(key, m->data, m->cap);
+	if (len < 0 || (size_t)len > m->cap || (size_t)len < d->len + 4 || memcmp(m->data, d->data, d->len)) {
+		jit->stat_jc_misses++;
+		return 0;
+	}
+	/* The branch hints kept with it (offsets in the function), then the function. */
+	{
+		const uint8_t *at = m->data + d->len;
+		size_t left = (size_t)len - d->len - 4;
+		uint32_t nh;
+
+		memcpy(&nh, at, 4);
+		at += 4;
+		if (nh >= left / 4 || left - (size_t)nh * 4 > f->cap || hints_room(jit, nh)) {
+			jit->stat_jc_misses++;
+			return 0;
+		}
+		memcpy(jit->hints, at, (size_t)nh * 4);
+		jit->nhints = nh;
+		at += (size_t)nh * 4;
+		left -= (size_t)nh * 4;
+		f->len = left;
+		f->overflow = 0;
+		memcpy(f->data, at, f->len);
+	}
+	jit->stat_jc_hits++;
+	return 1;
+}
+
+static void hint_keep(struct rv_cpu *cpu, const struct jit_region *r);
+
+/* Keep the function just made (jit->func) in the store, after its description (made again in jit->body, which is free now). */
+static void cache_keep(struct rv_cpu *cpu, const struct jit_region *r, const uint8_t key[RV_JC_KEY])
+{
+	struct rv_jit *jit = cpu->jit;
+	struct wbuf *d = &jit->body;
+
+	if (cache_describe(cpu, r, d))
+		return;
+	w_bytes(d, &jit->nhints, 4);
+	w_bytes(d, jit->hints, 4 * (size_t)jit->nhints);
+	w_bytes(d, jit->func.data, jit->func.len);
+	if (!d->overflow && !rv_jc_put(key, d->data, d->len))
+		jit->stat_jc_puts++;
+	if (!jit->nhint)
+		hint_keep(cpu, r);
+}
+
+/*
+ * Is the code at pc a file's (a program's or a library's, mapped from its
+ * file)? Only such code goes into the store: code a program makes as it runs
+ * (a JavaScript engine's) is made anew, elsewhere, every time, and would only
+ * fill it.
+ */
+static int file_code(struct rv_cpu *cpu, uint64_t pc)
+{
+	uint64_t dev, ino, offset, page = pc >> RV_PAGE_SHIFT;
+	int fixed;
+
+	if (page < cpu->npages && (cpu->map[page] & RV_PAGE_SHARED))
+		return 1;
+	return rv_mm_file_at(cpu, pc, &dev, &ino, &offset, &fixed);
+}
+
+/* ... all of region r (its first and its last block, at least). */
+static int cache_file_code(struct rv_cpu *cpu, const struct jit_region *r)
+{
+	return file_code(cpu, r->blocks[0].pc) && file_code(cpu, r->blocks[r->nblocks - 1].pc);
+}
+
+/*
+ * Programs start cold: every block is interpreted until it has run JIT_HOT
+ * times, although the same program, run before, found out which blocks those
+ * are. So the store also has, for every region kept there, a hint: the
+ * blocks the region was made of, under a key made from where it begins and
+ * the first bytes of code there (hint_key()). A block that runs for the
+ * JIT_HINT_AT-th time and has a hint is made into its region at once, of the
+ * blocks the hint names, which, if the code is the same, is the same region,
+ * whose function the store then has as well (hint_translate()). A hint that
+ * is out of date costs nothing but a region made of other blocks: the region
+ * is made from the code that is there, whatever the hint says.
+ */
+#define JIT_HINT_AT	2
+struct hint_head {
+	uint32_t magic;
+	uint32_t off;		/* of RV_JIT_OFF, what changes which blocks a region has */
+	uint64_t pc;
+	uint32_t nbytes;
+	uint8_t bytes[20];
+};
+#define HINT_MAGIC	0x31686a72	/* "rjh1" */
+#define HINT_BYTES	16
+
+static int hint_key(struct rv_cpu *cpu, uint64_t pc, uint8_t key[RV_JC_KEY])
+{
+	struct hint_head h;
+	uint64_t left = RV_PAGE_SIZE - (pc & (RV_PAGE_SIZE - 1));
+
+	if (!code_page_now(cpu, pc))
+		return -1;
+	memset(&h, 0, sizeof(h));
+	h.magic = HINT_MAGIC;
+	h.off = cpu->jit->off & (OFF_WARM | OFF_RETURNS);
+	h.pc = pc;
+	h.nbytes = left < HINT_BYTES ? (uint32_t)left : HINT_BYTES;
+	memcpy(h.bytes, rv_host_addr(cpu, pc), h.nbytes);
+	rv_jc_key(&h, sizeof(h), key);
+	return 0;
+}
+
+static int compare_pc(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* The hint for region r (just kept in the store): its blocks, sorted. */
+static void hint_keep(struct rv_cpu *cpu, const struct jit_region *r)
+{
+	uint64_t pcs[JIT_MAX_BLOCKS];
+	uint8_t key[RV_JC_KEY];
+
+	if (hint_key(cpu, r->blocks[0].pc, key))
+		return;
+	for (int k = 0; k < r->nblocks; k++)
+		pcs[k] = r->blocks[k].pc;
+	qsort(pcs, (size_t)r->nblocks, sizeof(pcs[0]), compare_pc);
+	rv_jc_put(key, pcs, (size_t)r->nblocks * sizeof(pcs[0]));
+}
+
+/* The block at pc has run JIT_HINT_AT times: made into a region at once if a hint says one began there. As translate(); -1 if there was no hint. */
+static int hint_translate(struct rv_cpu *cpu, uint64_t pc)
+{
+	static __thread uint64_t pcs[JIT_MAX_BLOCKS];
+	struct rv_jit *jit = cpu->jit;
+	uint8_t key[RV_JC_KEY];
+	long len;
+	int done;
+
+	jit->stat_hint_asked++;
+	if (!file_code(cpu, pc) || hint_key(cpu, pc, key))
+		return -1;
+	len = rv_jc_get(key, pcs, sizeof(pcs));
+	if (len <= 0 || (size_t)len > sizeof(pcs) || len % sizeof(pcs[0]))
+		return -1;
+	jit->stat_hint_found++;
+	jit->hint = pcs;
+	jit->nhint = (uint32_t)(len / sizeof(pcs[0]));
+	done = translate(cpu, pc);
+	jit->hint = NULL;
+	jit->nhint = 0;
+	if (done == 1 || done == 2)
+		jit->stat_hint_made++;
+	return done;
+}
+
 static int translate_region(struct rv_cpu *cpu, uint64_t pc)
 {
 	struct rv_jit *jit = cpu->jit;
 	struct jit_region *r = jit->region;
 	int timed = cpu->verbose || jit->log_fd >= 0;
-	uint64_t t0 = timed ? now_ns() : 0, t1, t2;
+	uint64_t t0 = timed ? now_ns() : 0, t1 = 0, t2 = 0;
+	uint8_t key[RV_JC_KEY];
+	int same, cached = 0, jc_file = 0;
 	long slot = -1;
 	uint32_t n;
-	int same;
 
 #ifdef RV_HEAPCHECK
 	rv_hc_light("before a translation");
@@ -4082,6 +6135,8 @@ static int translate_region(struct rv_cpu *cpu, uint64_t pc)
 	build_region(cpu, r, pc);
 	if (!r->nblocks)
 		return 0;
+	if (timed)
+		jit->lap[0] = now_ns() - t0;
 
 	/*
 	 * The map at most half full. Beyond that: if a good part of it is
@@ -4118,16 +6173,70 @@ static int translate_region(struct rv_cpu *cpu, uint64_t pc)
 		return 0;
 	}
 	n = jit->nfree ? jit->free_regions[jit->nfree - 1] : jit->nslots;
+	/* The shape of the code, and the blocks numbered in its order (see struct layout). */
+	layout_region(cpu, r, jit->layout);
+	layout_renumber(r, jit->layout);
 	if (target_table(jit, n, r)) {
 		jit->stat_nomem++;
 		return 0;
 	}
 	jit->making = n;
-	gen_module(cpu, jit);
+	if (jit->jc && !(jc_file = cache_file_code(cpu, r)))
+		jit->stat_jc_other++;
+	if (timed)
+		t1 = now_ns();
+	if (jc_file)
+		cached = cache_find(cpu, r, key);
+	if (timed) {
+		t2 = now_ns();
+		jit->lap[1] = t2 - t1;
+	}
+	if (cached && jit->jc_verify) {
+		/* RV_JIT_CACHE_VERIFY: the function from the store must be the one made now, byte for byte. */
+		size_t len = jit->func.len, at = 0;
+		uint32_t nh = jit->nhints;
+		uint8_t *stored = malloc((len ? len : 1) + 4 * (size_t)nh);
+
+		if (stored) {
+			memcpy(stored, jit->func.data, len);
+			if (nh)
+				memcpy(stored + len, jit->hints, 4 * (size_t)nh);
+			gen_func(cpu, jit);
+			if (jit->module.overflow) {
+				free(stored);
+				return -1;
+			}
+			while (at < len && at < jit->func.len && stored[at] == jit->func.data[at])
+				at++;
+			if (at < len || len != jit->func.len)
+				fprintf(stderr, "rv: jit: store: the function for %#llx (%u blocks) is not the one made now: %zu bytes, now %zu, "
+				       "first difference at %zu\n", (unsigned long long)r->blocks[0].pc, (unsigned)r->nblocks, len,
+				       jit->func.len, at);
+			else if (nh != jit->nhints || (nh && memcmp(stored + len, jit->hints, 4 * (size_t)nh)))
+				fprintf(stderr, "rv: jit: store: the function for %#llx (%u blocks) is not the one made now: its branch hints "
+				       "differ (%u, now %u)\n", (unsigned long long)r->blocks[0].pc, (unsigned)r->nblocks, nh, jit->nhints);
+			free(stored);
+			cached = 0;
+		}
+	}
+	if (!cached) {
+		gen_func(cpu, jit);
+		if (jit->module.overflow)
+			return -1;	/* (the caller has larger buffers made) */
+		if (jc_file)
+			cache_keep(cpu, r, key);
+	}
+	if (timed) {
+		t1 = now_ns();
+		jit->lap[2] = t1 - t2;
+	}
+	gen_wrap(cpu, jit);
 	if (jit->module.overflow)
-		return -1;	/* (the caller has larger buffers made) */
+		return -1;
 	same = module_seen(&jit->module);
 	jit->stat_same += same;
+	if (timed)
+		jit->lap[3] = now_ns() - t1;
 
 	if (n < jit->nslots)
 		slot = jit->slots[n];
@@ -4137,7 +6246,7 @@ static int translate_region(struct rv_cpu *cpu, uint64_t pc)
 	jit->stat_ns_translate += t1 - t0;
 	jit->stat_ns_install += t2 - t1;
 	if (jit->log_fd >= 0)
-		log_region(cpu, r, t1 - t0, t2 - t1, jit->module.len, same);
+		log_region(cpu, r, t1 - t0, t2 - t1, jit->module.len, same, cached);
 	if (slot < 0) {
 		jit->stat_failed++;
 		return 0;
@@ -4181,17 +6290,24 @@ static int translate_region(struct rv_cpu *cpu, uint64_t pc)
 	jit->made[n].kib = code_kib(jit->module.len);
 	jit->code_kib += jit->made[n].kib;
 	jit->used[n] = 1;
-	if (!jit->batch_off && (jit->made[n].body = malloc(jit->func.len))) {
+	/* (Its branch hints after it, in the same allocation: gen_module() left them as offsets in the function.) */
+	if (!jit->batch_off && (jit->made[n].body = malloc(((jit->func.len + 3) & ~(size_t)3) + 4 * (size_t)jit->nhints))) {
 		memcpy(jit->made[n].body, jit->func.data, jit->func.len);
 		jit->made[n].body_len = (uint32_t)jit->func.len;
+		jit->made[n].hints = (uint32_t *)(void *)(jit->made[n].body + ((jit->func.len + 3) & ~(size_t)3));
+		jit->made[n].nhints = jit->nhints;
+		if (jit->nhints)
+			memcpy(jit->made[n].hints, jit->hints, 4 * (size_t)jit->nhints);
+		jit->made[n].body_hash = body_hash(jit->func.data, jit->func.len);
+		jit->made[n].bucket = batch_bucket(cpu, jit, pc);
 		jit->pending[jit->npending++] = n;
 	}
 
 	for (int k = 0; k < r->nblocks; k++)
 		map_insert(jit, r->blocks[k].pc, (uint32_t)slot, (uint32_t)k, r->blocks[k].count);
 	pages_note(jit, n);
-	if (jit->npending == JIT_BATCH)
-		batch_make(cpu, jit);
+	if (jit->made[n].body)
+		batch_trigger(cpu, jit, n);
 
 #ifdef RV_HEAPCHECK
 	rv_hc_light("after a translation");
@@ -4306,7 +6422,18 @@ static int note_and_maybe_translate(struct rv_cpu *cpu, uint64_t pc)
 	}
 	if (c->count == NEVER)
 		return 0;
-	if (++c->count < jit->hot_made)
+	if (++c->count == JIT_HINT_AT && jit->jc && !jit->hints_off && jit->stat_regions < jit->limit) {
+		switch (hint_translate(cpu, pc)) {
+		case 1:
+			return 1;
+		case 2:
+			return 0;
+		}
+		c = &jit->counts[hash_pc(pc, jit->map_bits)];	/* (translating may have replaced the table) */
+		if (c->pc != pc)
+			return 0;
+	}
+	if (c->count < jit->hot_made)
 		return 0;
 	if (jit->hot_made < jit->hot) {
 		/*
@@ -4461,7 +6588,7 @@ static void checked_call(struct rv_cpu *cpu, struct rv_jit *jit, const struct ji
 	}
 
 	/* The translated block: keep what it did, and take that back too. */
-	((rv_region_fn)(uintptr_t)e->slot)(cpu, e->index, 0);
+	region_call(jit, e->slot, cpu, e->index, 0);
 	got = *cpu;
 	ran = cpu->insn_count - before.insn_count;
 	/* (All of it read before any of it is put back: a block may write one place twice.) */
@@ -4546,6 +6673,100 @@ static void checked_call(struct rv_cpu *cpu, struct rv_jit *jit, const struct ji
 	_exit(99);
 }
 
+/*
+ * RV_JIT_SNAP=DIR: the guest's whole state as translated code is about to be
+ * entered, written once per region (its first entry; at most RV_JIT_SNAP_MAX
+ * of them, 64 by default), for running the dumped regions on a real engine
+ * from the same state (tools/region-bench.js). The file: a header, the
+ * registers, then every page that has memory, with its flags.
+ */
+struct snap_head {
+	char magic[8];
+	uint64_t pc, insn_count, region_pc;
+	uint32_t entry, slot, fcsr, lr_valid;
+	uint64_t lr_addr, lr_value;
+	uint64_t x[32], f[32];
+	uint64_t npages, nmapped;
+};
+
+static void snapshot(struct rv_cpu *cpu, struct rv_jit *jit, const struct jit_entry *e)
+{
+	uint32_t n = region_of(jit, e->slot);
+	struct snap_head h;
+	char path[512];
+	FILE *out;
+
+	if (jit->nsnaps >= jit->snap_max)
+		return;
+	if (jit->snap_every) {
+		if (cpu->insn_count < jit->snap_next)
+			return;
+		jit->snap_next = cpu->insn_count + jit->snap_every;
+	} else {
+		if (jit->made[n].snapped)
+			return;
+		jit->made[n].snapped = 1;
+	}
+	snprintf(path, sizeof(path), "%s/snap-%u-%llx.bin", jit->snap_dir, jit->nsnaps++, (unsigned long long)cpu->pc);
+	if (!(out = fopen(path, "wb")))
+		return;
+	memset(&h, 0, sizeof(h));
+	memcpy(h.magic, "RVSNAP01", 8);
+	h.pc = cpu->pc;
+	h.insn_count = cpu->insn_count;
+	h.region_pc = jit->made[n].pcs[0];
+	h.entry = e->index;
+	h.slot = e->slot;
+	h.fcsr = cpu->fcsr;
+	h.lr_valid = (uint32_t)cpu->lr_valid;
+	h.lr_addr = cpu->lr_addr;
+	h.lr_value = cpu->lr_value;
+	memcpy(h.x, cpu->x, sizeof(h.x));
+	memcpy(h.f, cpu->f, sizeof(h.f));
+	h.npages = cpu->npages;
+	for (uint64_t p = 0; p < cpu->npages; p++)
+		h.nmapped += (cpu->map[p] & RV_PAGE_BACKED) != 0;
+	fwrite(&h, sizeof(h), 1, out);
+	for (uint64_t p = 0; p < cpu->npages; p++) {
+		uint64_t flags = cpu->map[p] & RV_PAGE_FLAGS;
+
+		if (!(cpu->map[p] & RV_PAGE_BACKED))
+			continue;
+		fwrite(&p, 8, 1, out);
+		fwrite(&flags, 8, 1, out);
+		fwrite(rv_host_addr(cpu, p << RV_PAGE_SHIFT), RV_PAGE_SIZE, 1, out);
+	}
+	fclose(out);
+}
+
+/* The offsets translated code was made with, for the same tool: once per directory. */
+static void snapshot_layout(const char *dir)
+{
+	char path[512];
+	FILE *out;
+
+	snprintf(path, sizeof(path), "%s/layout.json", dir);
+	if (!(out = fopen(path, "w")))
+		return;
+	fprintf(out, "{\n");
+#define OFF(name, field) fprintf(out, "  \"%s\": %zu,\n", name, offsetof(struct rv_cpu, field))
+	OFF("x", x); OFF("f", f); OFF("pc", pc); OFF("fcsr", fcsr); OFF("lr_addr", lr_addr); OFF("lr_value", lr_value);
+	OFF("lr_valid", lr_valid); OFF("proc", proc); OFF("map", map); OFF("npages", npages); OFF("reserve_seen", reserve_seen);
+	OFF("jit", jit); OFF("jit_used", jit_used); OFF("jit_fault", jit_fault); OFF("sig_pending", sig_pending);
+	OFF("insn_count", insn_count);
+#undef OFF
+	fprintf(out, "  \"sizeof_cpu\": %zu,\n", sizeof(struct rv_cpu));
+	fprintf(out, "  \"proc_reserve_gen\": %zu,\n", offsetof(struct rv_proc, reserve_gen));
+	fprintf(out, "  \"jit_map\": %zu,\n  \"jit_map_bits\": %zu,\n  \"jit_stat_chained\": %zu,\n  \"jit_stat_misses\": %zu,\n",
+		offsetof(struct rv_jit, map), offsetof(struct rv_jit, map_bits), offsetof(struct rv_jit, stat_chained),
+		offsetof(struct rv_jit, stat_misses));
+	fprintf(out, "  \"entry_size\": %zu,\n  \"entry_pc\": %zu,\n  \"entry_slot\": %zu,\n  \"entry_index\": %zu,\n",
+		sizeof(struct jit_entry), offsetof(struct jit_entry, pc), offsetof(struct jit_entry, slot), offsetof(struct jit_entry, index));
+	fprintf(out, "  \"map_probes\": %d,\n  \"hash_multiplier\": \"%llx\",\n  \"used_bits\": %d,\n  \"budget\": %d\n}\n",
+		MAP_PROBES, (unsigned long long)HASH_MULTIPLIER, USED_BITS, JIT_BUDGET);
+	fclose(out);
+}
+
 /* The dispatcher: translated code where there is some, the interpreter elsewhere. */
 void rv_jit_run(struct rv_cpu *cpu)
 {
@@ -4575,6 +6796,8 @@ void rv_jit_run(struct rv_cpu *cpu)
 			e = revive(cpu, e);	/* a block of a suspended region */
 		else if (!e && note_and_maybe_translate(cpu, cpu->pc))
 			e = map_find(jit, cpu->pc);
+		if (e && __builtin_expect(jit->snap_dir != NULL, 0))
+			snapshot(cpu, jit, e);
 		if (e && jit->fake) {
 			jit->used[region_of(jit, e->slot)] = 1;
 			stale_check(cpu, jit, e);
@@ -4585,7 +6808,7 @@ void rv_jit_run(struct rv_cpu *cpu)
 		} else if (e) {
 			uint64_t before = cpu->insn_count;
 
-			((rv_region_fn)(uintptr_t)e->slot)(cpu, e->index, JIT_BUDGET);
+			region_call(jit, e->slot, cpu, e->index, JIT_BUDGET);
 			jit->stat_ran += cpu->insn_count - before;
 			jit->stat_calls++;
 			/*
@@ -4647,11 +6870,13 @@ int rv_jit_init(struct rv_cpu *cpu)
 	if (jit->hot_made > jit->hot)
 		jit->hot_made = jit->hot;
 #ifndef __wasm__
-	jit->fake = getenv("RV_JIT_FAKE") != NULL;
+	jit->emu = getenv("RV_JIT_EMU") != NULL;
+	jit->fake = !jit->emu && getenv("RV_JIT_FAKE") != NULL;
 	jit->fake_slot = 16;
 #endif
 	jit->warm = getenv("RV_JIT_WARM") ? (uint32_t)atoi(getenv("RV_JIT_WARM")) : JIT_WARM;
 	jit->off = getenv("RV_JIT_OFF") ? (uint32_t)atoi(getenv("RV_JIT_OFF")) : 0;
+	jit->hint_sites = getenv("RV_JIT_HINT_SITES") ? (uint32_t)strtoul(getenv("RV_JIT_HINT_SITES"), NULL, 0) & HS_ALL : HS_ALL;
 	jit->tag = getenv("RV_JIT_TAG") != NULL;
 	jit->stat_ns_start = now_ns();
 	if (jit->tag)
@@ -4660,12 +6885,58 @@ int rv_jit_init(struct rv_cpu *cpu)
 	if (jit->check)
 		jit->off |= OFF_CHAIN;
 	jit->dump_dir = getenv("RV_JIT_DUMP");
+#ifndef __wasm__
+	if (getenv("RV_JIT_FLATMEM") && jit->dump_dir) {
+		jit->flatmem = strtoull(getenv("RV_JIT_FLATMEM"), NULL, 0);
+		jit->flatmem_on = 1;
+	}
+#endif
+	/*
+	 * The defaults, from the measurements (see the report in the branch's
+	 * description): the translation cache and the nesting of blocks as
+	 * loops are both opt-in. The cache gains 20-50% on code that walks
+	 * arrays and stacks, but loses as much where pointers are followed from
+	 * object to object (every access a miss), and no static choice of
+	 * registers told the two apart on every program; the nesting helps
+	 * TurboFan a little and QuickJS's dispatch in Liftoff, but costs 9x in
+	 * TurboFan compile time and 20% in Liftoff on Lua. RV_JIT_PCACHE=n (up
+	 * to PCACHE_SLOTS registers) and RV_JIT_STRUCT=1 turn them on.
+	 */
+	jit->pcache_slots = getenv("RV_JIT_PCACHE") ? atoi(getenv("RV_JIT_PCACHE")) : 0;
+	if (jit->pcache_slots > PCACHE_SLOTS)
+		jit->pcache_slots = PCACHE_SLOTS;
+	if (!(getenv("RV_JIT_STRUCT") && atoi(getenv("RV_JIT_STRUCT"))))
+		jit->off |= OFF_STRUCT;
+	/* The indirect-jump profile is opt-in too: it makes interpreter dispatch tables 2.4x faster
+	 * (list) but costs Lua 26% and no shape of it is free; RV_JIT_JALRPROF=1 turns it on. */
+	if (!(getenv("RV_JIT_JALRPROF") && atoi(getenv("RV_JIT_JALRPROF"))))
+		jit->off |= OFF_JALRPROF;
+	jit->snap_dir = getenv("RV_JIT_SNAP");
+	jit->snap_max = getenv("RV_JIT_SNAP_MAX") ? (uint32_t)atoi(getenv("RV_JIT_SNAP_MAX")) : 64;
+	jit->snap_every = getenv("RV_JIT_SNAP_EVERY") ? strtoull(getenv("RV_JIT_SNAP_EVERY"), NULL, 0) : 0;
+	if (jit->dump_dir)
+		snapshot_layout(jit->dump_dir);
 	jit->names = getenv("RV_JIT_NAMES") && atoi(getenv("RV_JIT_NAMES"));
 	jit->old = getenv("RV_JIT_OLD") ? (uint32_t)atoi(getenv("RV_JIT_OLD")) : 0;
+	jit->batch_min = JIT_BATCH_MIN;
+	jit->batch_mask = JIT_BATCH_MASK;
+	jit->group_shift = JIT_GROUP_SHIFT;
+	if (getenv("RV_JIT_GROUP")) {
+		unsigned bmin, bmask, bshift;
+
+		if (sscanf(getenv("RV_JIT_GROUP"), "%u:%u:%u", &bmin, &bmask, &bshift) == 3 && bmin >= 1 && bmin < JIT_BATCH_MAX) {
+			jit->batch_min = bmin;
+			jit->batch_mask = bmask;
+			jit->group_shift = bshift;
+		}
+	}
 	jit->batch_off = getenv("RV_JIT_BATCH") && !atoi(getenv("RV_JIT_BATCH"));
 	jit->refuse = getenv("RV_JIT_REFUSE") ? (uint32_t)atoi(getenv("RV_JIT_REFUSE")) : 0;
 	jit->code_cap_kib = (getenv("RV_JIT_CODE_MB") && atoi(getenv("RV_JIT_CODE_MB")) > 0 ?
 			     (uint64_t)atoi(getenv("RV_JIT_CODE_MB")) : 512) * 1024;
+	jit->jc = !jit->tag && rv_jc_on();
+	jit->jc_verify = getenv("RV_JIT_CACHE_VERIFY") != NULL;
+	jit->hints_off = getenv("RV_JIT_HINTS") && !atoi(getenv("RV_JIT_HINTS"));
 	jit->log_fd = getenv("RV_JIT_LOG") ? open(getenv("RV_JIT_LOG"), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644) : -1;
 	cpu->jit = jit;
 	return 0;
@@ -4686,6 +6957,7 @@ void rv_jit_free(struct rv_cpu *cpu)
 	}
 	free(jit->batch_live);
 	free(jit->batch_size);
+	free(jit->hints);
 	free(jit->targets);
 	free(jit->used);
 	free(jit->used_pc);
@@ -4697,6 +6969,10 @@ void rv_jit_free(struct rv_cpu *cpu)
 	free(jit->map);
 	free(jit->map_len);
 	free(jit->counts);
+#ifndef __wasm__
+	if (jit->emu)
+		rv_emu_thread_exit();
+#endif
 	free(jit);
 	cpu->jit = NULL;
 	cpu->jit_used = NULL;
@@ -4751,6 +7027,10 @@ void rv_jit_report(struct rv_cpu *cpu)
 
 	if (!jit)
 		return;
+#ifndef __wasm__
+	if (jit->emu)
+		rv_emu_report();
+#endif
 	fprintf(stderr, "rv: jit: of %llu ms since this thread's translator began, %llu ms went into making regions and %llu ms into the host compiling them\n",
 		(unsigned long long)((now_ns() - jit->stat_ns_start) / 1000000), (unsigned long long)(jit->stat_ns_translate / 1000000),
 		(unsigned long long)(jit->stat_ns_install / 1000000));
@@ -4771,6 +7051,13 @@ void rv_jit_report(struct rv_cpu *cpu)
 		fprintf(stderr, "rv: jit: %llu batches made of %llu regions, %llu failed\n",
 			(unsigned long long)jit->stat_batches, (unsigned long long)jit->stat_batched,
 			(unsigned long long)jit->stat_batch_failed);
+	if (jit->jc)
+		fprintf(stderr, "rv: jit: store of translations: %llu regions found there, %llu not (%llu kept), %llu not of a file; "
+			"hints: %llu looked for, %llu found, %llu regions made from them\n",
+			(unsigned long long)jit->stat_jc_hits, (unsigned long long)jit->stat_jc_misses,
+			(unsigned long long)jit->stat_jc_puts, (unsigned long long)jit->stat_jc_other,
+			(unsigned long long)jit->stat_hint_asked, (unsigned long long)jit->stat_hint_found,
+			(unsigned long long)jit->stat_hint_made);
 	if (jit->stat_events || jit->stat_suspended || jit->stat_tidied)
 		fprintf(stderr, "rv: jit: code changed %llu times for this thread: %llu regions suspended, %llu taken up again "
 			"as they were, %llu found changed, %llu given up as written to all the time; the map tidied %llu times\n",

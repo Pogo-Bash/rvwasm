@@ -36,12 +36,13 @@ url = "$SITE/favicon.ico"
 url = "$SITE/site.webmanifest"
 url = "$SITE/robots.txt"
 url = "$SITE/desktop"
+url = "$SITE/probe"
 url = "$SITE/rv-site.json"
 url = "$SITE/relay/address"
 url = "$SITE/disk/$DISK/manifest.json"
 url = "$SITE/disk/home/manifest.json"
 URLS
-for f in audio-worklet.js audio.js background.js blenderweb.js breeze.css chrome.css disk-worker.js display.js gpu-exec.js \
+for f in audio-worklet.js audio.js background.js breeze.css chrome.css disk-worker.js display.js gpu-exec.js probe.html \
          hostopen.css hostopen.js kernel-symbols.txt linux-worker.js linux.js panel.css plasma.js rvgpu-worker.js splash.js \
          vdec-worker.js vdec.js watchdog.js xterm.css xterm.js rvgpu/rvgpu.js vrend/vrend.js vrend/vrend.wasm; do
   echo "url = \"$SITE/$f\"" >> /tmp/rv-load.txt

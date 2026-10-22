@@ -116,10 +116,38 @@ The page draws a frame into the two textures in the executor's Worker (`tools/ww
 `vdecFrame`): `texImage2D(VideoFrame)` (the browser's YUV to RGB) into a texture of ours, then two draws back
 to Y and CbCr with the inverse of the frame's colour-space matrix (texelFetch, 2×2 mean for chroma), vrend's
 GL state saved and restored around it, the ring run up to date first (the player's draws from the surface's
-last picture were sent before). Then the slot's "ready" word, which `vaSyncSurface` waits for. The round trip
+last picture were sent before). Then the slot's "ready" word, which `vaSyncSurface` waits for. (The WebGPU executor, `?exec=webgpu`, does the same
+in its own Worker: see "On the WebGPU executor" below.) The round trip
 through 8-bit RGB is not exact (about one code value; chroma filtered by the browser's upsampling;
 out-of-gamut colours clip; full range is asked for so luma does not clip): WebGL cannot give a VideoFrame's
 planes as textures. `?vdec=exact` uses copyTo + texSubImage2D (exact bytes; a readback and an upload).
+
+### On the WebGPU executor (VK-14, `tools/www/rvgpu-worker.js`, "video frames")
+
+The same message port (`vdec-port` -> `vdec-frame`) goes to `rvgpu-worker.js` when the executor is WebGPU
+(`rvGpu.vdecPort`, `tools/www/gpu-exec.js`; a WebGPU executor that waits for the first GPU program (VK-15) keeps the
+port until its Worker starts, and a Worker that finds no WebGPU device hands the port back for vrend's). There is no GL
+here, so what vrend does with `texImage2D` is done in WGSL:
+- the surface's two textures are the ones `rvgpu_present_grab(res)` gives for the two resources (vfront's zink image of
+  each virgl resource, `R8_UNORM` and `RG8_UNORM`; vfront's resources are global, so the guest's import in the player's
+  own open needs no attach on this executor);
+- the frame is imported as a `GPUExternalTexture` (`device.importExternalTexture`, no copy), and two render passes read it
+  with `textureLoad` at their own pixel: luma into the R8 texture, the mean of each 2x2 block's Cb/Cr into the R8G8 one,
+  through the inverse of the frame's colour-space matrix (the same `vdecMatrix` as gpu-exec.js; row 0 of the frame is
+  row 0 of the texture, as in the vrend path). If the browser will not import the frame, `copyExternalImageToTexture` into
+  an RGBA8 texture and the same passes (stats `vdecRgba`); if the shader path fails altogether, or `?vdec=exact`, or the
+  frame's visible rect is not its display size, `VideoFrame.copyTo` of the planes and `queue.writeTexture` (`vdecExact`:
+  bit for bit, at a readback and an upload);
+- frames are drawn between two ring drains (the Worker's loop drains, then pumps the queue), so the guest's draws that
+  came before the frame are recorded first, and what the guest sends after the "ready" word runs after the draw on the
+  one queue. The ready word is written whatever happened;
+- counts: `rvGpu.stats.exec.vdecFrames` (received), `vdecDrawn`, `vdecExternal`/`vdecRgba`/`vdecExact` (by path),
+  `vdecSkipped` (given back undrawn: no textures for the resources, or another format), `vdecErrors`, `vdecMs`,
+  `vdecLastMs`, `vdecLast`, `vdecPath`, `vdecError`.
+
+Under Node (`tools/gpu-nm.sh mpv`, `gpu/tools/vdec-draw-test.js`) the external-texture import cannot run (dawn.node takes no
+VideoFrame), so those runs exercise the RGBA path and the exact path; the import itself is the owner's check
+(`the manual test sheets`, VK-14).
 
 ### Copy (vaGetImage)
 
@@ -201,9 +229,9 @@ seq, address, off_y, pitch_y, off_uv, pitch_uv, width, height, size], 10 EXPORT,
 | gpuserver: video clients, the vdec ring; resource import | gpu/server/vdec.js; gpu/server/server.js |
 | rv: PRIME import across opens | rv/virtgpu.c |
 | vrend: attach/detach | gpu/vrend/rvgpu.c (built by gpu/vdec/build-vrend.sh against the VM's virglrenderer build), tools/www/gpu-exec.js |
-| page | tools/www/vdec-worker.js, tools/www/vdec.js, tools/www/gpu-exec.js (vdecFrame) |
+| page | tools/www/vdec-worker.js, tools/www/vdec.js, tools/www/gpu-exec.js (vdecFrame, vdecPort), tools/www/rvgpu-worker.js (video frames: the WebGPU executor) |
 | guest | tools/x/desktop (with `RVGPU_DRM=1`: `LIBVA_DRIVER_NAME=rvwasm LIBVA_DRIVERS_PATH=/run/rvgpu/va GST_VA_ALL_DRIVERS=1`; `RVVDEC=0` not), tools/stage.sh (the driver into /usr/lib/rvgpu/va), gpu/vdec/guest/run.sh |
-| tests | gpu/vdec/test/: native.sh, vdec-native-server.py, vdec-ref.c, export-test.c, js-test.js, check-dump.sh, chunks.py, make-media.sh; gpu/tools/vdec-stub.js (node-machine) |
+| tests | gpu/vdec/test/: native.sh, vdec-native-server.py, vdec-ref.c, export-test.c, js-test.js, check-dump.sh, chunks.py, make-media.sh; gpu/tools/vdec-stub.js (node-machine; `VDEC_STUB_GPU=executor`: a test card to the real WebGPU executor); gpu/tools/vdec-draw-test.js (the WebGPU executor's drawing on a Dawn device), `tools/gpu-nm.sh mpv` (mpv --hwdec=vaapi on the real executor) |
 
 Driver environment: `RVVDEC_DEBUG=1`, `RVVDEC_DUMP=FILE` (every chunk), `RVVDEC_TIMEOUT=MS`, `RVVDEC_WAIT=S`,
 `RVVDEC_CODECS=h264,vp9` (offer only those), `RVVDEC_NO_GPU=1` (no export), `RVVDEC_STATS=0`.
@@ -235,6 +263,20 @@ Driver environment: `RVVDEC_DEBUG=1`, `RVVDEC_DUMP=FILE` (every chunk), `RVVDEC_
   own (`check-dump.sh`), are the original's pictures exactly.
 - mpv `--hwdec=vaapi`: see the end of this file (results).
 
+## Verified on the WebGPU executor under Node (VK-14, 2026-10-13; Dawn's Node bindings on the Mac's Metal, no browser)
+
+- `gpu/tools/vdec-draw-test.js` (the Worker's own drawing code, a real Dawn device, test-card frames): 19 checks. The shader path
+  (an RGBA copy standing in for the import) puts luma within 1 code and chroma within 1 code of the card's own planes (full range
+  BT.709; BT.709 limited and BT.601 round-trip to 0 codes where the RGB was not clipped), the exact path is bit for bit, a
+  picture smaller than its surface leaves the rest untouched, missing or wrong-format textures still write the ready word, 20 frames
+  in a row all arrive in order, no validation errors.
+- `tools/gpu-nm.sh mpv` (mpv --hwdec=vaapi in the machine, the real executor, the stand-in decoder sending a test card): 60 chunks,
+  57 frames drawn of 57 sent (shader path from the RGBA copy, 7.4 ms a frame; `--exact`: 54 of 54, 0.7 ms), 0 skipped, 0 errors,
+  and 24 of 24 window PNGs show the card in mpv's window (eight bars in order, ramp rising to the right, bars on top). This needs
+  an rv with PRIME import across opens (the dev server's older initramfs says "PRIME import ... not done yet" and mpv's EGL import
+  then fails): the script overlays `build/vdec-nm/rv` when it is there.
+- Not run under Node: `device.importExternalTexture` (the browser's) and the real decoder.
+
 ## Not verified (the owner's checks): anything in a browser
 
 Chrome's VideoToolbox decode of these chunks, isConfigSupported's answers on the M4 Max, the executor's draw
@@ -251,7 +293,13 @@ into vrend's textures (WebGL with VideoFrame), mpv's picture on screen, timing.
 - Surface reuse ordering: the player's GL commands that still sample a surface travel on the GPU socket, a
   new decode into it on the video socket; the executor runs its ring up to date before each draw, which
   closes it unless both arrive within one turn.
-- `?exec=webgpu` (branch webgpu's executor) does not draw frames: copies only there.
+- On `?exec=webgpu` the frame's colour goes through the browser's conversion to sRGB on its way into the shader
+  (`importExternalTexture` converts to a destination colour space; BT.709's transfer function differs a little from sRGB's,
+  and the shader inverts only the matrix, as the vrend path does with WebGL's own YUV to RGB): expect tone differences in the
+  darks between `?exec=webgpu` and `?exec=vrend` and between either and `?vdec=exact`. The owner's sheet compares them.
+- A WebGPU Worker that dies before it says "ready" (a script error) has the decoder's port inside it: vrend takes the ring but
+  the port is lost, and zero-copy frames are not drawn (the driver's wait ends at its 10 s timeout). The no-device fallback
+  hands the port back. Device loss (VK-13) likewise terminates the Worker: programs that are running keep waiting.
 
 ## Not done
 

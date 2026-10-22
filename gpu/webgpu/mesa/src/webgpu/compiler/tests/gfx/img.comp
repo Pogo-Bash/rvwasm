@@ -1,0 +1,18 @@
+#version 450
+// Storage images: read-only, write-only and read-write (r32), 2D, 2D array and 3D, int and float formats, sizes.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D src;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray dst;
+layout(set = 0, binding = 2, r32ui) uniform uimage2D counters;
+layout(set = 0, binding = 3, rgba32i) uniform writeonly iimage3D vol;
+layout(set = 0, binding = 4, r32f) uniform image2D rw;
+void main()
+{
+	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	vec4 c = imageLoad(src, p);
+	imageStore(dst, ivec3(p, 1), c * 2.0);
+	uint v = imageLoad(counters, p).x;
+	imageStore(counters, p, uvec4(v + 1u));
+	imageStore(vol, ivec3(p, 0), ivec4(imageSize(src), imageSize(dst).z, 0));
+	imageStore(rw, p, imageLoad(rw, p) + vec4(1.0));
+}

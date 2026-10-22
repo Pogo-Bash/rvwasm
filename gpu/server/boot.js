@@ -67,6 +67,12 @@
     }
     return view;
   };
+  // The index of the 32-bit word at `address` in i32() (Atomics). The machine's memory can be larger than
+  // 4 GiB (mem=8192M: the page's default on a big computer), so an address is a Number of up to 2^34 and more:
+  // never turn one into an index, or a page or a rounded value, with `>> 2`, `& ~4095`, `| 0` or `>>> 0` (32-bit
+  // operators: above 2 GiB the index goes negative, above 4 GiB it wraps to a LOW address, the kernel's).
+  const ix32 = (address) => Math.floor(address / 4);
+  const roundUp = (n, to) => Math.ceil(n / to) * to;
   // For Atomics on a 32-bit word of the memory (index = address / 4).
   const i32 = () => {
     if (memory.buffer !== buffer) {
@@ -251,7 +257,7 @@
 
   const gs = {
     host, memory, C, SYS, sys0, sys1, sys2, sys3, sys4, sys5, sys6,
-    u8, dv, i32, alloc, free, text, cstring, path, P0, S, SCRATCH, PATH_MAX,
+    u8, dv, i32, ix32, roundUp, alloc, free, text, cstring, path, P0, S, SCRATCH, PATH_MAX,
     readFile, writeMem, writeAll, exit, argv, envp, env, home, log,
     debug: env("RVGPU_DEBUG") === "1",
   };
@@ -285,7 +291,7 @@
   };
 
   try {
-    gs.load("server.js");
+    gs.load(env("RVGPU_LOAD") || "server.js");	// (RVGPU_LOAD: a test program in the server's place, ballast.js)
   } catch (error) {
     if (error && error.name === "Trap") {
       throw error;

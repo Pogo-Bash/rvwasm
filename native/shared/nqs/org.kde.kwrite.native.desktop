@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=KWrite (native)
+GenericName=Text Editor
+Comment=KWrite as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run kwrite %U
+Icon=kwrite
+MimeType=text/plain;
+Categories=Qt;KDE;Utility;TextEditor;
+Terminal=false
+StartupWMClass=kwrite

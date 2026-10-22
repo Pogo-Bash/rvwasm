@@ -40,7 +40,7 @@
   const ST_SIZE = 4096 + 32 * 4096, ST_STATE = 8;
 
   const block = gs.alloc(HEADER + DATA_SIZE + 4096);
-  const ring = (block + 4095) & ~4095;
+  const ring = gs.roundUp(block, 4096);
   const data = ring + HEADER;
   u8().fill(0, ring, ring + HEADER + DATA_SIZE);
   {

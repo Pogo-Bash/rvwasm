@@ -64,7 +64,7 @@ The relay tells the page where it stands with a *text* WebSocket message (Ethern
 confused; only a page that connected with `&ctl=1` is sent any):
 `{"type":"net-state","state":"active"|"waiting","others":N,"queue":Q,"waiting":W,"cap":C}`. `others`: other machines of this
 address that have the network, `queue`: its place in line (0 when it has the network). `dev.html` keeps these messages from
-the machine and shows a small banner at the bottom of the page, outside the machine's display ("network relay in use by 2 others
+the machine and shows a small banner at the bottom of the page, outside the machine's display ("rvRelay in use by 2 others
 on your network (shared IP). waiting for a free slot, you're next; ..."), which disappears when the machine has the network; it
 also logs one line to the browser's console. Nothing is added inside the machine.
 
@@ -133,6 +133,24 @@ How it works:
   and 5xx too, and gives up (the read fails with EIO) only after two minutes on one piece. A 404 or a piece of the
   wrong size is tried twice. A bucket that answers 429/503 is left alone for its `Retry-After` and the site serves
   meanwhile. (`tests/disk-worker-remote.js` covers these rules.)
+- **Fetching ahead.** One synchronous request per piece (~0.15 s on a cache hit, 0.3 s on a miss) made a cold boot (some 810
+  pieces to the desktop) take two minutes of waiting. The disk worker therefore starts a second worker of its own, the
+  fetcher (the same file, named `disk-fetcher`), which fetches pieces nobody is waiting for yet: at most 6 requests at a
+  time (`?fetchers=N` on the page's address, 0 for none), **from the bucket only** (the site's pieces are rate limited per
+  address, see "The disk pieces, measured"), into 24 slots of shared memory that the disk worker empties into OPFS between
+  two kernel requests, so memory and writes stay bounded. What it fetches: the manifest's `boot` list (the pieces a cold
+  boot reads, in the order it reads them), then read-ahead on runs of consecutive pieces (4, then 8, then 16 ahead).
+  A piece the kernel waits for is never queued behind these: if the fetcher has it in flight it is waited for (never asked
+  twice), otherwise the disk worker asks for it itself, at once, and the fetcher runs one request fewer meanwhile. Without
+  OPFS, without a bucket in the manifest, with `fetchers=0` or if the fetcher does not come up, nothing is fetched ahead
+  and everything is as it was. The home disk's first-start copy (24 pieces) uses the same fetcher. `?trace` logs one
+  line per piece the kernel touches.
+  The `boot` list is `docker/boot/release.json`, made by `tools/boot-trace.sh` (a cold boot under `tools/release-nm.sh`
+  with the trace on, then `tools/boot-list.py`) and put into the manifests by `docker/patch-dist.sh` /
+  `tools/r2-publish.py` (`--boot-only` for a dist that is made). It is not part of the disk's `id`, so a deploy that adds
+  or changes it leaves the visitors' kept disks alone. A release with another `id` carries the list over by piece hash
+  until the next trace. `tests/disk-worker-pool.js` covers the pool (priority, a piece asked once, read-ahead, the boot
+  list, bounds, fallbacks, Retry-After).
 - The page's `Content-Security-Policy`: there is none today. If one is added, `connect-src` must include the bucket's domain.
 
 Set up once (Cloudflare):
@@ -164,6 +182,22 @@ Going back: put a manifest without `base` on the server (take the two keys `base
 its next boot. The objects stay in the
 bucket (they cost storage only; a bucket lifecycle rule can expire `disk/` objects older than the disks in use).
 
+### The shared libraries of `?dl=1` (`nqs` disk and `dl/`)
+
+Dynamic linking (docs/wasm-dynamic-linking.md) ships as two more sets of files, both inert for a visitor without `?dl=1`:
+the `nqs` disk (a read-only ext4 image of about 100 MB, 101 pieces, mounted at `/opt/nq-shared`; its pieces are named
+by sha256 like the others and go to the same bucket) and `dl/` (`libs.json` and the library files `<key>.wasm`, 77 files,
+92 MB). `docker/release.sh nqs` (also the end of `dist`) puts both into the dist; `publish` (or by hand
+`tools/r2-publish.py DIST --disk nqs --base https://disk.example.com/disk/` and `tools/r2-publish.py DIST --dl`) uploads
+what the bucket lacks. A library goes to `dl/<key>.wasm` with `Content-Type: application/wasm` (compileStreaming requires
+it) and the same immutable `Cache-Control`; `--dl` then rewrites `dl/libs.json` to the bucket's absolute addresses, last.
+`libs.json` is served by the site (`no-cache`: it is what switches the feature on), the files also by the site as a fallback
+(`/dl/<key>.wasm`, immutable): the Caddyfile has the zones `dl_10s`/`dl_1m`/`dl_1h` (100 per 10 s, 150 per minute, 800
+per hour per visitor) for them, `/dl/*` is kept out of the `www` and `big` zones, and `/dl/libs.json` counts with the pages.
+The release disk's `id` is not touched. When you copy a changed Caddyfile onto the server, write it **in place**
+(`cat new > docker/Caddyfile`, not scp/rsync over it): the container bind-mounts the file by inode, and a replaced file
+leaves it reading the old one.
+
 ## First deployment (what was done on the server)
 
 On the server (Ubuntu 24.04, Docker from Docker's own apt repository, `ubuntu` in the `docker` group, ports 80/443
@@ -171,7 +205,7 @@ open in iptables and in the cloud firewall):
 
     mkdir -p ~/rvwasm && cd ~/rvwasm
     # from the Mac (see "Updating" below): the tree's docker/, site/, tools/net-*.py, tools/initramfs-init,
-    # tools/www/dev.html, blenderweb/ (the image's build context needs it), docker-compose.yml, and the dist in dist/
+    # tools/www/dev.html, docker-compose.yml, and the dist in dist/
     cat > .env <<'ENV'
     RV_DOMAIN=plasmaontheweb.com
     RV_WWW_DOMAIN=www.plasmaontheweb.com
@@ -232,6 +266,50 @@ new one. A changed Caddyfile (limits, headers): copy it to `~/rvwasm/docker/Cadd
 (the image is not rebuilt; see "Abuse protection"). To update the server's compose files, Caddyfile or relay scripts: rsync the tree's `docker/`, `site/`,
 `tools/net-relay.py`, `tools/net-setup.sh`, `docker-compose.yml` into `~/rvwasm` the same way (`rsync -a --relative`), then `docker compose up -d --build` (the relay restarts: open
 machines lose their network for a moment and reconnect only after a reload).
+
+## GPU executor switch (the kill switch of the WebGPU program)
+
+Which GPU executor a visitor's page starts is decided in the visitor's browser (`tools/www/gpu-exec.js`), from this
+order: `?exec=` in the address, then the server's `rv-site.json` key `gpu_exec`, then `vrend`. The key is the operator's
+switch. `rv-site.json` is not a file: `docker/Caddyfile` answers `/rv-site.json` with JSON built from environment variables
+(`RV_DISK`, `RV_GPU_EXEC`), `Cache-Control: no-cache`, and the page reads it with `cache: no-store`.
+
+| `RV_GPU_EXEC` | the page starts |
+|---|---|
+| `vrend` (the default; anything else is read as this too) | virglrenderer on WebGL2, for everyone |
+| `auto` | WebGPU (`rvgpu-worker.js`) in Chrome or Edge on a desktop (decision D1) whose adapter passes the page's probe (`MIN_LIMITS` in gpu-exec.js: 4 bind groups, 8 colour attachments, 128 MiB storage bindings, 256 MiB buffers, not a software adapter); vrend in every other browser |
+| `webgpu` | the same without the browser rule (any browser with `navigator.gpu` and a passing adapter): for trying it |
+
+A WebGPU executor that cannot start falls back by itself: no `navigator.gpu`, a failed probe, no device (the Worker's
+"fallback"), a Worker that dies before it is ready: all give vrend on the same ring; a vrend that fails leaves the guest to
+software (gpuserver's `rvgpu-0.none` after 10 s). A WebGPU device that is lost mid-session makes gpuserver write
+`rvgpu-0.none` at once: programs started from then on draw in software; open GPU programs keep the lost executor until the
+page is reloaded, and the page says so in a one-line notice. `?exec=vrend|webgpu|auto` in the address overrides the
+server's value for that visitor (`?exec=webgpu` skips the probe and the browser rule: it is how the site is tried while
+`RV_GPU_EXEC=vrend`).
+
+**Throw the switch (no redeploy, no page change).** On the server, in `~/rvwasm`:
+
+    sed -i '/^RV_GPU_EXEC=/d' .env && echo RV_GPU_EXEC=vrend >> .env      # or auto / webgpu
+    docker compose up -d --no-deps caddy                                   # recreates Caddy only (about 2 s)
+    curl -s https://plasmaontheweb.com/rv-site.json                       # must show "gpu_exec": "vrend"
+
+Why not `caddy reload`: Caddy substitutes `{$RV_GPU_EXEC}` from its container's environment, and a reload inside the
+running container does not see a changed `.env`; the container has to be recreated (a `docker compose restart caddy`
+does not re-read `.env` either). It takes effect on each visitor's next page load; **open tabs keep their executor until
+reloaded**. Rollback is the same command with `vrend`. The first time (the Caddyfile and `docker-compose.yml` need the new
+key): rsync `docker/Caddyfile` and `docker-compose.yml` into `~/rvwasm` (see "Updating the dist"), then the three lines above.
+The default stays `vrend` until the owner sheet (`the manual test sheets`, later `vulkan.md`) has passed. Locally,
+`docker/serve.py --gpu-exec EXEC` (or `RV_GPU_EXEC=EXEC docker compose up -d` for the `www` service) does the same.
+
+**Opt-in on the live site (2026-10-14).** The WebGPU executor is deployed but the site default is untouched: the live
+Caddyfile has no `gpu_exec` key (so `rv-site.json` gives no value and the page reads `vrend`), and only `?exec=webgpu` in the
+address starts it. What `tools/deploy.sh` ships for it, through `docker/patch-dist.sh` in the build VM's dist: `vdec.js` and
+`rvgpu-worker.js` (this tree's page files), `www/rvgpu/` from `RV_RVGPU_DIR` (a stamped, clean build: `tools/rvgpu-stamp-check.py`),
+and the venus tree (`RV_VENUS_DIR`: Mesa's venus driver, vulkaninfo, vkcube and their ICD files; no lavapipe, 2.5 MB compressed, which
+every visitor would otherwise download in the boot image) as `/usr/lib/rvgpu/venus` in the boot image, with the tree's `desktop` script
+and `gpu/server/*.js`. Nothing of it runs unless the visitor's page chose the WebGPU executor (the ready file says `"venus"` then).
+`tools/vkship-check.sh` is the browser gate (`exec-webgpu`, `exec-default`).
 
 ## Abuse protection
 

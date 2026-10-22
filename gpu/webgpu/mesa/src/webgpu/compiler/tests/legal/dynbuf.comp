@@ -1,0 +1,16 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : require
+// dynamically indexed arrays of UBOs and SSBOs (loads, stores, atomics, lengths); no word is both
+// written and read by different invocations
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) uniform U { uint v[64]; } ubos[3];
+layout(set = 0, binding = 1) buffer S { uint w[]; } ssbos[4];
+layout(set = 0, binding = 2) buffer Out { uint o[]; };
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   uint k = i % 3u, j = (i / 3u) % 4u;
+   uint a = ubos[k].v[(i * 5u) & 15u];
+   atomicAdd(ssbos[nonuniformEXT(j)].w[i & 31u], a);
+   ssbos[(j + 1u) & 3u].w[64u + i] = a + uint(ssbos[j].w.length());
+   o[i] = ssbos[j].w[128u + i] + k;
+}

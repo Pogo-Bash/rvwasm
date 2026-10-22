@@ -1,0 +1,16 @@
+#!/bin/sh
+# The shell Konsole starts (SHELL): Debian's bash, through `debian` (tools/debian-enter) when run natively, or directly
+# when run inside the chroot (the launcher: there /bin/bash is Debian's). Without a Debian system, BusyBox's sh. Konsole's
+# own command lines are `-c COMMAND`.
+if [ -x /usr/bin/bash ]; then
+	[ $# -eq 0 ] && exec /bin/bash -l
+	exec /bin/bash "$@"
+fi
+if [ -x /debian/usr/bin/bash ] && [ -x /bin/debian ]; then
+	if [ "$1" = -c ]; then
+		shift
+		exec /bin/debian "$@"
+	fi
+	exec /bin/debian
+fi
+exec /bin/sh "$@"

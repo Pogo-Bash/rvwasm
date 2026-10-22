@@ -474,6 +474,11 @@
     const wait = () => {
       const seen = Atomics.load(core.w32(), bell);
       core.turn();
+      if (typeof Atomics.waitAsync !== "function") {
+        // (Firefox before 145: no Atomics.waitAsync; look again in 2 ms, a doorbell waits that long at most)
+        setTimeout(wait, 2);
+        return;
+      }
       const r = Atomics.waitAsync(core.w32(), bell, seen, 100);
       (r.async ? r.value : Promise.resolve()).then(wait);
     };

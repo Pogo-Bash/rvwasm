@@ -156,16 +156,120 @@
     return fds;
   };
 
+  // The desktop shell is not an X program. With DISPLAY set (the programs it starts, the panel's launchers, inherit
+  // it, so it is) plasmashell opens one X connection of its own at start: its KScreen XRandR backend asks for the
+  // RANDR extension (the first request, seen with a stand-in X server) and gives up at once without it. That one
+  // connection would start Xwayland for the whole session, and with the shell's connection open it would never end.
+  // Until the shell has made it, a pending connection is therefore taken here and its process looked at (SO_PEERCRED):
+  // the shell's is closed, the display stays unserved; anyone else's starts Xwayland as before and is carried to it
+  // (bridge: the first X program in the first minute of a session, before the shell has made its connection, a
+  // connection that cannot pass descriptors). The window ends with the shell's connection, or after WINDOW seconds.
+  const WINDOW = 60;
+  let shellProbed = env("WLSERVER_SHELL") !== "plasma" || env("WLSERVER_X_PEEK") === "0";
+  const t0 = performance.now();
+  let carried = -1;		// an X program's connection taken before Xwayland ran, to be carried to it
+  const peerCommand = (fd) => {
+    const b = ws.alloc(16), l = ws.alloc(4);
+    ws.dv().setInt32(l, 12, true);
+    const r = ws.sys5(SYS.getsockopt, fd, 1 /* SOL_SOCKET */, 17 /* SO_PEERCRED */, b, l);
+    const peer = r === 0 ? ws.dv().getInt32(b, true) : 0;
+    ws.free(b);
+    ws.free(l);
+    return { pid: peer, cmd: peer > 0 ? (ws.readText("/proc/" + peer + "/cmdline") || "").replace(/\0/g, " ").trim() : "" };
+  };
+
+  // Carries an accepted X connection (a) to the display's socket once Xwayland listens: bytes both ways until one ends.
+  const bridge = (a) => {
+    const c = sys3(SYS.socket, AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    const addr = ws.alloc(112);
+    ws.u8().fill(0, addr, addr + 112);
+    ws.dv().setUint16(addr, AF_UNIX, true);
+    const raw = new TextEncoder().encode(SOCKET);
+    ws.u8().set(raw, addr + 2);
+    const r = c < 0 ? c : sys3(SYS.connect, c, addr, 2 + raw.length + 1);
+    ws.free(addr);
+    if (r < 0) {
+      log("xwm: cannot reach the display's socket for the first X program (error " + -r + ")");
+      sys1(SYS.close, a);
+      if (c >= 0) {
+        sys1(SYS.close, c);
+      }
+      return;
+    }
+    const buf = ws.alloc(16384);
+    let open = true;
+    const end = () => {
+      if (!open) {
+        return;
+      }
+      open = false;
+      ws.unwatchFd(a);
+      ws.unwatchFd(c);
+      sys1(SYS.close, a);
+      sys1(SYS.close, c);
+      ws.free(buf);
+    };
+    const move = (from, to) => () => {
+      while (open) {
+        const n = sys3(SYS.read, from, buf, 16384);
+        if (n === -4) {
+          continue;
+        }
+        if (n === -11) {
+          return;
+        }
+        if (n <= 0 || ws.writeAll(to, ws.u8().slice(buf, buf + n)) < 0) {
+          end();
+          return;
+        }
+      }
+    };
+    ws.watchFd(a, move(a, c));
+    ws.watchFd(c, move(c, a));
+  };
+
   const onPending = () => {
+    if (!shellProbed && performance.now() - t0 > WINDOW * 1000) {
+      shellProbed = true;
+    }
+    if (!shellProbed) {
+      const fd = sys4(SYS.accept4, listener, 0, 0, SOCK_NONBLOCK | SOCK_CLOEXEC);
+      if (fd < 0) {
+        return;	// (nothing there after all: the level-triggered watch fires again when something is)
+      }
+      const peer = peerCommand(fd);
+      if (/(^|\/)plasmashell$/.test(peer.cmd.split(" ")[0])) {
+        shellProbed = true;
+        sys1(SYS.close, fd);
+        log("xwm: the desktop shell (process " + peer.pid + ") looked at the X display and was turned away: Xwayland stays off until an X program asks");
+        return;
+      }
+      log("xwm: an X program (process " + peer.pid + ") connected before the shell did: carried to Xwayland");
+      shellProbed = true;
+      carried = fd;
+    }
     ws.unwatchFd(listener);	// (Xwayland accepts on it from now on)
     const t = performance.now();
     starts = starts.filter((s) => t - s < 30000);
     if (starts.length >= 3) {
       log("xwm: Xwayland was started three times in 30 seconds: not again (see " + LOG + ")");
+      if (carried >= 0) {
+        sys1(SYS.close, carried);
+        carried = -1;
+      }
       return;
     }
     starts.push(t);
     start();
+    if (carried >= 0) {
+      const a = carried;
+      carried = -1;
+      if (xpid) {
+        bridge(a);
+      } else {
+        sys1(SYS.close, a);
+      }
+    }
   };
 
   const start = () => {

@@ -24,14 +24,26 @@ SF_OBJS := $(SF_NAMES:%=$(O)/sf/%.o)
 SF_LIB := $(O)/libsoftfloat.a
 vpath %.c $(SF)/source $(SF)/source/RISCV
 
-SRCS := main.c interp.c bitmanip.c compressed.c fp.c vector.c elf.c fork.c heapcheck.c identity.c jit.c mm.c seccomp.c signal.c syscall.c thread.c virtgpu.c
+SRCS := main.c interp.c bitmanip.c compressed.c fp.c vector.c elf.c fork.c heapcheck.c identity.c jit.c jitcache.c mm.c seccomp.c signal.c syscall.c thread.c virtgpu.c wasm_emu.c
 OBJS := $(SRCS:%.c=$(O)/%.o)
 
 $(O)/rv: $(OBJS) $(SF_LIB)
-	$(CC) $(CFLAGS) $(LDFLAGS) -pthread -o $@ $(OBJS) $(SF_LIB)
+	$(CC) $(CFLAGS) $(LDFLAGS) -pthread -o $@ $(OBJS) $(SF_LIB) -lm
 
-$(O)/%.o: %.c rv.h wasm_emit.h virtgpu_formats.h | $(O)
+$(O)/%.o: %.c rv.h wasm_emit.h wasm_emu.h virtgpu_formats.h | $(O)
 	$(CC) $(CFLAGS) -pthread $(WARN) $(FP) $(SF_TLS) $(SF_INC) -c -o $@ $<
+
+# Translations kept from one process to another (jitcache.c) are only good for the translator that made them:
+# its sources' hash is in every key.
+# (All of rv's sources, not only the translator's: fp.c and bitmanip.c decide what is translated and which
+# operands a region fetches, interp.c expands compressed instructions into what the translator sees, mm.c and
+# the headers lay out what the code addresses. Any change to rv is a new generator as far as a kept record knows.)
+JC_SOURCES := $(SRCS) rv.h wasm_emit.h virtgpu_formats.h
+$(O)/jc_source.h: $(JC_SOURCES) | $(O)
+	echo "#define RV_JIT_SOURCE 0x$$(cat $(JC_SOURCES) | sha256sum | cut -c1-16)ULL" > $@
+
+$(O)/jitcache.o: jitcache.c $(O)/jc_source.h rv.h | $(O)
+	$(CC) $(CFLAGS) -pthread $(WARN) -I$(O) -c -o $@ $<
 
 $(SF_LIB): $(SF_OBJS)
 	rm -f $@

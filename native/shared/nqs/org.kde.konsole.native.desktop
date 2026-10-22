@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Konsole (native)
+GenericName=Terminal Emulator
+Comment=Konsole as a WebAssembly program on shared libraries (nqs disk), opening Debian's bash
+Exec=/opt/nq-shared/bin/nqs-run konsole
+Icon=utilities-terminal
+Categories=Qt;KDE;System;TerminalEmulator;
+Terminal=false
+StartupWMClass=konsole

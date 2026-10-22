@@ -25,6 +25,8 @@
 //     type:TEXT           the keys that make TEXT on a US keyboard
 //     key:NAME            one key (Enter, Escape, Tab, Backspace, Up, Down, Left, Right, F1..F12, a letter),
 //                         with modifiers before it: key:ctrl+shift+c
+//     latency:CHAR        press CHAR (a US key) and report the milliseconds until a window next presents (the echo), and until
+//                         the screen has been quiet for 300 ms (the run of presents it caused)
 //     shot:NAME           the composed screen (windows by their order, decorated ones in a plain frame) as NAME.png
 //     clip                print the guest's clipboard as the page would give it to the host
 //     hostclip:TEXT       put TEXT in the table as the page does with the host's clipboard, and wait for the server
@@ -377,6 +379,14 @@ module.exports = (os, run) => {
         }
         seq2 = Atomics.load(w32, at / 4);
       } while (seq1 !== seq2 || (seq1 & 1));
+      // (A slot of a table whose server ended and whose memory was reused, magic still in place, can settle with garbage in it: a
+      // buffer address beyond the memory. The server of `desktop wayland sh -c ...` that ends with its first client leaves such a table.
+      // Let it go: the live server announces its own every second.)
+      if (s.id && s.format !== 2 && s.buffer && s.buffer + s.stride * s.bh > memory.buffer.byteLength) {
+        console.error("[wl-dump] slot " + i + " has a buffer beyond the memory (a table that outlived its server): the table is let go");
+        announced = null;
+        return;
+      }
       if (s.id) {
         current.push(s);
       }
@@ -552,6 +562,28 @@ module.exports = (os, run) => {
           }
         }
         break;
+      case "latency": {
+        const k = CHARS[arg[0]];
+        look();
+        const before = lastPresentAt;
+        const start = Date.now();
+        os.screen_input(0, k[0], 1);
+        await sleep(20);
+        os.screen_input(0, k[0], 0);
+        let first = 0;
+        for (let spent = 0; spent < 10000; spent += 5) {
+          await sleep(5);
+          look();
+          if (!first && lastPresentAt > before) {
+            first = lastPresentAt - start;
+          }
+          if (first && Date.now() - lastPresentAt > 300) {
+            break;
+          }
+        }
+        console.log("[wl-dump] latency:" + arg + " first present " + first + " ms, last " + (lastPresentAt - start) + " ms");
+        break;
+      }
       case "key": {
         const parts = arg.toLowerCase().split("+");
         const main = parts.pop();

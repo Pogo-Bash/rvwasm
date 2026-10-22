@@ -122,7 +122,7 @@
 				window 10s
 				events 40
 				match {
-					path / /index.html /desktop /desktop/ /dev.html /rv-site.json /robots.txt /sitemap.xml /site.webmanifest
+					path / /index.html /desktop /desktop/ /dev.html /probe /probe/ /probe.html /rv-site.json /robots.txt /sitemap.xml /site.webmanifest /dl/libs.json
 				}
 			}
 			zone pages_1m {
@@ -130,7 +130,7 @@
 				window 1m
 				events 150
 				match {
-					path / /index.html /desktop /desktop/ /dev.html /rv-site.json /robots.txt /sitemap.xml /site.webmanifest
+					path / /index.html /desktop /desktop/ /dev.html /probe /probe/ /probe.html /rv-site.json /robots.txt /sitemap.xml /site.webmanifest /dl/libs.json
 				}
 			}
 
@@ -171,7 +171,7 @@
 						root /dist/www
 						try_files {path}
 					}
-					not path /dev.html *.wasm *.cpio.gz
+					not path /dev.html *.wasm *.cpio.gz /dl/*
 				}
 			}
 			zone www_1m {
@@ -183,7 +183,7 @@
 						root /dist/www
 						try_files {path}
 					}
-					not path /dev.html *.wasm *.cpio.gz
+					not path /dev.html *.wasm *.cpio.gz /dl/*
 				}
 			}
 
@@ -195,6 +195,7 @@
 				events 60
 				match {
 					path *.wasm *.cpio.gz
+					not path /dl/*
 					file {
 						root /dist/www
 						try_files {path}
@@ -207,10 +208,41 @@
 				events 400
 				match {
 					path *.wasm *.cpio.gz
+					not path /dl/*
 					file {
 						root /dist/www
 						try_files {path}
 					}
+				}
+			}
+
+			# the shared libraries of ?dl=1 (dl/<key>.wasm, 77 files, 92 MB; the page takes them from the bucket,
+			# disk.plasmaontheweb.com/dl/, and only comes here if the bucket is unreachable, or for a self-hosted
+			# setup without one): a first visit with the flag on fetches the 28 preloaded ones at once, a program that
+			# is started later up to 77 in all, then the browser keeps them for ever (immutable). Kept out of www and big
+			# (above) so that those keep their numbers; dl/libs.json is counted with the pages.
+			zone dl_10s {
+				import perip
+				window 10s
+				events 100
+				match {
+					path_regexp ^/dl/[^/]+\.wasm$
+				}
+			}
+			zone dl_1m {
+				import perip
+				window 1m
+				events 150
+				match {
+					path_regexp ^/dl/[^/]+\.wasm$
+				}
+			}
+			zone dl_1h {
+				import perip
+				window 1h
+				events 800
+				match {
+					path_regexp ^/dl/[^/]+\.wasm$
 				}
 			}
 
@@ -304,34 +336,6 @@
 				}
 			}
 
-			# Blender's page and files (/blender/, blenderweb/; docs/deploy.md "Blender"): a Blender window costs about 8
-			# requests, two of them big (the engine, 145 MB, and Blender's files, 67 MB; sent compressed, and the
-			# browser keeps them for a day). The big two get an hourly limit of their own.
-			zone blender_10s {
-				import perip
-				window 10s
-				events 60
-				match {
-					path /blender /blender/*
-				}
-			}
-			zone blender_1m {
-				import perip
-				window 1m
-				events 150
-				match {
-					path /blender /blender/*
-				}
-			}
-			zone blender_big_1h {
-				import perip
-				window 1h
-				events 40
-				match {
-					path /blender/release/blender.wasm /blender/release/assets.tar
-				}
-			}
-
 			# requests for something that is not there (scanners looking for .env, wp-login.php, /admin, piece
 			# numbers): nothing real asks for these more than a couple of times
 			zone miss_10s {
@@ -339,7 +343,7 @@
 				window 10s
 				events 10
 				match {
-					not path /relay /relay/* /rv-site.json /desktop /desktop/ /blender /blender/*
+					not path /relay /relay/* /rv-site.json /desktop /desktop/ /probe /probe/
 					not file {
 						root /dist/www
 						try_files {path}
@@ -362,7 +366,7 @@
 				window 1m
 				events 30
 				match {
-					not path /relay /relay/* /rv-site.json /desktop /desktop/ /blender /blender/*
+					not path /relay /relay/* /rv-site.json /desktop /desktop/ /probe /probe/
 					not file {
 						root /dist/www
 						try_files {path}
@@ -395,56 +399,15 @@
 
 		# what dev.html takes from the server (docker/serve.py does the same for the local setup): the relay is on this
 		# address under /relay, the machine's resolver is the relay's own DNS server, and the disk.
+		# gpu_exec (RV_GPU_EXEC: vrend, webgpu or auto; anything else counts as vrend) is the GPU program's kill switch,
+		# tools/www/gpu-exec.js reads it: vrend = every visitor on virglrenderer/WebGL2 (the default), auto = WebGPU for
+		# Chrome/Edge on a desktop whose adapter passes the page's probe, webgpu = the same without the browser test.
+		# ?exec= in the address overrides it. Caddy reads the variable when the container starts: change it in .env and
+		# `docker compose up -d --no-deps caddy` (docs/deploy.md "GPU executor switch"); a `caddy reload` alone does not
+		# see a changed container environment. The answer is not cached, so it holds from the next page load.
 		handle /rv-site.json {
 			header Content-Type application/json
-			respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}", "blender": "{$RV_BLENDER_URL:}"}` 200
-		}
-
-		# Blender (Puter's WebGPU build, blenderweb/): its page and files, from /blender (the tree's blenderweb/www/
-		# and the unpacked release in release/; tools/deploy-blender.sh). The machine's page frames it, and it has to be
-		# a SITE of its own (another registrable domain than the page's: Chrome then gives it a process of its own, a
-		# subdomain would share the page's): RV_BLENDER_URL, the address the page is told in rv-site.json, is
-		# https://OTHER-DOMAIN/blender/ and OTHER-DOMAIN is one of this server's names (RV_ALT_DOMAINS). The frame
-		# needs what a frame of a cross-origin-isolated page needs (COEP require-corp, CORP cross-origin) and only the
-		# machine's page may embed it. The two big files are served compressed (blender.wasm.zst/.gz next to them,
-		# tools/deploy-blender.sh makes them): this Caddy would otherwise compress 212 MB per visitor on two cores.
-		@blenderslash path /blender
-		redir @blenderslash /blender/ 308
-		handle_path /blender/* {
-			root * /blender
-			header {
-				>Cross-Origin-Resource-Policy cross-origin
-				>Cross-Origin-Embedder-Policy require-corp
-				>Content-Security-Policy "frame-ancestors {$RV_BLENDER_ANCESTORS:https://localhost}"
-				>X-Robots-Tag "noindex"
-			}
-			@blenderrelease path /release/*
-			header @blenderrelease >Cache-Control "public, max-age=86400"
-			# The big two from their compressed copies, by hand: file_server's own `precompressed` answers 206 (a
-			# partial answer holding the whole file) to a request without a Range, which no cache should have to
-			# understand. zstd where the browser accepts it, else gzip, else the file as it is.
-			@bigzst {
-				path /release/blender.wasm /release/assets.tar
-				header Accept-Encoding *zstd*
-			}
-			@biggz {
-				path /release/blender.wasm /release/assets.tar
-				header Accept-Encoding *gzip*
-				not header Accept-Encoding *zstd*
-			}
-			@bigwasm path /release/blender.wasm
-			@bigtar path /release/assets.tar
-			route {
-				header @bigzst >Content-Encoding zstd
-				header @biggz >Content-Encoding gzip
-				header @bigzst >Vary Accept-Encoding
-				header @biggz >Vary Accept-Encoding
-				header @bigwasm >Content-Type application/wasm
-				header @bigtar >Content-Type application/x-tar
-				rewrite @bigzst {path}.zst
-				rewrite @biggz {path}.gz
-				file_server
-			}
+			respond `{"net_path": "/relay", "dns": "10.0.5.1", "disk": "{$RV_DISK:release}", "gpu_exec": "{$RV_GPU_EXEC:vrend}"}` 200
 		}
 
 		# the disk: 1 MiB pieces (named by number, no extension) and a manifest, ranges and ETags from the file server.
@@ -469,6 +432,18 @@
 			file_server
 		}
 
+		# The browser probe (tools/www/probe.html; docs/firefox.md): one self-contained page that tests, in the visitor's
+		# browser, what the machine needs. Served at /probe from the same files as the machine, not indexed.
+		@probeslash path /probe/
+		redir @probeslash /probe 302
+		@probe path /probe /probe.html
+		handle @probe {
+			header X-Robots-Tag "noindex, nofollow"
+			rewrite * /probe.html
+			root * /dist/www
+			file_server
+		}
+
 		# The landing page and its files (site/ in the tree, mounted at /site): /, robots.txt, sitemap.xml, the icons,
 		# assets/. A Search Console verification file (googleXXXX.html) dropped into site/ is served here too.
 		@site file {
@@ -489,6 +464,19 @@
 			header @robots Content-Type "text/plain; charset=utf-8"
 			@sitemap path /sitemap.xml
 			header @sitemap Content-Type "application/xml; charset=utf-8"
+			file_server
+		}
+
+		# the shared libraries of ?dl=1 and their manifest (dist/www/dl/, tools/dl-manifest.py): a library's name is its
+		# content key, so it never changes under it (immutable, application/wasm for compileStreaming); libs.json is what
+		# switches the feature on for a page and is always revalidated (the default no-cache above).
+		handle /dl/* {
+			root * /dist/www
+			header X-Robots-Tag "noindex"
+			@dlkeyed path_regexp ^/dl/[0-9a-f]+-[0-9]+\.wasm$
+			# (a `>` header here replaces the ? default of CORP above for this handle; say it again)
+			header @dlkeyed >Cache-Control "public, max-age=31536000, immutable"
+			header @dlkeyed >Cross-Origin-Resource-Policy same-origin
 			file_server
 		}
 

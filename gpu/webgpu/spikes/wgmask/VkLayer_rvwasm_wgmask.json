@@ -1,0 +1,11 @@
+{
+  "file_format_version": "1.1.2",
+  "layer": {
+    "name": "VK_LAYER_RVWASM_wgmask",
+    "type": "GLOBAL",
+    "library_path": "/out/wgmask/libVkLayer_rvwasm_wgmask.so",
+    "api_version": "1.4.0",
+    "implementation_version": "1",
+    "description": "Vulkan as a WebGPU-backed driver could offer it (spike)"
+  }
+}

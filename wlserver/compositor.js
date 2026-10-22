@@ -381,7 +381,7 @@
       kind: surface.sub ? KIND_SUBSURFACE : (surface.xdg && surface.xdg.popup) || xpopup ? KIND_POPUP
         : surface.role === "dnd_icon" ? KIND_DRAG_ICON : surface.layer ? KIND_LAYER : KIND_TOPLEVEL,
       x, y, w, h,
-      z: surface.z, flags, geometry: ws.geometry(surface),
+      z: surface.z, flags, geometry: (surface.layer && ws.layerVisible && ws.layerVisible(surface)) || ws.geometry(surface),
       present: latest ? latest.id : surface.presentSeq,
       buffer: buffer ? bufferAddress(buffer) : 0,
       stride: buffer ? buffer.stride : 0,

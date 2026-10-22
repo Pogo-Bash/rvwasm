@@ -1,13 +1,15 @@
 // Guest players' video, decoded by this browser (docs/video-decode.md): starts the decoder's Worker
 // (vdec-worker.js) on gpuserver's announcement ("rv-gpu", whose `vdec` is the vdec ring), hands it the machine's
 // memory, and joins it to the GPU executor's Worker (window.rvGpu.vdecPort) so that frames can be drawn into
-// guest surfaces without passing through the machine (zero copy). Without an executor that draws (no GPU, or
-// ?exec=webgpu) the guest's players copy frames (vaapi-copy).
+// guest surfaces without passing through the machine (zero copy). Both executors draw them: vrend with
+// WebGL (gpu-exec.js, vdecFrame) and the WebGPU one with a shader or the planes' bytes (rvgpu-worker.js, "video
+// frames"; VK-14). Without an executor (no GPU) the guest's players copy frames (vaapi-copy).
 //   ?vdec=off       no decoder: guest players decode in software
 //   ?vdec=exact     zero copy draws the frame's own Y and CbCr bytes (copyTo + upload) instead of a GPU round
 //                   trip through RGB, which is not bit-exact
 //   ?vdecframes=MiB frames kept for later copies, at most (384)
-// window.rvVdec: { caps, stats, held, gpu } for the console.
+// window.rvVdec: { caps, stats, held, gpu } for the console; the executor's side of the frames is rvGpu.stats.exec
+// (vdecFrames received, vdecDrawn, vdecExternal / vdecRgba / vdecExact by path, vdecSkipped, vdecErrors, vdecMs).
 (() => {
   "use strict";
   const params = new URLSearchParams(location.search);
@@ -56,10 +58,12 @@
     if (started || !m || m.type !== "gpu" || !m.vdec || !os || !os.memory) {
       return;
     }
-    // (the executor starts on the same announcement: give it a moment to have its Worker, then join them)
+    // (the executor starts on the same announcement: give it a moment to have its Worker, then join them. A WebGPU
+    // executor that waits for the first GPU program (stats.lazy) has no Worker for a long time: rvGpu.vdecPort keeps
+    // the port for it, so there is nothing to wait for.)
     first = first || performance.now();
     const g = window.rvGpu && window.rvGpu.stats;
-    if (g && !g.exec_kind && performance.now() - first < 5000 && params.get("gpu") !== "off") {
+    if (g && !g.exec_kind && g.lazy !== "waiting" && performance.now() - first < 5000 && params.get("gpu") !== "off") {
       return;
     }
     start(os.memory, m.vdec);

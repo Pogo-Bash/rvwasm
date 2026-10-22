@@ -1,0 +1,9 @@
+# layered rendering: a GS writes gl_Layer (and gl_ViewportIndex); the pass has 2 layers, layer 1 is compared
+# (wgvk renders a WebGPU pass per layer; the fragment shader discards other layers' primitives)
+draw plain count 24 instances 2
+topology triangles
+vb 0 stride 8 rate vertex data floats
+attr 0 binding 0 format R32G32_FLOAT offset 0
+layer 1
+viewport 0 0 0 64 64 0 1
+viewport 1 8 4 40 50 0 1

@@ -602,6 +602,7 @@
     }
     if (bar) {
       bar.style.display = "none";
+      document.documentElement.classList.remove("rv-desk");
     }
     if (panel) {
       panel.style.display = "none";
@@ -672,6 +673,7 @@
       say("display: drawing windows from the table (" + table.slots + " slots)");
       if (bar) {
         bar.style.display = "";
+        document.documentElement.classList.add("rv-desk");
       }
       resize();
       sendLayout();
@@ -735,7 +737,7 @@
         surfaces.set(i, surface);
         if (surface.present !== before && (!g.present || g.present === s.present)) {
           stats.gpuPresents = (stats.gpuPresents || 0) + 1;
-          Atomics.store(w32, (at + S_UPLOADED) >> 2, s.present);
+          Atomics.store(w32, (at + S_UPLOADED) / 4, s.present);
         }
         s.surface = surface;
         // (as for any window below: without its desktop a GPU window counts as on another one, never drawn)
@@ -1616,6 +1618,12 @@
         // under it show through, the frame of a window below included)
         const of = frames.get(o.id), fr = frameRect(o, titleH, border);
         holes.push(T && of && of.visible ? [fr[0] + of.visible[0], fr[1] + of.visible[1], of.visible[2], of.visible[3]] : fr);
+      } else if (o.kind === KIND_LAYER) {
+        // (a panel's surface is larger than the panel: plasmashell's floating gap and shadow room are transparent. The
+        // server puts the part that is the panel into the slot's geometry (layershell.js layerVisible); a window's frame
+        // is cut only by that, so that a title bar below the panel is not eaten by the panel's empty margin)
+        const g = o.geometry;
+        holes.push(g && g[2] > 0 && g[3] > 0 ? [o.sx + g[0], o.sy + g[1], g[2], g[3]] : [o.sx, o.sy, o.w, o.h]);
       } else {
         holes.push([o.sx, o.sy, o.w, o.h]);
       }
@@ -1766,7 +1774,7 @@
   };
 
   // ---- pages shown in windows (embed): a program of the machine makes a window whose app id is
-  // "rvembed-TOKEN.NAME" and asks the page (on a channel of its own: blenderweb.js) to show a page there; the page
+  // "rvembed-TOKEN.NAME" and asks the page (on a channel of its own) to show a page there; the page
   // registers the element (an iframe) with rvDisplay.embed(TOKEN, element, { focus, blur }) and it is laid over the
   // window's geometry here, every frame: above the window's own frame, under the windows above it (cut to what
   // they leave), hidden with the window. The window is the server's like any other (moved, resized, stacked,
@@ -2361,8 +2369,8 @@
   // For a heavy page someone opened in the machine's Firefox or Chromium (video above all): its address is
   // read the way a person would, Ctrl-L (the address bar) and Ctrl-C, which puts it on the guest's clipboard,
   // and so, by the bridge, here (the clipboard above); then Escape closes the address bar's list. The address
-  // goes to hostopen.js, which opens it at once if the key or the click that asked is still the page's user
-  // activation (Chrome: five seconds), and shows it as a link to click otherwise. What it costs: the address
+  // goes to hostopen.js, which asks the person first, as for every address from the machine (a box at the top
+  // of the page: Open / Cancel; nothing opens without that click). What it costs: the address
   // is on the guest's and the host's clipboard afterwards, and the address bar keeps the keyboard.
   const BROWSERS = /firefox|chromium|chrome|falkon|epiphany|konqueror|midori/i;
   let sending = false, lastSend = null;
@@ -2398,8 +2406,7 @@
         send(c, false);
       }
       const began = performance.now();
-      // (Up to 10 s: a busy Firefox under the emulator can take that long; after Chrome's five seconds of user
-      // activation the address is shown as a link instead of opened.)
+      // (Up to 10 s: a busy Firefox under the emulator can take that long.)
       while (clipboard.fromGuest === before && performance.now() - began < 10000) {
         await new Promise((resolve) => setTimeout(resolve, 30));
       }
@@ -2410,9 +2417,8 @@
         return { status: "no address" };
       }
       const url = (clipboard.lastGuestText || "").trim();
-      const result = window.rvHostOpen.ask(url, { direct: true });
-      note(result.status === "opened" ? "Page to host: opened " + url : result.status === "asked"
-        ? "Page to host: click the address in the top right corner" : "Page to host: " + result.reason);
+      const result = window.rvHostOpen.ask(url);
+      note(result.status === "asked" ? "Page to host: confirm in the box at the top of the page" : "Page to host: " + result.reason);
       return Object.assign({ url }, result);
     } finally {
       sending = false;
@@ -3114,7 +3120,18 @@
       return;
     }
     try {
-      await stage.requestFullscreen({ navigationUI: "hide" });
+      // Where there is no navigator.keyboard.lock (Firefox 151 and later), the same is asked in the fullscreen
+      // request itself: keyboardLock "browser". (A browser that does not know the value rejects: then without it.)
+      if (navigator.keyboard && navigator.keyboard.lock) {
+        await stage.requestFullscreen({ navigationUI: "hide" });
+      } else {
+        await stage.requestFullscreen({ navigationUI: "hide", keyboardLock: "browser" }).catch((error) => {
+          if (error && error.name === "NotSupportedError") {
+            return stage.requestFullscreen({ navigationUI: "hide" });
+          }
+          throw error;
+        });
+      }
       // In fullscreen Chrome lets a page have the keys the system would take (Alt-Tab, Alt-F4, Cmd-W, ...);
       // Escape held down leaves.
       if (navigator.keyboard && navigator.keyboard.lock) {
@@ -3126,8 +3143,43 @@
     focusScreen();
   };
 
+  // The bar and the page around the machine are set as the landing page is (site/index.html: Catppuccin Mocha, JetBrains Mono,
+  // surface0 borders, mauve for what can be clicked); the same height as before, so the screen has the size it had.
+  // (Here and not in chrome.css: deploy.sh sends display.js and dev.html, which are all a change of the bar needs.)
+  const barStyle = () => {
+    const style = document.createElement("style");
+    style.id = "rv-bar-style";
+    style.textContent = `
+html.rv-desk, html.rv-desk body { background: #11111b; color-scheme: dark; }
+html.rv-desk #rv-bar {
+  display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: 28px; margin-bottom: 4px; padding: 0 6px 0 10px;
+  min-width: 0; overflow: hidden; border: 1px solid #313244; border-radius: 8px; background: #181825; color: #a6adc8;
+  font: 12px/1 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#rv-bar .rv-bar-brand { flex: none; font-weight: 700; color: #cba6f7; margin-right: 2px; }
+#rv-bar .rv-bar-btn, #rv-bar .rv-bar-select {
+  flex: none; height: 20px; padding: 0 8px; border: 1px solid #313244; border-radius: 4px; background: transparent; color: #bac2de;
+  font: inherit; cursor: pointer; transition: color .15s, border-color .2s, background .2s;
+}
+#rv-bar .rv-bar-btn:hover, #rv-bar .rv-bar-select:hover { border-color: #cba6f766; color: #cba6f7; }
+#rv-bar .rv-bar-btn:active { background: #313244; }
+#rv-bar .rv-bar-btn:focus-visible, #rv-bar .rv-bar-select:focus-visible, #rv-bar input:focus-visible { outline: 2px solid #cba6f7; outline-offset: 2px; }
+#rv-bar .rv-bar-select { max-width: 15rem; padding: 0 4px; background: #1e1e2e; color-scheme: dark; }
+#rv-bar .rv-bar-label { flex: none; display: flex; align-items: center; gap: 6px; color: #7f849c; }
+#rv-bar .rv-bar-label input { margin: 0; accent-color: #cba6f7; }
+#rv-bar .rv-bar-status { flex: 0 1 auto; min-width: 0; margin-left: 0; color: #7f849c; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@media (max-width: 1000px) { #rv-bar .rv-bar-brand { display: none; } }
+`;
+    document.head.appendChild(style);
+  };
+
   let layoutSelect = null, layoutsShown = "", barStatus = null;
   const setupBar = () => {
+    barStyle();
+    const brand = document.createElement("span");
+    brand.className = "rv-bar-brand";
+    brand.textContent = "rvwasm";
+    bar.appendChild(brand);
     const button = (label, what, run) => {
       const b = document.createElement("button");
       b.className = "rv-bar-btn";
@@ -3192,6 +3244,14 @@
     barStatus = document.createElement("span");
     barStatus.className = "rv-bar-status";
     bar.appendChild(barStatus);
+    // What a program that is slow to start is doing (dev.html, launchNote: "Starting Kate... 17 s", "Launched Kate (57 s)"), at the
+    // right end, so that nothing is drawn over the machine's display.
+    const launch = document.createElement("div");
+    launch.id = "launchnote";
+    launch.setAttribute("role", "status");
+    launch.setAttribute("aria-live", "polite");
+    launch.hidden = true;
+    bar.appendChild(launch);
   };
 
   // Once a frame: what the bar shows (the layouts the server has, the one in use).
@@ -3479,6 +3539,10 @@
     },
     stats,
     nativeShell: () => nativeShell,
+    // The usable area [x, y, w, h]: the screen less the panels (the server's, once plasmashell is the shell), what maximized windows fill.
+    workArea: () => workArea(),
+    // The decorated windows' title bar height, in screen pixels (what the server keeps above a window's content).
+    titleHeight: () => (tableNow ? tableNow.v.getUint32(tableNow.t + H_TITLE_HEIGHT, true) : 0),
     windows: () => lastWindows.map((s) => ({ id: s.id, kind: s.kind, layer: s.layer, role: s.role, parent: s.parent,
                                              x: s.sx, y: s.sy, w: s.w, h: s.h, z: s.z,
                                              bw: s.bw, bh: s.bh, scale: s.scale, geometry: s.geometry.slice(),

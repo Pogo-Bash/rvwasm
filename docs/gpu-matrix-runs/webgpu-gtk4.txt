@@ -1,0 +1,17 @@
+== gpu-nm gtk4 ==
+program:  gtk4
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3898 ms
+ring:     submitted 813, done 813, heartbeat 505
+jspi waits:488 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+boot:     893 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 218107904 (pid 181), caps at 222304256
+windows:  slot 0 "GTK Widget Factory" 1161x799: 110 looks, present 110
+probe:    4 of 4 window PNGs are drawn (not flat); 4 different pictures; last 0-4.png 1161x799: 410 colours, the commonest 73.6%
+rc:       program 0, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (813 submits)
+  ok   window drawn (slot 0 "GTK Widget Factory" 1161x799: 110 looks, present 110)
+  ok   pixel probe (a drawn window, not a flat colour) (4/4)
+PASS
+MATRIX_RESULT {"app":"gtk4","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":813,"presents":0,"pictures":4,"pass":true,"failed":[]}

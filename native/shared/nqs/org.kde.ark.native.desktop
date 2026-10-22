@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Ark (native)
+GenericName=Archiving Tool
+Comment=Ark as a WebAssembly program on shared libraries (nqs disk); zip and tar through libarchive, other formats through the Debian disk's tools when it has them
+Exec=/opt/nq-shared/bin/nqs-run ark %U
+Icon=ark
+MimeType=application/zip;application/gzip;application/x-compressed-tar;application/x-tar;
+Categories=Qt;KDE;Utility;Archiving;
+Terminal=false
+StartupWMClass=ark

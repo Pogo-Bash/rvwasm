@@ -9,9 +9,10 @@
 #     Start button goes to /desktop; /desktop is dev.html, the machine, which boots at once (noindex; the query is
 #     kept: /desktop?autostart=0). Without a SITE directory, / goes to dev.html as before;
 #   - /rv-site.json: the defaults dev.html takes from the server: the relay's port as the browser reaches it
-#     (--net-port) and the disk when the address names none (--disk).
+#     (--net-port), the disk when the address names none (--disk) and the GPU executor (--gpu-exec, "gpu_exec":
+#     vrend, webgpu or auto; tools/www/gpu-exec.js; the public site's Caddyfile answers the same key from RV_GPU_EXEC).
 #
-#   serve.py --dist DIST [--bind ADDRESS] [--port PORT] [--net-port PORT] [--disk NAME] [--site SITE]
+#   serve.py --dist DIST [--bind ADDRESS] [--port PORT] [--net-port PORT] [--disk NAME] [--site SITE] [--gpu-exec EXEC]
 import argparse
 import http.server
 import json
@@ -30,13 +31,18 @@ def main():
     p.add_argument("--disk", default="release")
     p.add_argument("--site", default="/site", help="the landing page's files (site/ in the tree)")
     p.add_argument("--dns", default="", help="the resolver the machine uses (rv-site.json), e.g. 10.0.5.1")
+    p.add_argument("--gpu-exec", default=os.environ.get("RV_GPU_EXEC", "vrend"),
+                   help="the GPU executor the page uses by default (rv-site.json gpu_exec): vrend, webgpu or auto")
     a = p.parse_args()
+    # (anything else is vrend, as in the page: a typo must not turn the executor on)
+    gpu_exec = a.gpu_exec if a.gpu_exec in ("vrend", "webgpu", "auto") else "vrend"
     www = os.path.join(a.dist, "www")
     disks = os.path.join(a.dist, "disk")
     if not os.path.exists(os.path.join(www, "dev.html")):
         sys.exit(f"serve.py: no {www}/dev.html (build the dist: docker/release.sh, or set RV_RELEASE_URL)")
     landing = os.path.isfile(os.path.join(a.site, "index.html"))
-    site = json.dumps({"net_port": a.net_port, "disk": a.disk, **({"dns": a.dns} if a.dns else {})}).encode()
+    site = json.dumps({"net_port": a.net_port, "disk": a.disk, "gpu_exec": gpu_exec,
+                       **({"dns": a.dns} if a.dns else {})}).encode()
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         protocol_version = "HTTP/1.1"

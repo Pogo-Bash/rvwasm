@@ -1,0 +1,4 @@
+draw indexed16 count 12 first 2 base_vertex 1
+topology points
+vb 0 stride 4 rate vertex data bytes
+attr 0 binding 0 format R8G8B8A8_UNORM offset 0

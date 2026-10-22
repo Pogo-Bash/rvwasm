@@ -1,0 +1,38 @@
+#!/bin/bash
+# zink on wgvk (Dawn on lavapipe), EGL surfaceless: zink takes wgvk's device, its format table and limits,
+# and makes GL / GLES contexts (eglinfo). Needs a native build with zink (GPU_NATIVE=zink or full); skipped
+# otherwise. LIBGL_ALWAYS_SOFTWARE + GALLIUM_DRIVER=zink is the path without a DRM device (zink then wants
+# a CPU device: WGVK_DEVICE_TYPE=cpu). The GL version is what wgvk's features give: 3.3 core / ES 3.1 until
+# tessellation is emulated (GS, XFB and logic ops are advertised as planned emulations).
+mkdir -p $B/tests
+if [ ! -f $B/native/src/gallium/targets/dri/libgallium-*.so ] 2>/dev/null && ! ls $B/native/src/gallium/targets/dri/libgallium-*.so > /dev/null 2>&1; then
+	echo "ok zink: skipped (no zink in this build; GPU_NATIVE=zink)"; exit 0
+fi
+cd /tmp
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD WGVK_DEVICE_TYPE=cpu LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=zink \
+	timeout 120 meson devenv -C $B/native env VK_DRIVER_FILES=$WGVK_ICD eglinfo -B -p surfaceless > $B/tests/zink-eglinfo.txt 2>&1
+s=0
+core=$(grep -m1 "OpenGL core profile version:" $B/tests/zink-eglinfo.txt | sed 's/.*version: //')
+es=$(grep -m1 "OpenGL ES profile version:" $B/tests/zink-eglinfo.txt | sed 's/.*version: //')
+renderer=$(grep -m1 "renderer:" $B/tests/zink-eglinfo.txt | sed 's/.*renderer: //')
+case "$renderer" in
+*wgvk*) ;;
+*) echo "FAIL zink: no zink on wgvk (see $B/tests/zink-eglinfo.txt): $(grep -m2 -i "error\|fail\|assert" $B/tests/zink-eglinfo.txt | tr '\n' ' ')"; exit 1 ;;
+esac
+# (T2) GL drawing through zink on wgvk: zink-draw.c renders into an FBO and checks pixels; WGVK_STATS=1 prints
+# what wgvk's replay did with zink's command stream (passes, splits, snapshots, pipelines)
+cc -O1 -g -Wall -I$TREE/include -o $B/tests/zink-draw $WT/gpu/webgpu/mesa/src/webgpu/tests/zink-draw.c \
+	-L$B/native/src/egl -L$B/native/src/mesa/glapi/es2api -lEGL -lGLESv2 &&
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD WGVK_DEVICE_TYPE=cpu LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=zink \
+	WGVK_STATS=1 timeout 120 meson devenv -C $B/native env VK_DRIVER_FILES=$WGVK_ICD $B/tests/zink-draw \
+	$B/tests/zink-draw.ppm > $B/tests/zink-draw.txt 2>&1
+zd=$?
+grep -E "^(ok|FAIL) zink-draw" $B/tests/zink-draw.txt || { echo "FAIL zink-draw: no result (exit $zd)"; tail -5 $B/tests/zink-draw.txt; }
+grep -E "^wgvk: stats" $B/tests/zink-draw.txt | sed 's/^wgvk: /info zink-draw: /'
+want_core=${ZINK_WANT_CORE:-3.3}
+case "$core" in
+"$want_core"*) echo "ok zink: $renderer: GL $core, $es" ;;
+*) echo "FAIL zink: GL core '$core' (want $want_core), ES '$es'"; s=1 ;;
+esac
+[ $zd = 0 ] || s=1
+exit $s

@@ -9,12 +9,13 @@
 #   rv-host-open --off       xdg-open, x-www-browser, kde-open and $BROWSER open addresses in the machine again
 #   rv-host-open --on        ... and on the host (the default)
 #
-# The page shows the address in its top right corner with an Open button
-# (a page may open a tab only right after a click: browsers block it
-# otherwise), or opens it at once if the person has just clicked on the
-# screen. hostopen/README.md in the source tree has the details.
+# The page asks first, in a box of its own at the top of the page (outside the
+# machine's screen): "Open example.com/... in a new tab?" with the whole address
+# and Open / Cancel; nothing opens without that click. A file (file:///x.html, or
+# a path) is not for the host: it opens in the machine's own browser (the host
+# cannot read the machine's files). hostopen/README.md in the source tree has the details.
 #
-# Exits 0 when the page opened or showed it, 1 if it refused it, 3 if no
+# Exits 0 when the page showed it to the person (who may cancel), 1 if it refused it, 3 if no
 # page answered (an older page, or hostnode is missing).
 
 HERE=/run/hostopen
@@ -41,7 +42,7 @@ case "$1" in
 	rm -f "$HOME/.config/rv-host-open/off"
 	echo "rv-host-open: on (addresses open on the host)"; exit 0 ;;
 -h|--help|"")
-	sed -n '2,19s/^# \{0,1\}//p' "$0"
+	sed -n '2,20s/^# \{0,1\}//p' "$0"
 	[ -n "$1" ]; exit $? ;;
 -*)
 	echo "rv-host-open: no option $1 (--help)" >&2; exit 2 ;;
@@ -56,6 +57,12 @@ if [ -e "$HOME/.config/rv-host-open/off" ]; then
 	exec /usr/bin/x-www-browser "$1"
 fi
 url=$1
+# (a file: the host cannot read it; the machine's own browser can. KDE hands a local .html file here as text/html's default.)
+case "$url" in
+file:*|/*)
+	unset BROWSER
+	exec /usr/bin/x-www-browser "$url" ;;
+esac
 case "$url" in
 *://*) ;;
 [A-Za-z]*:[0-9]*) url="https://$url" ;;	# (a host and a port)

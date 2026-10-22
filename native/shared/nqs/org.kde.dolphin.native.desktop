@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Dolphin (native)
+GenericName=File Manager
+Comment=Dolphin as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run dolphin %u
+Icon=system-file-manager
+Categories=Qt;KDE;System;FileManager;
+MimeType=inode/directory;
+Terminal=false
+StartupWMClass=dolphin

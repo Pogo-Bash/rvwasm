@@ -1,0 +1,910 @@
+# pass on zink+lavapipe, not on zink+wgvk: group<TAB>status<TAB>test<TAB>first output line
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@!opengl 1.4@tex-miplevel-selection-lod-bias	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture() 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture() 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture() 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture() cube	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 1darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 2darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() cube	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() cubearray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 1darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 2darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad cube	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad cubearray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 1darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 2darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 1darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 2darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod cube	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod cubearray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 1darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 2darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 1darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 2darray	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset(bias) 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 1d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 1d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 2d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 2d_projvec4	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 3d	Failure:
+1D textures are 2D in wgvk: mip level selection and LOD bias differ	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset(bias) 3d	Failure:
+compute: storage image bound with another format than the shader declares	fail	spec@arb_compute_shader@execution@basic-uniform-access	Probe color at (0,0)
+compute: storage image bound with another format than the shader declares	fail	spec@arb_compute_shader@execution@border-color	Atomic counter 0 test failed: Reference == Observed
+compute: storage image bound with another format than the shader declares	fail	spec@arb_compute_shader@execution@multiple-texture-reading	Probe color at (0,0)
+compute: storage image bound with another format than the shader declares	fail	spec@arb_compute_shader@execution@multiple-workgroups	Probe color at (0,0)
+compute: storage image bound with another format than the shader declares	fail	spec@arb_compute_shader@execution@simple-barrier	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.0@gl-1.0-drawpixels-stencil-test	Probe color at (50,50)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.0@gl-1.0-scissor-copypixels	Probe color at (89,9)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@copypixels-draw-sync	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@copyteximage 1d	Testing GL_TEXTURE_1D
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@copyteximage 2d	Testing GL_TEXTURE_2D
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@draw-copypixels-sync	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@getteximage-formats	getteximage-formats failure: format: GL_COMPRESSED_LUMINANCE, level 0 at pixel(285, 167)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@gl-1.1-xor-copypixels	glCopyPixels appeared to fail.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@stencil-drawpixels	Probe color at (10,10)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.1@texsubimage-depth-formats	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.3@tex3d-depth1	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 1.5@depth-tex-compare	Probe color at (35,250)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 2.0@gl-2.0-two-sided-stencil	FAIL:
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@!opengl 3.2@layered-rendering@clear-depth	Probe depth at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth gl_depth24_stencil8	Testing GL_DEPTH24_STENCIL8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth gl_depth32f_stencil8	Testing GL_DEPTH32F_STENCIL8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth gl_depth_component16	Testing GL_DEPTH_COMPONENT16.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth gl_depth_component24	Testing GL_DEPTH_COMPONENT24.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth gl_depth_component32	Testing GL_DEPTH_COMPONENT32.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth gl_depth_component32f	Testing GL_DEPTH_COMPONENT32F.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth_stencil gl_depth24_stencil8	Testing GL_DEPTH24_STENCIL8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit depth_stencil gl_depth32f_stencil8	Testing GL_DEPTH32F_STENCIL8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit stencil gl_depth24_stencil8	Testing GL_DEPTH24_STENCIL8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit stencil gl_depth32f_stencil8	Testing GL_DEPTH32F_STENCIL8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit stencil gl_stencil_index1	Testing GL_STENCIL_INDEX1.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit stencil gl_stencil_index16	Testing GL_STENCIL_INDEX16.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit stencil gl_stencil_index4	Testing GL_STENCIL_INDEX4.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@arb_framebuffer_object-depth-stencil-blit stencil gl_stencil_index8	Testing GL_STENCIL_INDEX8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@fbo blit from missing attachment	Testing blit from buffer with missing attachment to complete buffer...
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@fbo blit to missing attachment	Testing blit from complete buffer to buffer with missing attachment...
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@framebuffer-blit-levels draw stencil	Testing level 0
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_framebuffer_object@framebuffer-blit-levels read stencil	Testing level 0
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_texture_buffer_object@data-sync	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@arb_texture_buffer_object@subdata-sync	Probe color at (0,0)
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-readpixels-depth-formats	GL_FLOAT: Expected 0.500000 at (5,0), found 0.000000
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index1-blit	Testing GL_STENCIL_INDEX1.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index1-copypixels	Testing GL_STENCIL_INDEX1.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index1-drawpixels	Testing GL_STENCIL_INDEX1.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index1-readpixels	Testing GL_STENCIL_INDEX1.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index16-blit	Testing GL_STENCIL_INDEX16.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index16-copypixels	Testing GL_STENCIL_INDEX16.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index16-drawpixels	Testing GL_STENCIL_INDEX16.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index16-readpixels	Testing GL_STENCIL_INDEX16.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index4-blit	Testing GL_STENCIL_INDEX4.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index4-copypixels	Testing GL_STENCIL_INDEX4.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index4-drawpixels	Testing GL_STENCIL_INDEX4.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index4-readpixels	Testing GL_STENCIL_INDEX4.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index8-blit	Testing GL_STENCIL_INDEX8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index8-copypixels	Testing GL_STENCIL_INDEX8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index8-drawpixels	Testing GL_STENCIL_INDEX8.
+depth/stencil copies and blits (WebGPU copies whole subresources; separate stencil references)	fail	spec@ext_framebuffer_object@fbo-stencil-gl_stencil_index8-readpixels	Testing GL_STENCIL_INDEX8.
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_alpha	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance12	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance16	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance4	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance4_alpha4	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance6_alpha2	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance8	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance8_alpha8	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_luminance_alpha	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_r16	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_r16_snorm	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_r16f	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_r8	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_r8_snorm	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_red	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_rg	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_rg8	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 1.1@teximage-colors gl_rg8_snorm	Probe at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 2.1@minmax	GL_MAX_TEXTURE_LOD_BIAS                            2.000000 0.000000 (ERROR)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 3.0@minmax	GL_MAX_TEXTURE_LOD_BIAS                            2.000000 0.000000 (ERROR)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 3.1@minmax	GL_MAX_TEXTURE_LOD_BIAS                            2.000000 0.000000 (ERROR)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 3.2@minmax	GL_MAX_TEXTURE_LOD_BIAS                            2.000000 0.000000 (ERROR)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@!opengl 3.3@minmax	GL_MAX_TEXTURE_LOD_BIAS                            2.000000 0.000000 (ERROR)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@arb_framebuffer_object@fbo-generatemipmap-cubemap s3tc_dxt1	Probe color at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@arb_texture_buffer_object@texture-buffer-size-clamp	Probe color at (0,0)
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@arb_uniform_buffer_object@maxuniformblocksize@fs	Max uniform block size: 65536
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@arb_uniform_buffer_object@maxuniformblocksize@vs	Max uniform block size: 65536
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@ext_framebuffer_object@fbo-generatemipmap-formats	Using test set: Core formats
+formats and limits wgvk reports differently (luminance/alpha-luminance and snorm teximage, LOD bias range, texture buffer and uniform block sizes, GS output components)	fail	spec@glsl-3.30@built-in constants	Failed to compile shader gl_MaxGeometryOutputComponents: 0:6(17): error: array size must be > 0
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@gs-conditional-emit	Probe color at (0,0)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@output-triangle-strip-orientation	Probe color at (0,0)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@point-size-out	Probe color at (185,125)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-id-out	Probe color at (0,0)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_line_loop	Testing GL_POINTS(1 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_line_strip	Testing GL_POINTS(1 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_line_strip_adjacency	Testing GL_POINTS(3 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_lines	Testing GL_POINTS(1 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_lines_adjacency	Testing GL_POINTS(3 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_points	Testing GL_POINTS(0 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_triangle_fan	Testing GL_POINTS(2 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_triangle_strip	Testing GL_POINTS(2 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_triangle_strip_adjacency	Testing GL_POINTS(5 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_triangles	Testing GL_POINTS(2 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@geometry@primitive-types gl_triangles_adjacency	Testing GL_POINTS(5 vertices)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@gs-also-uses-smooth-flat-noperspective	Probe color at (111,55)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@gs-trivial	Probe color at (0,0)
+geometry shader parts not compiled (see the wgvk log: clip distance, primitive restart, line loops)	fail	spec@glsl-1.50@execution@variable-indexing@gs-output-array-vec4-index-wr	Probe color at (6,6)
+gl_ClipDistance read by the fragment shader (no clip-distance input slot in WGSL)	fail	spec@glsl-1.30@execution@clipping@fs-clip-distance-interpolated	Probe color at (0,0)
+gl_ClipDistance read by the fragment shader (no clip-distance input slot in WGSL)	fail	spec@glsl-1.50@execution@geometry@clip-distance-bulk-copy	Probe color at (0,0)
+gl_ClipDistance read by the fragment shader (no clip-distance input slot in WGSL)	fail	spec@glsl-1.50@execution@geometry@clip-distance-itemized-copy	Probe color at (0,0)
+gl_ClipDistance read by the fragment shader (no clip-distance input slot in WGSL)	fail	spec@glsl-1.50@execution@geometry@clip-distance-out-values	Probe color at (62,125)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler1d 1-513	1x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler1darray 1x281-501x281	1x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler1darray 1x71-501x71	1x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler1darray 281x1-281x281	281x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler1darray 71x1-71x281	71x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2d 1x281-501x281	1x281x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2d 1x71-501x71	1x71x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2d 281x1-281x281	281x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2d 71x1-71x281	71x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2darray 1x129x9-98x129x9	1x129x9
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2darray 98x129x1-98x129x9	98x129x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler2darray 98x1x9-98x129x9	98x1x9
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler3d 1x129x9-98x129x9	1x129x9
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler3d 98x129x1-98x129x9	98x129x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch fs sampler3d 98x1x9-98x129x9	98x1x9
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-isampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-isampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-isampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-isampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-isampler2darray-swizzle	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-isampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-sampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-sampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-sampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-sampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-sampler2darray-swizzle	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-sampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-usampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-usampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-usampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-usampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-usampler2darray-swizzle	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@fs-texelfetch-usampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-isampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-isampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-isampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-isampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-isampler2darray-swizzle	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-isampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-sampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-sampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-sampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-sampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-sampler2darray-swizzle	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-sampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-usampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-usampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-usampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-usampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-usampler2darray-swizzle	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetch@vs-texelfetch-usampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-isampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-isampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-isampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-isampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-isampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-sampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-sampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-sampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-sampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-sampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-usampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-usampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-usampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-usampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@fs-texelfetch-usampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-isampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-isampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-isampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-isampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-isampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-sampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-sampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-sampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-sampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-sampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-usampler1d	65x1x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-usampler1darray	65x1x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-usampler2d	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-usampler2darray	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texelfetchoffset@vs-texelfetch-usampler3d	65x32x5
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-isampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-isampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-isampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-isampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-isampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-isamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-usampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-usampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-usampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-usampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-usampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@fs-texturesize-usamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-isampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-isampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-isampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-isampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-isampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-isamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-usampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-usampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-usampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-usampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-usampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@texturesize@vs-texturesize-usamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@vs-attrib-ivec4-implied	Probe color at (0,0)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@vs-attrib-ivec4-precision	Probe color at (0,0)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@vs-attrib-uvec4-implied	Probe color at (0,0)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.30@execution@vs-attrib-uvec4-precision	Probe color at (0,0)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetch@fs-texelfetch-isampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetch@fs-texelfetch-sampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetch@fs-texelfetch-usampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetch@vs-texelfetch-isampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetch@vs-texelfetch-sampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetch@vs-texelfetch-usampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetchoffset@fs-isampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetchoffset@fs-sampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetchoffset@fs-usampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetchoffset@vs-isampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetchoffset@vs-sampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texelfetchoffset@vs-usampler2drect	65x32x1
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isampler2drect	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-isamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-usampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-usampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-usampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-usampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-usampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@fs-texturesize-usamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isampler2drect	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-isamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-usampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-usampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-usampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-usampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-usampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.40@execution@texturesize@vs-texturesize-usamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isampler2drect	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-isamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-usampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-usampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-usampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-usampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-usampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@gs-texturesize-usamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isampler2drect	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isamplerbuffer	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-isamplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler1darrayshadow	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler1dshadow	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler2darrayshadow	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler2drect	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler2drectshadow	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler2dshadow	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-sampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-samplerbuffer	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-samplercube	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-samplercubeshadow	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usampler1d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usampler1darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usampler2d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usampler2darray	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usampler3d	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usamplerbuffer	Probe color at (10,10)
+integer textures and vertex attributes: Sint texture bound as UnfilterableFloat, Sint attribute vs Float shader input	fail	spec@glsl-1.50@execution@texturesize@tes-texturesize-usamplercube	Probe color at (10,10)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2x3 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2x3 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2x3 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2x4 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2x4 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat2x4 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3x2 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3x2 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3x2 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3x4 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3x4 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat3x4 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4x2 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4x2 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4x2 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4x3 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4x3 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple mat4x3 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec2 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec2 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec2 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec3 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec3 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec3 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec4 array	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec4 arrays_of_arrays	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.10@execution@varying-packing@simple vec4 separate	Probe color at (0,0)
+inter-stage variable limits (varying packing exceeds WebGPU's 16 locations / 60 components)	fail	spec@glsl-1.30@execution@varying-packing-mixed-types	Probe color at (0,0)
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color	Probe color at (0,53)
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 1d_array mipmapped	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 1d_array single_level	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 2d_array mipmapped	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 2d_array single_level	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 2d_multisample_array single_level	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 3d mipmapped	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types 3d single_level	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types cube_map mipmapped	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types cube_map single_level	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types cube_map_array mipmapped	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-all-types cube_map_array single_level	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@clear-color-mismatched-layer-count	Clearing each layer individually
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@gl-layer-cube-map	Probe color at (0,0)
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@gl-layer-not-layered	Probe color at (0,0)
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@gl-layer-render	Texture Type: GL_TEXTURE_3D
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@gl-layer-render-clipped	Probe color at (0,0)
+layered rendering (clears of array and 3D layers)	fail	spec@!opengl 3.2@layered-rendering@gl-layer-render-storage	Texture Type: GL_TEXTURE_3D
+logic ops (not in WebGPU; faked)	fail	spec@!opengl 1.0@gl-1.0-logicop	Probe at (0,0)
+logic ops (not in WebGPU; faked)	fail	spec@!opengl 1.1@gl-1.1-xor	Failure: images should match after drawing XOR lines twice.
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_framebuffer_object@execution@msaa-alpha-to-coverage_alpha-to-one	Probe color at (62,0)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_framebuffer_object@execution@msaa-alpha-to-one	Probe color at (0,0)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_sample_shading@arb_sample_shading-builtin-gl-sample-mask-mrt-alpha	Probe color at (0,0)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_sample_shading@arb_sample_shading-builtin-gl-sample-mask-mrt-alpha-to-coverage	Probe color at (6,0)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@arb_texture_multisample-dsa-texelfetch	
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@large-float-texture	Failed to create MSAA texture
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dms 4 1x130-501x130	1x130x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dms 4 1x71-501x71	1x71x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dms 4 281x1-281x130	281x1x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dms 4 71x1-71x130	71x1x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dmsarray 4 1x129x9-98x129x9	1x129x9
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dmsarray 4 98x129x1-98x129x9	98x129x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch fs sampler2dmsarray 4 98x1x9-98x129x9	98x1x9
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-fs-isampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-fs-isampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-fs-sampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-fs-sampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-fs-usampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-fs-usampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-gs-isampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-gs-isampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-gs-sampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-gs-usampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-gs-usampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-vs-isampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-vs-isampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-vs-sampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-vs-sampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-vs-usampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@2-vs-usampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-fs-isampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-fs-isampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-fs-sampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-fs-sampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-fs-usampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-fs-usampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-gs-isampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-gs-isampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-gs-sampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-gs-usampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-gs-usampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-vs-isampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-vs-isampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-vs-sampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-vs-sampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-vs-usampler2dms	65x32x1
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texelfetch@4-vs-usampler2dmsarray	65x32x5
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@fs-texturesize-isampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@fs-texturesize-isampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@fs-texturesize-sampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@fs-texturesize-usampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@fs-texturesize-usampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@gs-texturesize-isampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@gs-texturesize-isampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@gs-texturesize-sampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@gs-texturesize-usampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@gs-texturesize-usampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@tes-texturesize-isampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@tes-texturesize-isampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@tes-texturesize-sampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@tes-texturesize-sampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@tes-texturesize-usampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@tes-texturesize-usampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@vs-texturesize-isampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@vs-texturesize-isampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@vs-texturesize-sampler2dmsarray	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@vs-texturesize-usampler2dms	Probe color at (10,10)
+multisampled array textures and sample counts WebGPU lacks (one layer; 4 samples only)	fail	spec@arb_texture_multisample@texturesize@vs-texturesize-usampler2dmsarray	Probe color at (10,10)
+other (not yet attributed)	fail	spec@!opengl 1.0@gl-1.0-blend-func	Probe at (0,0)
+other (not yet attributed)	fail	spec@!opengl 1.0@gl-1.0-dlist-bitmap	glCallList(bitmap) failed
+other (not yet attributed)	fail	spec@!opengl 1.0@gl-1.0-edgeflag-const	Probe color at (3,5)
+other (not yet attributed)	fail	spec@!opengl 1.1@array-stride	array-stride: image comparison failed at stride = 4
+other (not yet attributed)	fail	spec@!opengl 1.1@line-aa-width	Line from 90,12-119,20 had bad thickness (max > 1.5):
+other (not yet attributed)	fail	spec@!opengl 1.1@line-smooth-stipple	Probe color at (1,1)
+other (not yet attributed)	fail	spec@!opengl 1.1@point-line-no-cull	Error: Point culled by GL_CULL_FACE = GL_FRONT_AND_BACK
+other (not yet attributed)	fail	spec@!opengl 1.1@polygon-offset	Probe color at (60,60)
+other (not yet attributed)	fail	spec@!opengl 1.1@texwrap formats	Testing GL_RGBA8
+other (not yet attributed)	fail	spec@!opengl 1.1@texwrap formats offset	Using texture offsets.
+other (not yet attributed)	fail	spec@!opengl 1.2@tex3d	Render 3D texture: Mismatch at 0x0x0
+other (not yet attributed)	fail	spec@!opengl 1.3@tex-border-1	Probe color at (40,40)
+other (not yet attributed)	fail	spec@!opengl 1.4@copy-pixels	Probe at (0,0)
+other (not yet attributed)	fail	spec@!opengl 1.4@gl-1.4-polygon-offset	Actual MRD is too small (may cause incorrect results)
+other (not yet attributed)	fail	spec@!opengl 1.5@draw-elements-user	Testing user arrays.
+other (not yet attributed)	fail	spec@!opengl 2.0@gl-2.0-edgeflag	Probe color at (3,1)
+other (not yet attributed)	fail	spec@!opengl 2.0@tex3d-npot	Render 3D texture: Mismatch at 0x0x0
+other (not yet attributed)	fail	spec@!opengl 3.0@attribs	Testing GL3
+other (not yet attributed)	fail	spec@!opengl 3.0@clearbuffer-mixed-format	Probe color at (0,0)
+other (not yet attributed)	fail	spec@!opengl 3.0@gl-3.0-vertexattribipointer	Probe color at (80,80)
+other (not yet attributed)	fail	spec@!opengl 3.0@render-integer	Failure at pixel (50, 50):
+other (not yet attributed)	fail	spec@!opengl 3.1@gl-3.1-mixed-int-float-fbo	Probe color at (0,0)
+other (not yet attributed)	fail	spec@!opengl 3.1@gl-3.1-mixed-int-float-fbo int_second	Probe color at (0,0)
+other (not yet attributed)	fail	spec@arb_draw_indirect@arb_draw_indirect-draw-arrays-base-instance	Probe color at (32,32)
+other (not yet attributed)	fail	spec@arb_draw_indirect@arb_draw_indirect-draw-elements	Probe color at (32,32)
+other (not yet attributed)	fail	spec@arb_draw_indirect@arb_draw_indirect-draw-elements-base-instance	Probe color at (32,32)
+other (not yet attributed)	fail	spec@arb_draw_indirect@arb_draw_indirect-draw-elements-prim-restart	Probe color at (96,96)
+other (not yet attributed)	fail	spec@arb_draw_indirect@arb_draw_indirect-transform-feedback	Probe color at (32,32)
+other (not yet attributed)	fail	spec@arb_framebuffer_object@mixed-buffer-sizes	Rendering failure with:
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@formats (fs, 3.1 core)	Testing GL_RGBA8
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@formats (fs, ext_gpu_shader4)	Testing GL_RGBA8
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@formats (vs, 3.1 core)	Testing GL_RGBA8
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@formats (vs, ext_gpu_shader4)	Testing GL_RGBA8
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@indexed	Probe color at (0,0)
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@max-size	MAX_TEXTURE_BUFFER_SIZE: 33554432
+other (not yet attributed)	fail	spec@arb_texture_buffer_object@re-init	Probe color at (40,0)
+other (not yet attributed)	fail	spec@arb_uniform_buffer_object@execution@fs-array-of-structs-std140-indirect	Probe color at (0,0)
+other (not yet attributed)	fail	spec@glsl-1.20@execution@out-parameter-indexing@fs-inout-index-two-level	Probe color at (0,0)
+other (not yet attributed)	fail	spec@glsl-1.30@execution@fs-execution-ordering	Probe color at (0,0)
+other (not yet attributed)	fail	spec@glsl-1.30@execution@fs-texturelod-miplevels-biased	Probe color at (26,15)
+other (not yet attributed)	fail	spec@glsl-1.30@execution@vs-texturelod-miplevels-biased	Probe color at (26,15)
+other (not yet attributed)	fail	spec@glsl-1.50@execution@redeclare-pervertex-out-subset-gs	Probe color at (185,125)
+other (not yet attributed)	fail	spec@glsl-1.50@execution@vs-input-arrays	Probe color at (0,0)
+server lost (a test before it killed or restarted the server)	crash	spec@ext_transform_feedback@get-buffer-state buffer_start	lost connection to rendering server on 8 read -1 22
+server lost (a test before it killed or restarted the server)	crash	spec@ext_transform_feedback@get-buffer-state indexed_binding	lost connection to rendering server on 8 read -1 22
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@!opengl 3.0@sampler-cube-shadow	Probe color at (105,174)
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.10@execution@samplers@glsl-fs-shadow1d-bias	Probe color at (0,25)
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.10@execution@samplers@glsl-fs-shadow1dproj-bias	Probe color at (0,25)
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.10@execution@samplers@glsl-fs-shadow2d-bias	Probe color at (0,25)
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.10@execution@samplers@glsl-fs-shadow2d-clamp-z	Probe color at (62,0)
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.10@execution@samplers@glsl-fs-shadow2dproj-bias	Probe color at (0,25)
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture() 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture() 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture(bias) 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:texture(bias) 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj(bias) 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.20@execution@tex-miplevel-selection gl2:textureproj(bias) 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 2darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() cubearrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture() cubeshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture(bias) 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture(bias) 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture(bias) 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texture(bias) cubeshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 2darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 2drectshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegrad cubeshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 2darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 2drectshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturegradoffset 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelod 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection texturelodoffset 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 2darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset(bias) 1darrayshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset(bias) 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureoffset(bias) 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj(bias) 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureproj(bias) 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 2drectshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgrad 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 2drectshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojgradoffset 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlod 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojlodoffset 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset 2dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset(bias) 1dshadow	Failure:
+shadow sampling with bias or gradients (WGSL has textureSampleCompare and ...Level(0) only)	fail	spec@glsl-1.30@execution@tex-miplevel-selection textureprojoffset(bias) 2dshadow	Failure:
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_sample_shading@builtin-gl-sample-mask-simple 6	
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_sample_shading@builtin-gl-sample-mask-simple 8	
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@arb_texture_multisample-texelfetch 6	
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@arb_texture_multisample-texelfetch 8	
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@fb-completeness@6	Sample count of 6 not supported.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@fb-completeness@8	Sample count of 8 not supported.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-fs-isampler2dms	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-fs-isampler2dmsarray	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-fs-sampler2dms	Sample count of 6 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-fs-sampler2dmsarray	Sample count of 6 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-fs-usampler2dms	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-fs-usampler2dmsarray	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-gs-isampler2dms	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-gs-isampler2dmsarray	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-gs-sampler2dms	Sample count of 6 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-gs-sampler2dmsarray	Sample count of 6 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-gs-usampler2dms	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-gs-usampler2dmsarray	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-vs-isampler2dms	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-vs-isampler2dmsarray	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-vs-sampler2dms	Sample count of 6 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-vs-sampler2dmsarray	Sample count of 6 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-vs-usampler2dms	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@6-vs-usampler2dmsarray	Sample count of 6 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-fs-isampler2dms	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-fs-isampler2dmsarray	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-fs-sampler2dms	Sample count of 8 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-fs-sampler2dmsarray	Sample count of 8 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-fs-usampler2dms	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-fs-usampler2dmsarray	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-gs-isampler2dms	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-gs-isampler2dmsarray	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-gs-sampler2dms	Sample count of 8 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-gs-sampler2dmsarray	Sample count of 8 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-gs-usampler2dms	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-gs-usampler2dmsarray	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-vs-isampler2dms	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-vs-isampler2dmsarray	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-vs-sampler2dms	Sample count of 8 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-vs-sampler2dmsarray	Sample count of 8 not supported, >MAX_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-vs-usampler2dms	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@arb_texture_multisample@texelfetch@8-vs-usampler2dmsarray	Sample count of 8 not supported, >MAX_INTEGER_SAMPLES
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@gs-input-array-float-index-rd	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@gs-input-array-vec2-index-rd	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@gs-input-array-vec3-index-rd	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@gs-input-array-vec4-index-rd	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@vs-output-array-float-index-wr-before-gs	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@vs-output-array-vec2-index-wr-before-gs	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@vs-output-array-vec3-index-wr-before-gs	Test requires vertex output components >= 128.  The driver supports 120.
+skipped where lavapipe runs it (sample counts, image types WebGPU lacks)	skip	spec@glsl-1.50@execution@variable-indexing@vs-output-array-vec4-index-wr-before-gs	Test requires vertex output components >= 128.  The driver supports 120.
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side back front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side back front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled back	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled back back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled back front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled back front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front back	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front back back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front back front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front back front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side enabled front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front back	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front back back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front back front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front back front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front front2 back2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front2	Window quadrants show:
+tessellation advertised but not implemented in wgvk (vfront drops the shaders and the patch draws)	fail	spec@!opengl 2.0@vertex-program-two-side front2 back2	Window quadrants show:
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.1@primitive-restart-xfb flush	XFB[0] == -858993460, expected 1
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.1@primitive-restart-xfb generated	Query result: 0, expected: 4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.1@primitive-restart-xfb written	Query result: 0, expected: 4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims cull-back pv-first	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims cull-back pv-last	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims cull-front pv-first	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims cull-front pv-last	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims line cull-back pv-first	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims line cull-back pv-last	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims line cull-front pv-first	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims line cull-front pv-last	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims pv-first	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@!opengl 3.2@gl-3.2-adj-prims pv-last	Transform Feedback Failure for GL_TRIANGLES_ADJACENCY, prim 0 wrong color
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback2@counting with pause	GL_PRIMITIVES_GENERATED: Expected 3, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@alignment 0	readback[0]: 4294967295, expected: 66051
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@alignment 12	readback[3]: 4294967295, expected: 66051
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@alignment 4	readback[1]: 4294967295, expected: 66051
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@alignment 8	readback[2]: 4294967295, expected: 66051
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@buffer-usage	Readback found 0.000000, expected 1.0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@change-size base-grow	PRIMITIVES_WRITTEN: expected=2, actual=0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@change-size base-shrink	PRIMITIVES_WRITTEN: expected=1, actual=0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@change-size offset-grow	PRIMITIVES_WRITTEN: expected=2, actual=0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@change-size offset-shrink	PRIMITIVES_WRITTEN: expected=1, actual=0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@change-size range-grow	PRIMITIVES_WRITTEN: expected=1, actual=0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@change-size range-shrink	PRIMITIVES_WRITTEN: expected=1, actual=0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@discard-copypixels	Probe color at (0,0)
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@immediate-reuse	Probe color at (0,0)
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@immediate-reuse-index-buffer	Probe color at (16,0)
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@immediate-reuse-uniform-buffer	Probe color at (16,0)
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@interleaved-attribs	Buffer[0]: 0.123456,  Expected: 0.550000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@intervening-read output	Read incorrect data for vertex 0.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@intervening-read output use_gs	Read incorrect data for vertex 0.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@intervening-read prims_generated	Expected 4 primitives generated, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@intervening-read prims_generated use_gs	Expected 4 primitives generated, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@intervening-read prims_written	Expected 3 primitives written, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@intervening-read prims_written use_gs	Expected 3 primitives written, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@nonflat-integral	XFB[0] == -858993460, expected 11
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@order arrays lines	Incorrect shift_reg_final at vertex 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@order arrays points	Incorrect shift_reg_final at vertex 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@order arrays triangles	Incorrect shift_reg_final at vertex 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@order elements lines	Incorrect shift_reg_final at vertex 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@order elements points	Incorrect shift_reg_final at vertex 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@order elements triangles	Incorrect shift_reg_final at vertex 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type float	Testing type: float
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type float[2]	Testing type: float
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type float[2]-no-subscript	Testing type: float
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type int	Testing type: int
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type int[2]	Testing type: int
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type int[2]-no-subscript	Testing type: int
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec2	Testing type: ivec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec2[2]	Testing type: ivec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec2[2]-no-subscript	Testing type: ivec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec3	Testing type: ivec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec3[2]	Testing type: ivec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec3[2]-no-subscript	Testing type: ivec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec4	Testing type: ivec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec4[2]	Testing type: ivec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type ivec4[2]-no-subscript	Testing type: ivec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2	Testing type: mat2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2[2]	Testing type: mat2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2[2]-no-subscript	Testing type: mat2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2x3	Testing type: mat2x3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2x3[2]	Testing type: mat2x3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2x3[2]-no-subscript	Testing type: mat2x3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2x4	Testing type: mat2x4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2x4[2]	Testing type: mat2x4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat2x4[2]-no-subscript	Testing type: mat2x4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3	Testing type: mat3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3[2]	Testing type: mat3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3[2]-no-subscript	Testing type: mat3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3x2	Testing type: mat3x2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3x2[2]	Testing type: mat3x2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3x2[2]-no-subscript	Testing type: mat3x2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3x4	Testing type: mat3x4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3x4[2]	Testing type: mat3x4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat3x4[2]-no-subscript	Testing type: mat3x4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4	Testing type: mat4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4[2]	Testing type: mat4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4[2]-no-subscript	Testing type: mat4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4x2	Testing type: mat4x2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4x2[2]	Testing type: mat4x2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4x2[2]-no-subscript	Testing type: mat4x2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4x3	Testing type: mat4x3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4x3[2]	Testing type: mat4x3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type mat4x3[2]-no-subscript	Testing type: mat4x3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uint	Testing type: uint
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uint[2]	Testing type: uint
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uint[2]-no-subscript	Testing type: uint
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec2	Testing type: uvec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec2[2]	Testing type: uvec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec2[2]-no-subscript	Testing type: uvec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec3	Testing type: uvec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec3[2]	Testing type: uvec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec3[2]-no-subscript	Testing type: uvec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec4	Testing type: uvec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec4[2]	Testing type: uvec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type uvec4[2]-no-subscript	Testing type: uvec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec2	Testing type: vec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec2[2]	Testing type: vec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec2[2]-no-subscript	Testing type: vec2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec3	Testing type: vec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec3[2]	Testing type: vec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec3[2]-no-subscript	Testing type: vec3
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec4	Testing type: vec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec4[2]	Testing type: vec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@output-type vec4[2]-no-subscript	Testing type: vec4
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@overflow-edge-cases	size=1, num_varyings=1, num_primitives=1, mode=GL_POINTS:
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@overflow-edge-cases use_gs	size=1, num_varyings=1, num_primitives=1, mode=GL_POINTS:
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@pipeline-basic-primgen	Primitives generated: 0,  Expected: 2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@points	0 primitives generated:
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@points-large	Testing large points
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-readback-bufferbase	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-readback-bufferbase-discard	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-readback-bufferoffset	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-readback-bufferoffset-discard	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-readback-bufferrange	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-readback-bufferrange-discard	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-render-bufferbase	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-render-bufferbase-discard	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-render-bufferoffset	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-render-bufferoffset-discard	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-render-bufferrange	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@position-render-bufferrange-discard	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@primgen-query transform-feedback-disabled	Primitives generated: 0,  Expected: 2
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_generated-bufferbase	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_generated-bufferbase-discard	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_generated-bufferoffset	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_generated-bufferoffset-discard	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_generated-bufferrange	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_generated-bufferrange-discard	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_written-bufferbase	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_written-bufferbase-discard	Testing BindBufferBase.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_written-bufferoffset	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_written-bufferoffset-discard	Testing BindBufferOffset.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_written-bufferrange	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@query-primitives_written-bufferrange-discard	Testing BindBufferRange.
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@separate-attribs	Buffer[0][0]: 0.123456, Expected: 0.550000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct run	Output v[0].a element 0: expected 100.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct run interface	Output v[0].a element 0: expected 100.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct run-no-fs	Output v[0].a element 0: expected 100.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct run-no-fs interface	Output v[0].a element 0: expected 100.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-elem run	Output v[0].a[0] element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-elem run interface	Output v[0].a[0] element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-elem run-no-fs	Output v[0].a[0] element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-elem run-no-fs interface	Output v[0].a[0] element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-struct run	Output v[0].e[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-struct run interface	Output v[0].e[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-struct run-no-fs	Output v[0].e[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-array-struct run-no-fs interface	Output v[0].e[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-whole-array run	Output v[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-whole-array run interface	Output v[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-whole-array run-no-fs	Output v[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs array-struct-whole-array run-no-fs interface	Output v[0].a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs basic-struct run	Output v.a element 0: expected 1.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs basic-struct run interface	Output v.a element 0: expected 1.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs basic-struct run-no-fs	Output v.a element 0: expected 1.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs basic-struct run-no-fs interface	Output v.a element 0: expected 1.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-array-elem run	Output v.a[0] element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-array-elem run interface	Output v.a[0] element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-array-elem run-no-fs	Output v.a[0] element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-array-elem run-no-fs interface	Output v.a[0] element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-struct run	Output v.e.a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-struct run interface	Output v.e.a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-struct run-no-fs	Output v.e.a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-struct run-no-fs interface	Output v.e.a element 0: expected 1, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-whole-array run	Output v.a element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-whole-array run interface	Output v.a element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-whole-array run-no-fs	Output v.a element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs struct-whole-array run-no-fs interface	Output v.a element 0: expected 100, got -858993460
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs_gles3 basic-struct run	Output v.a element 0: expected 1.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@structs_gles3 basic-struct run-no-fs	Output v.a element 0: expected 1.000000, got -107374176.000000
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_loop flat_first	Expected 8 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_loop flat_last	Expected 8 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_loop monochrome	Expected 8 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_loop smooth	Expected 8 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_strip flat_first	Expected 6 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_strip flat_last	Expected 6 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_strip monochrome	Expected 6 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation line_strip smooth	Expected 6 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation lines flat_first	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation lines flat_last	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation lines monochrome	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation lines smooth	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation points flat_first	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation points flat_last	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation points monochrome	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation points smooth	Expected 4 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation polygon flat_first	Expected 9 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation polygon flat_last	Expected 9 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation polygon monochrome	Expected 9 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation polygon smooth	Expected 9 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation polygon wireframe	Expected 9 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@ext_transform_feedback@tessellation quad_strip flat_first	Expected 12 output vertices, but got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.30@execution@isinf-and-isnan vs_xfb	expression    expect isinf isnan sign  >0?      value        delta
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.40@execution@tf-no-position	readback[0]: 3503345872, verts[0]: 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_line_loop ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_line_loop other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_line_strip ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_line_strip other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_line_strip_adjacency ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_line_strip_adjacency other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_lines ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_lines other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_lines_adjacency ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_lines_adjacency other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_points ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_points other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangle_fan ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangle_fan other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangle_strip ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangle_strip other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangle_strip_adjacency ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangle_strip_adjacency other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangles ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangles other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangles_adjacency ffs	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@primitive-id-restart gl_triangles_adjacency other	Expected at least 1 primitive, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@tri-strip-ordering-with-prim-restart gl_triangle_strip ffs	Expected 6 GS invocations, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@tri-strip-ordering-with-prim-restart gl_triangle_strip other	Expected 6 GS invocations, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@tri-strip-ordering-with-prim-restart gl_triangle_strip_adjacency ffs	Expected 6 GS invocations, got 0
+transform feedback not implemented (wgvk fakes the extension: Begin/End/BindBuffers skipped)	fail	spec@glsl-1.50@execution@geometry@tri-strip-ordering-with-prim-restart gl_triangle_strip_adjacency other	Expected 6 GS invocations, got 0

@@ -1,0 +1,9 @@
+draw plain count 6 instances 9 first 2 first_instance 3
+vb 0 stride 3 rate vertex data bytes
+vb 1 stride 4 rate instance divisor 2 data bytes
+vb 2 stride 4 rate vertex data bytes
+vb 3 stride 8 rate instance divisor 0 data bytes
+attr 0 binding 0 format R8G8B8_UNORM offset 0
+attr 1 binding 1 format R16G16_SINT offset 0
+attr 2 binding 2 format R8G8B8A8_UNORM offset 0
+attr 3 binding 3 format R8G8B8A8_UINT offset 4

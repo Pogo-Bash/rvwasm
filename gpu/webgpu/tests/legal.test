@@ -1,0 +1,22 @@
+#!/bin/bash
+# T3b, the WebGPU legalisation passes (src/webgpu/compiler/wgvk_legalize.c):
+#   legal          tests/legal/*: glslang -> T1's layout rules + the passes -> our WGSL, checked by Tint;
+#                  the compute ones also run on lavapipe (SPIR-V) and Dawn native (WGSL), buffers compared
+#   legal-scene    tests/scene/*: graphics passes at run time (vertex pulling, divisors, expanded points, draw
+#                  parameters, integer textures, dynamic indexing): lavapipe vs Dawn native, pixels compared
+#   legal-corpus   Blender 4.3's 177 zink modules with the layout remap and the passes: every module emitted
+#                  must pass Tint, and all 177 must emit (geometry shaders through libpoly)
+C=$WT/gpu/webgpu/mesa/src/webgpu/compiler/tools
+bash $WT/gpu/webgpu/build/native.sh src/webgpu/compiler/wgsl-corpus src/webgpu/compiler/cs-run src/webgpu/compiler/scene-run > /dev/null || { echo "FAIL legal: build"; exit 1; }
+fail=0
+out=$(NO_BUILD=1 bash $C/legal-check.sh 2>&1 | grep -v "^ - While")
+echo "$out" | sed -n 's/^\(ok\|FAIL\) \([^ :]*\)\.spv/\1 legal-run \2:/p; s/^\(ok\|FAIL\) \([^ .:]*\)$/\1 legal \2/p; s/^\(FAIL\) \([^ .:]*\): /\1 legal \2: /p'
+echo "$out" | grep -q "^FAIL" && fail=1
+out=$(NO_BUILD=1 bash $C/scene-check.sh 2>&1 | grep -v "^ - While")
+echo "$out" | sed -n 's/^\(ok\|FAIL\) /\1 legal-scene /p'
+echo "$out" | grep -q "^FAIL" && fail=1
+out=$(NO_BUILD=1 bash $C/corpus.sh $B/tests/legal-corpus -layout -legalize -features 2>&1)
+line=$(echo "$out" | grep "^modules:")
+n=$(echo "$line" | sed -n 's/^modules: \([0-9]*\) emitted.*/\1/p')
+if echo "$line" | grep -q " 0 invalid" && [ "${n:-0}" -ge 177 ]; then echo "ok legal-corpus: $line"; else echo "FAIL legal-corpus: $line"; fail=1; fi
+exit $fail

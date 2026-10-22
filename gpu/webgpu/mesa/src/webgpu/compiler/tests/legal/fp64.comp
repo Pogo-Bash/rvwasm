@@ -1,0 +1,15 @@
+#version 450
+// legal-check: static (soft-fp64 adds differ from lavapipe in the last bit in a few % of cases: see STATUS.md)
+// 64-bit floats through the soft-fp64 library. Only correctly rounded operations (add, mul, conversions,
+// compares), each its own rounding (precise: no fused multiply-add), so that both sides must agree to the
+// bit; division and sqrt are within Vulkan's 2.5 ULP but differ from lavapipe's in the last bit.
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer In { double d[]; };
+layout(set = 0, binding = 1) buffer Out { double o[]; };
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   precise double x = double(i) * 0.1lf + 1.0lf;
+   precise double y = x * x - 2.0lf;
+   precise double r = y * (x + 0.5lf) + (y < x ? x : -x) - double(float(i) * 0.3) + double(int(x * 7.0lf));
+   o[i] = r;
+}

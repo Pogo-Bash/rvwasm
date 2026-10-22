@@ -128,40 +128,7 @@
   background: #000;
 }
 
-/* The bar above the screen: the page's own controls. */
-#rv-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  margin-bottom: 4px;
-  font: 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #333;
-}
-
-.rv-bar-btn, .rv-bar-select {
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid #aab;
-  border-radius: 4px;
-  background: #f4f5f7;
-  color: inherit;
-  font: inherit;
-}
-
-.rv-bar-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.rv-bar-status {
-  margin-left: 8px;
-  color: #666;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
+/* The bar above the screen: its style is in display.js (barStyle), with the page's own look. */
 
 /* The window switcher (Alt-Tab), in the middle of the screen. */
 #rv-switcher {

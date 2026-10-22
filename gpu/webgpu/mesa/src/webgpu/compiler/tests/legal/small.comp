@@ -1,0 +1,17 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+// 8- and 16-bit integers in buffers and arithmetic
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer In { uint8_t b[256]; int16_t h[]; } inp;
+layout(set = 0, binding = 1) buffer Out { uint8_t ob[256]; int16_t oh[256]; } outp;
+layout(set = 0, binding = 2) buffer In16 { int16_t h16[]; };
+void main() {
+   uint i = gl_GlobalInvocationID.x;
+   uint8_t x = inp.b[i];
+   int16_t y = h16[i];
+   outp.ob[i] = x * uint8_t(3) + uint8_t(i);
+   outp.oh[i] = y >> 2 | int16_t(x);
+}

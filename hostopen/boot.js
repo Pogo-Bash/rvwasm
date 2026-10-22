@@ -9,9 +9,9 @@
 // Like the window server, this is JavaScript that hostnode runs as a process
 // of the machine (hostnode/hostnode.c, tools/patch-runtime.py item 11), so it
 // can speak to the page: it says the address on the BroadcastChannel
-// "rv-host" and waits for the page's answer. The page shows it as a prompt
-// ("Open example.com/... on this computer") or, when the person has just
-// clicked on the screen, opens it at once (README.md says why it has to ask).
+// "rv-host" and waits for the page's answer. The page always asks the person
+// first, in a box of its own at the top of the page ("Open example.com/... in a
+// new tab?": Open / Cancel; README.md says why it has to ask).
 //
 // Every tab of the dev server's origin hears the channel, and each may run a
 // machine of its own. So that only the page of THIS machine takes the
@@ -20,7 +20,7 @@
 // the mark only if the message came from it. (The window server's table is
 // told apart the same way: by being in the page's own machine's memory.)
 //
-// Exits 0 when the page has opened the address or shown it, 1 when the page
+// Exits 0 when the page has shown it to the person (or opened it), 1 when the page
 // refused it (not http or https, too long, ...), 2 for a bad command line, 3
 // when no page answered within three seconds (a page without hostopen.js).
 (function (host) {
@@ -211,7 +211,7 @@
       if (m.status === "saved") {
         done(0, "rv-host-save: " + save.name + " (" + save.size + " bytes) is in the host's downloads");
       } else if (m.status === "asked") {
-        done(0, "rv-host-save: the page asks the person to save " + save.name + " (its top right corner)");
+        done(0, "rv-host-save: the page asks the person to save " + save.name + " (a box at the top of the page)");
       } else {
         done(1, "rv-host-save: the page refused it: " + (m.reason || m.status));
       }
@@ -223,7 +223,7 @@
     if (m.status === "opened") {
       done(0, "rv-host-open: opened on the host: " + url);
     } else if (m.status === "asked") {
-      done(0, "rv-host-open: the page asks the person to open it (its top right corner): " + url);
+      done(0, "rv-host-open: the page asks the person to open it (a box at the top of the page): " + url);
     } else {
       done(1, "rv-host-open: the page refused it: " + (m.reason || m.status));
     }

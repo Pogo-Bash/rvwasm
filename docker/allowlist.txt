@@ -29,3 +29,16 @@ raw.githubusercontent.com
 crates.io
 static.crates.io
 index.crates.io
+
+# KDE: "Get New Stuff" (themes, widgets, wallpapers): the provider list (autoconfig.kde.org), the store's API
+# (api.kde-look.org) and its downloads and previews (Pling's file and image hosts); kde.org also covers invent.kde.org
+kde.org
+kde-look.org
+pling.com
+# KDE Store downloads (Pling files are served from DigitalOcean Spaces)
+digitaloceanspaces.com
+# Weather widgets (Seeua/Nori/SlateWeather): IP location, forecast, place names, day/night
+ip-api.com
+open-meteo.com
+nominatim.openstreetmap.org
+sunrise-sunset.org

@@ -102,6 +102,32 @@ for arg in $cmdline; do
 	esac
 done
 
+# rvdl=1 (dev.html?dl=1, the in-process dynamic loader): the third disk, if the page gave one (wdc, after the home disk),
+# holds the shared Qt/KF6 libraries and the native KCalc and Konsole on them (nativeqt/shared/build-nqs-image.sh; the
+# desktop's launcher shows them as "(native)" entries). Read-only, on /opt/nq-shared, and again on /debian/opt/nq-shared,
+# where the chroot (and the launcher in it) finds it. Without the flag nothing here runs: no mount, no directory.
+for arg in $cmdline; do
+	case $arg in
+	rvdl=1)
+		if [ -e /sys/block/wdb/dev ] && [ -e /sys/block/wdc/dev ]; then
+			IFS=: read -r major minor < /sys/block/wdc/dev
+			mknod /dev/wdc b "$major" "$minor"
+			mkdir -p /opt/nq-shared
+			if mount -t ext4 -o ro,noatime /dev/wdc /opt/nq-shared 2> /dev/null; then
+				if [ -x /opt/nq-shared/lib/ld-wasm ]; then
+					if [ -d /debian/usr ]; then
+						mkdir -p /debian/opt/nq-shared
+						mount -o bind /opt/nq-shared /debian/opt/nq-shared
+					fi
+				else
+					umount /opt/nq-shared
+				fi
+			fi
+		fi
+		;;
+	esac
+done
+
 # The network: a fixed address on the little network the relay provides
 # (tools/net-relay.py). Without a relay nothing answers, and nothing is lost.
 # (By their full names: there is no PATH yet that has /sbin.)
@@ -142,6 +168,23 @@ if [ -x /debian/etc/rvwasm/autostart ]; then
 		# (With a PATH: the kernel starts /init without one, and `debian` runs mount, chroot and the like by name.)
 		export PATH=/sbin:/usr/sbin:/bin:/usr/bin
 		/bin/debian true < /dev/null > /dev/console 2>&1
+		# The native programs' first launch used to copy the Qt plugins/QML files into /run/nqs one process at a time
+		# (nqs-run's loop: 598 spawns, 46 s). Here it is done at boot, in the background, by ONE process (tools/x/nqs-copy.c),
+		# into /debian/run/nqs.build, and renamed to /debian/run/nqs (what nqs-run sees as /run/nqs) with its `ready` inside, last:
+		# nqs-run, unchanged, then finds `ready` and skips its loop. A launch that comes before the rename does the old copy itself;
+		# the rename then fails (its /run/nqs exists) and this copy is thrown away.
+		if [ -x /usr/lib/wlserver/nqs-copy ] && [ -x /opt/nq-shared/lib/ld-wasm ] && [ -d /debian/opt/nq-shared ] &&
+			[ -f /opt/nq-shared/share/nqs/maps.list ] && [ ! -e /debian/run/nqs ]; then
+			(
+				nb=/debian/run/nqs.build
+				/bin/rm -rf $nb
+				/bin/mkdir -p $nb/share &&
+					/bin/cp -a /opt/nq-shared/usr/share/mime $nb/share/ &&
+					/bin/rm -f $nb/share/mime/mime.cache &&
+					{ [ ! -d /opt/nq-shared/usr/lib/qt6/qml ] || { /bin/mkdir -p $nb/lib/qt6 && /bin/cp -a /opt/nq-shared/usr/lib/qt6/qml $nb/lib/qt6/; }; } &&
+					/usr/lib/wlserver/nqs-copy /opt/nq-shared $nb /debian/run/nqs || /bin/rm -rf $nb
+			) < /dev/null > /dev/console 2>&1 &
+		fi
 		/bin/debian /etc/rvwasm/autostart < /dev/null > /dev/console 2>&1 &
 	else
 		echo "autostart: off (?autostart=0); start it with: debian /etc/rvwasm/autostart &"

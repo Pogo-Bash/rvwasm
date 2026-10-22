@@ -1,0 +1,16 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_16bit_storage : require
+// 16-bit floats read straight from uniform and storage buffers (shader-f16 + 16-bit storage).
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) uniform U { f16vec4 hu[8]; };
+layout(set = 0, binding = 1) buffer O { float o[]; };
+layout(set = 0, binding = 2) readonly buffer I { float16_t hin[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	float16_t a = hin[i], b = hin[i * 3u + 1u];
+	f16vec4 u = hu[i & 7u];
+	o[i * 2u] = float(a * float16_t(2.0) + b);
+	o[i * 2u + 1u] = float(u.y + u.w * a);
+}

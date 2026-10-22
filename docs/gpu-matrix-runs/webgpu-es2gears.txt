@@ -1,0 +1,19 @@
+== gpu-nm es2gears ==
+program:  es2gears
+stamp:    vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6
+executor: vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr; caps 1408 bytes; ready after 3960 ms
+ring:     submitted 976, done 976, heartbeat 515
+jspi waits:946 wgvk_wait calls (each a JSPI suspension of rvgpu_ring_drain; counted from the wasm debug words)
+boot:     764 ms
+gpuserver:[rvgpu-nm] gpuserver's ring at 184553472 (pid 178), caps at 188749824
+frames:   51 in 1 reports of es2gears; last 51 frames in 5.1 seconds = 10.012 FPS
+windows:  slot 0 "es2gears" 300x300: 245 looks, present 245
+probe:    4 of 4 window PNGs pass; last 0-4.png 300x300: red 18.5%, green 4.7%, blue 3.8%, background 71.6%, other 1.3%
+rc:       program 124, node-machine 0
+  ok   executor ready (vfront: zink on wgvk on apple / metal-3 / apple-m4-max / Metal driver on macOS Version 26.6.2 (Build 25G83) + vkr)
+  ok   ring moved (976 submits)
+  ok   frames > 0 (51)
+  ok   window drawn (slot 0 "es2gears" 300x300: 245 looks, present 245)
+  ok   pixel probe (4/4)
+PASS
+MATRIX_RESULT {"app":"es2gears","stamp":"vk-09-wgvk-device-type 0f45ce6f2bdb mesa 35b085c4c0 dawn c943ea32b6","submits":976,"presents":0,"frames":51,"fps":10.012,"pass":true,"failed":[]}

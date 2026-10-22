@@ -1,0 +1,67 @@
+#!/bin/bash
+# T6, vfront (src/webgpu/vfront): virgl captures replayed into vfront, natively.
+#   vfront-lvp CAP    zink on lavapipe: every readback of the live run (the capture's RESULT records, made on
+#                     lavapipe) again, bit for bit
+#   ring-vfront CAP   the same through the page's path: the capture as ring records (gpu/PROTOCOL.md v2) into
+#                     rvgpu.c's consumer and vf_rvgpu.c, one thread, readbacks checked once ctx_done passed
+#   vfront-wgvk CAP   zink on wgvk on Dawn on lavapipe, loader-free as in the page (VFRONT_GIPA_LIB): with a
+#                     tolerance, since WebGPU's pipeline differs from lavapipe's own in rounding: every readback
+#                     image within 8 of 255 on 99% of its pixels of the lavapipe run's (tools/imgcmp.py); the
+#                     number equal bit for bit is reported. WGVK_VFRONT=0 leaves it out.
+# Captures: $VFRONT_CAPS (default ~/rvwasm/gpu-t6/cap/*.vfcap), made by vfront/scripts/make-captures.sh from
+# glmark2-es2 in the trixie chroot; they are not in the repository (megabytes of guest textures).
+# Needs zink in the build (GPU_NATIVE=zink or full).
+V=$B/native/src/webgpu/vfront/vfront-replay
+bash $WT/gpu/webgpu/build/native.sh src/webgpu/vfront/vfront-replay src/webgpu/vfront/vfront-ring > /dev/null 2>&1
+if [ ! -x $V ]; then echo "ok vfront: skipped (no vfront in this build: GPU_NATIVE=zink builds it)"; exit 0; fi
+caps=(${VFRONT_CAPS:-$HOME/rvwasm/gpu-t6/cap/*.vfcap})
+[ -f "${caps[0]}" ] || { echo "ok vfront: skipped (no captures; vfront/scripts/make-captures.sh)"; exit 0; }
+WGVK_LIB=$B/native/src/webgpu/vulkan/libvulkan_webgpu.so
+IMGCMP=$WT/gpu/webgpu/mesa/src/webgpu/vfront/tools/imgcmp.py
+D=$B/tests/vfront
+mkdir -p $D
+fail=0
+matched() { echo "$1" | sed -n 's/.*results matched \([0-9]*\) of \([0-9]*\).*/\1 \2/p'; }
+for c in "${caps[@]}"; do
+	n=$(basename $c .vfcap)
+	rm -rf $D/$n-lvp $D/$n-wgvk
+	# lavapipe: exact
+	out=$(VK_DRIVER_FILES=$LVP_ICD LIBGL_ALWAYS_SOFTWARE=1 timeout 600 $V $c --dump $D/$n-lvp 2>&1)
+	line=$(echo "$out" | grep "^replayed")
+	m=$(matched "$line")
+	if [ -n "$m" ] && [ "${m% *}" = "${m#* }" ] && echo "$line" | grep -q "(0 failed), .*(0 failed)"; then
+		echo "ok vfront-lvp $n: $line"
+	else
+		echo "FAIL vfront-lvp $n: ${line:-$(echo "$out" | grep -v "^Warning\|^WARNING" | tail -2 | tr '\n' ' ')}"
+		fail=1
+	fi
+	# the ring path: exact
+	out=$(VK_DRIVER_FILES=$LVP_ICD LIBGL_ALWAYS_SOFTWARE=1 timeout 600 $B/native/src/webgpu/vfront/vfront-ring $c 2>&1)
+	line=$(echo "$out" | grep -E "^(ok|FAIL) ring-vfront")
+	echo "${line:-FAIL ring-vfront $n: $(echo "$out" | tail -2 | tr '\n' ' ')}"
+	echo "$line" | grep -q "^ok" || fail=1
+	# wgvk: within tolerance of the lavapipe run's images
+	[ "$WGVK_VFRONT" = 0 ] && continue
+	out=$(VFRONT_GIPA_LIB=$WGVK_LIB WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 900 $V $c --dump $D/$n-wgvk 2>&1)
+	line=$(echo "$out" | grep "^replayed")
+	m=$(matched "$line")
+	if [ -z "$m" ] || ! echo "$line" | grep -q "(0 failed), .*(0 failed)"; then
+		echo "FAIL vfront-wgvk $n: ${line:-$(echo "$out" | grep -v "^Warning\|^WARNING\|artificially" | tail -2 | tr '\n' ' ')}"
+		fail=1
+		continue
+	fi
+	images=$(ls $D/$n-lvp 2>/dev/null | grep -c "\.ppm$")
+	if [ "$images" = 0 ]; then
+		echo "ok vfront-wgvk $n: ${m% *} of ${m#* } readbacks bit for bit, no images to compare"
+		continue
+	fi
+	cmp=$(python3 $IMGCMP $D/$n-wgvk $D/$n-lvp 2>&1 | tail -1)
+	within=$(echo "$cmp" | sed -n 's/^\([0-9]*\) of \([0-9]*\) images match.*/\1 \2/p')
+	if [ -n "$within" ] && [ "${within% *}" = "${within#* }" ]; then
+		echo "ok vfront-wgvk $n: $cmp; ${m% *} of ${m#* } readbacks bit for bit equal to lavapipe's"
+	else
+		echo "FAIL vfront-wgvk $n: ${cmp:-no comparison}; ${m% *} of ${m#* } bit for bit; see $D/$n-*"
+		fail=1
+	fi
+done
+exit $fail

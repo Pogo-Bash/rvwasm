@@ -1,0 +1,41 @@
+#!/bin/bash
+# T7: wgvk's presenting pieces natively (mesa/src/webgpu/tests/wsi-test.c) through wgvk as an ICD: its own
+# WSI (headless surface, swapchain, frames read back) and what Mesa's venus asks the host before it offers
+# guests a swapchain (dma-buf export, the LINEAR modifier, sync files).
+mkdir -p $B/tests
+cc -O1 -g -Wall -I$TREE/include -o $B/tests/wsi-test $WT/gpu/webgpu/mesa/src/webgpu/tests/wsi-test.c -lvulkan || {
+	echo "FAIL wsi: build"; exit 1; }
+VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD timeout 120 $B/tests/wsi-test 2> $B/tests/wsi.err; s=$?
+if grep -q "WebGPU validation error\|WebGPU error\|device lost" $B/tests/wsi.err; then
+	echo "FAIL wsi-webgpu: $(grep -m1 "WebGPU" $B/tests/wsi.err)"; s=1
+fi
+[ $s = 0 ] || tail -5 $B/tests/wsi.err
+# Window systems (native.sh builds x11,wayland): vkcube on X11 (Xvfb) and on Wayland (weston's headless backend),
+# when the VM has them; each must finish its frames, and the X11 screen must show vkcube's grey clear colour.
+export VK_DRIVER_FILES=$WGVK_ICD WGVK_DAWN_DRIVER_FILES=$LVP_ICD
+if command -v Xvfb > /dev/null && command -v vkcube > /dev/null && command -v xwd > /dev/null; then
+	d=:$((40 + RANDOM % 40)); Xvfb $d -screen 0 320x240x24 > /dev/null 2>&1 & xp=$!; sleep 1
+	DISPLAY=$d timeout 60 vkcube --c 100 > $B/tests/wsi-x11.log 2>&1; r=$?
+	DISPLAY=$d timeout 20 vkcube > /dev/null 2>&1 & sleep 3
+	grey=$(DISPLAY=$d xwd -root -silent | python3 -c "
+import struct,sys
+d=sys.stdin.buffer.read(); hs,=struct.unpack('>I',d[:4]); w,h=struct.unpack('>II',d[16:24]); bpl,=struct.unpack('>I',d[48:52]); nc,=struct.unpack('>I',d[76:80]); px=d[hs+nc*12:]
+print(sum(1 for y in range(0,h,4) for x in range(0,w,4) if tuple(px[y*bpl+x*4:y*bpl+x*4+3])==(51,51,51)))")
+	pkill -P $$ vkcube 2> /dev/null; kill $xp 2> /dev/null
+	[ $r = 0 ] && [ "${grey:-0}" -gt 100 ] && echo "ok wsi-x11: vkcube on Xvfb (xcb): 100 frames, $grey grey samples on the screen" ||
+		{ echo "FAIL wsi-x11: vkcube rc $r, $grey grey samples"; s=1; }
+fi
+if command -v weston > /dev/null && command -v vkcube-wayland > /dev/null; then
+	export XDG_RUNTIME_DIR=$B/tests/xdg; rm -rf $XDG_RUNTIME_DIR; mkdir -p -m 700 $XDG_RUNTIME_DIR
+	weston --backend=headless --renderer=pixman --socket=wl-wsi --width=320 --height=240 > $B/tests/weston.log 2>&1 & wp=$!; sleep 2
+	WAYLAND_DISPLAY=wl-wsi timeout 60 vkcube-wayland --c 100 > $B/tests/wsi-wl.log 2>&1; r=$?
+	kill $wp 2> /dev/null
+	[ $r = 0 ] && echo "ok wsi-wayland: vkcube-wayland on weston: 100 frames" || { echo "FAIL wsi-wayland: rc $r"; s=1; }
+fi
+# Venus WSI (VK-07): the same cube through venus (vkr-vtest on wgvk, the trixie arm64 chroot's vkcube) onto weston.
+if [ -x $B/native/src/webgpu/vkr/vkr-vtest ] && command -v weston > /dev/null && [ -x $W/trixie/usr/bin/vkcube ]; then
+	bash $WT/gpu/webgpu/vkr/scripts/venus-wsi.sh > $B/tests/venus-wsi.log 2>&1
+	l=$(tail -1 $B/tests/venus-wsi.log); echo "$l"
+	case "$l" in ok*) ;; *) s=1; tail -12 $B/tests/venus-wsi.log ;; esac
+fi
+exit $s

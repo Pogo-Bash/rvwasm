@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Okular (native)
+GenericName=Document Viewer
+Comment=Okular as a WebAssembly program on shared libraries (nqs disk)
+Exec=/opt/nq-shared/bin/nqs-run okular %U
+Icon=okular
+MimeType=application/pdf;
+Categories=Qt;KDE;Graphics;Viewer;
+Terminal=false
+StartupWMClass=okular

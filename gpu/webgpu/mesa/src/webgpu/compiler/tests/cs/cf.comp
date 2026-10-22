@@ -1,0 +1,47 @@
+#version 450
+// Control flow: loops whose phis swap, break and continue, nested ifs, values used after the scope that made them.
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 1) buffer O { uint o[]; };
+layout(set = 0, binding = 2) buffer I { uint inp[]; };
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint a = inp[i], b = inp[i + 1u], n = inp[i] % 37u;
+	for (uint k = 0u; k < n; k++) {
+		uint t = a;
+		a = b;
+		b = t + k;
+		if ((a & 7u) == 3u)
+			continue;
+		if (b == 12345u)
+			break;
+		a ^= b >> 3;
+	}
+	uint acc = 0u, j = 0u;
+	while (true) {
+		j++;
+		if (j > (i % 13u))
+			break;
+		if ((j & 1u) == 0u) {
+			acc += j * 3u;
+			if (acc > 100u)
+				break;
+		} else {
+			acc ^= j;
+		}
+	}
+	uint sel;
+	if (a > b)
+		sel = a - b;
+	else if (a == b)
+		sel = 7u;
+	else
+		sel = b * 3u;
+	uint local[8];
+	for (int k = 0; k < 8; k++)
+		local[k] = uint(k) * a + b;
+	o[i * 4u + 0u] = a;
+	o[i * 4u + 1u] = b ^ acc;
+	o[i * 4u + 2u] = sel;
+	o[i * 4u + 3u] = local[inp[i] & 7u] + local[(inp[i] >> 3) & 7u];
+}
